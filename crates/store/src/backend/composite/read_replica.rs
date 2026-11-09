@@ -29,6 +29,10 @@ pub struct SQLReadReplica {
 }
 
 impl SQLReadReplica {
+    pub fn is_responsive(&self) -> bool {
+        self.primary.is_responsive()
+    }
+
     pub fn open(primary: Store, replicas: Vec<Store>) -> Result<Store, String> {
         Ok(Store::SQLReadReplica(Arc::new(Self {
             primary,

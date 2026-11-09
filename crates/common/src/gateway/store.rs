@@ -271,10 +271,10 @@ impl ExternalPublicKeyStore for Server {
 
         if row.key.fingerprint.as_deref() == Some(fingerprint.as_str()) {
             return match candidate.refreshed(&row.key, time) {
-                Some(updated) => {
-                    self.update_external_public_key(&row, updated).await?;
-                    Ok(KeyChange::Updated)
-                }
+                Some(updated) => match self.update_external_public_key(&row, updated).await {
+                    Err(err) if err.is_assertion_failure() => Ok(KeyChange::Unchanged),
+                    result => result.map(|_| KeyChange::Updated),
+                },
                 None => Ok(KeyChange::Unchanged),
             };
         }
@@ -297,7 +297,10 @@ impl ExternalPublicKeyStore for Server {
             if let Some(gateway) = self.core.email.gateway.as_deref() {
                 updated.schedule_next_check(gateway, time);
             }
-            self.update_external_public_key(&row, updated).await?;
+            match self.update_external_public_key(&row, updated).await {
+                Err(err) if err.is_assertion_failure() => return Ok(KeyChange::Unchanged),
+                result => result?,
+            }
         }
         Ok(change)
     }

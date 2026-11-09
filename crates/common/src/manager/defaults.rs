@@ -416,29 +416,52 @@ async fn insert_safe_defaults(bp: &mut Bootstrap) -> trc::Result<()> {
             }
         }
 
-        if bp.registry.count_object(ObjectType::Authentication).await? == 0
-            && role_ids.len() == num_roles
-        {
-            bp.registry
-                .write(RegistryWrite::insert(
-                    &Authentication {
-                        default_user_role_ids: Map::new(vec![role_ids[0]]),
-                        default_group_role_ids: Map::new(vec![role_ids[1]]),
-                        // SPDX-SnippetBegin
-                        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-                        // SPDX-License-Identifier: LicenseRef-SEL
-                        #[cfg(feature = "enterprise")]
-                        default_tenant_role_ids: Map::new(vec![role_ids[2], role_ids[0]]),
-                        // SPDX-SnippetEnd
-                        default_admin_role_ids: Map::new(vec![
-                            role_ids[num_roles - 1],
-                            role_ids[0],
-                        ]),
-                        ..Default::default()
-                    }
-                    .into(),
-                ))
-                .await?;
+        if role_ids.len() == num_roles {
+            let object_id = ObjectType::Authentication.singleton();
+            let old_object = bp.registry.get(object_id).await?;
+            let mut authentication = old_object
+                .as_ref()
+                .map(|old_object| Authentication::from(old_object.clone()))
+                .unwrap_or_default();
+            authentication.default_user_role_ids = Map::new(vec![role_ids[0]]);
+            authentication.default_group_role_ids = Map::new(vec![role_ids[1]]);
+            // SPDX-SnippetBegin
+            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+            // SPDX-License-Identifier: LicenseRef-SEL
+            #[cfg(feature = "enterprise")]
+            {
+                authentication.default_tenant_role_ids = Map::new(vec![role_ids[2], role_ids[0]]);
+            }
+            // SPDX-SnippetEnd
+            authentication.default_admin_role_ids =
+                Map::new(vec![role_ids[num_roles - 1], role_ids[0]]);
+
+            let result = match &old_object {
+                Some(old_object) => {
+                    let new_object = Object {
+                        inner: authentication.into(),
+                        revision: old_object.revision,
+                    };
+                    bp.registry
+                        .write(RegistryWrite::update(
+                            Id::singleton(),
+                            &new_object,
+                            old_object,
+                        ))
+                        .await?
+                }
+                None => {
+                    bp.registry
+                        .write(RegistryWrite::insert(&authentication.into()))
+                        .await?
+                }
+            };
+            if !matches!(result, RegistryWriteResult::Success(_)) {
+                bp.build_error(
+                    object_id,
+                    format!("Failed to assign default roles: {result}"),
+                );
+            }
         }
     } else if bp.registry.update_role_permissions() {
         update_role_permissions(bp).await?;

@@ -16,11 +16,12 @@ use crate::outbound::mta_sts::lookup::MtaStsLookup;
 use crate::outbound::mta_sts::verify::VerifyPolicy;
 use crate::outbound::{client::StartTlsResult, dane::verify::TlsaVerify};
 use crate::queue::dsn::{DsnStatus, SendDsn};
+use crate::queue::lease::{FinalWrite, QueueLease};
 use crate::queue::spool::{DSN_RETRY, SmtpSpool};
 use crate::queue::throttle::IsAllowed;
 use crate::queue::{
-    Error, FROM_REPORT, HostResponse, MessageWrapper, Metadata, QueueEnvelope, QueuedMessage,
-    RecipientBlob, Status, eval_strategy,
+    Error, FROM_REPORT, HostResponse, Message, MessageWrapper, Metadata, QueueEnvelope,
+    QueuedMessage, RecipientBlob, Status, eval_strategy,
 };
 use crate::reporting::send::MtaReportSend;
 use crate::{queue::ErrorDetails, reporting::tls::TlsRptOptions};
@@ -58,9 +59,24 @@ impl QueuedMessage {
         tokio::spawn(async move {
             // Lock queue event
             let queue_id = self.queue_id;
+            let locked_at = Instant::now();
             let status = if server.try_lock_event(queue_id, self.queue_name).await {
-                match server.read_message(queue_id, self.queue_name).await {
-                    Ok(Some(mut message)) => {
+                match server
+                    .read_message_archive_fresh(queue_id)
+                    .await
+                    .and_then(|archive| {
+                        archive
+                            .map(|archive| {
+                                archive.deserialize::<Message>().map(|message| {
+                                    (
+                                        MessageWrapper::new(message, queue_id, self.queue_name),
+                                        archive.version,
+                                    )
+                                })
+                            })
+                            .transpose()
+                    }) {
+                    Ok(Some((mut message, version))) => {
                         // Generate span id
                         message.span_id = server.inner.data.span_id_gen.generate();
                         let span_id = message.span_id;
@@ -97,7 +113,13 @@ impl QueuedMessage {
 
                         // Attempt delivery
                         let start_time = Instant::now();
-                        let queue_event = self.deliver_task(server.clone(), message).await;
+                        let queue_event = self
+                            .deliver_task(
+                                server.clone(),
+                                message,
+                                QueueLease::new(locked_at, version),
+                            )
+                            .await;
 
                         trc::event!(
                             Delivery(DeliveryEvent::AttemptEnd),
@@ -105,8 +127,9 @@ impl QueuedMessage {
                             Elapsed = start_time.elapsed(),
                         );
 
-                        // Unlock event
-                        server.unlock_event(queue_id, self.queue_name).await;
+                        if !matches!(queue_event, QueueEventStatus::Locked) {
+                            server.unlock_event(queue_id, self.queue_name).await;
+                        }
 
                         queue_event
                     }
@@ -175,7 +198,12 @@ impl QueuedMessage {
     }
 
     #[allow(clippy::type_complexity)]
-    async fn deliver_task(self, server: Server, mut message: MessageWrapper) -> QueueEventStatus {
+    async fn deliver_task(
+        self,
+        server: Server,
+        mut message: MessageWrapper,
+        lease: QueueLease,
+    ) -> QueueEventStatus {
         // Check that the message still has recipients to be delivered
         let has_pending_delivery = message.has_pending_delivery();
         let span_id = message.span_id;
@@ -197,19 +225,40 @@ impl QueuedMessage {
                 );
 
                 // All message recipients expired, do not re-queue.
-                message.remove(&server, self.due.into()).await;
+                if message
+                    .remove_with_lease(&server, self.due.into(), &lease)
+                    .await
+                    == FinalWrite::Pending
+                {
+                    return QueueEventStatus::Locked;
+                }
 
                 return QueueEventStatus::Completed;
             }
             PendingDelivery::No => {
-                message
-                    .save_changes(&server, self.due.into(), Some(now() + DSN_RETRY))
-                    .await;
+                if message
+                    .save_changes_with_lease(
+                        &server,
+                        self.due.into(),
+                        Some(now() + DSN_RETRY),
+                        &lease,
+                    )
+                    .await
+                    == FinalWrite::Pending
+                {
+                    return QueueEventStatus::Locked;
+                }
                 return QueueEventStatus::Deferred;
             }
             _ => {
                 // Re-queue the message if its not yet due for delivery
-                message.save_changes(&server, self.due.into(), None).await;
+                if message
+                    .save_changes_with_lease(&server, self.due.into(), None, &lease)
+                    .await
+                    == FinalWrite::Pending
+                {
+                    return QueueEventStatus::Locked;
+                }
                 return QueueEventStatus::Deferred;
             }
         }
@@ -240,7 +289,13 @@ impl QueuedMessage {
                     }
                 }
 
-                message.save_changes(&server, self.due.into(), None).await;
+                if message
+                    .save_changes_with_lease(&server, self.due.into(), None, &lease)
+                    .await
+                    == FinalWrite::Pending
+                {
+                    return QueueEventStatus::Locked;
+                }
 
                 return QueueEventStatus::Deferred;
             }
@@ -1661,15 +1716,25 @@ impl QueuedMessage {
             );
 
             // Save changes to disk
-            message.save_changes(&server, self.due.into(), None).await;
-
-            QueueEventStatus::Deferred
+            if message
+                .save_changes_with_lease(&server, self.due.into(), None, &lease)
+                .await
+                == FinalWrite::Pending
+            {
+                QueueEventStatus::Locked
+            } else {
+                QueueEventStatus::Deferred
+            }
         } else if dsn_status == DsnStatus::Deferred {
-            message
-                .save_changes(&server, self.due.into(), Some(now() + DSN_RETRY))
-                .await;
-
-            QueueEventStatus::Deferred
+            if message
+                .save_changes_with_lease(&server, self.due.into(), Some(now() + DSN_RETRY), &lease)
+                .await
+                == FinalWrite::Pending
+            {
+                QueueEventStatus::Locked
+            } else {
+                QueueEventStatus::Deferred
+            }
         } else {
             trc::event!(
                 Delivery(DeliveryEvent::Completed),
@@ -1678,9 +1743,15 @@ impl QueuedMessage {
             );
 
             // Delete message from queue
-            message.remove(&server, self.due.into()).await;
-
-            QueueEventStatus::Completed
+            if message
+                .remove_with_lease(&server, self.due.into(), &lease)
+                .await
+                == FinalWrite::Pending
+            {
+                QueueEventStatus::Locked
+            } else {
+                QueueEventStatus::Completed
+            }
         }
     }
 }

@@ -6,7 +6,7 @@
 
 // This file is auto-generated. Do not edit directly.
 
-pub const TOTAL_EVENT_COUNT: usize = 670;
+pub const TOTAL_EVENT_COUNT: usize = 672;
 pub const TOTAL_METRIC_COUNT: usize = 399;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -147,6 +147,7 @@ pub enum CacheEvent {
     SwapMiss = 595,
     SwapWrite = 596,
     SwapError = 597,
+    SwapSkip = 671,
     SwapMetrics = 598,
     SwapFlush = 599,
 }
@@ -893,6 +894,7 @@ pub enum StoreEvent {
     ElasticsearchError = 499,
     MeilisearchError = 573,
     RedisError = 511,
+    KeepError = 670,
     S3Error = 513,
     AzureError = 542,
     FilesystemError = 500,

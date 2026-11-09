@@ -147,6 +147,7 @@ impl EmailConfig {
             (StorageQuota::MaxEmailSubmissions, email.max_submissions),
             (StorageQuota::MaxAppPasswords, auth.max_app_passwords),
             (StorageQuota::MaxApiKeys, auth.max_api_keys),
+            (StorageQuota::MaxPasskeys, auth.max_passkeys),
             (StorageQuota::MaxPublicKeys, email.max_public_keys),
             (StorageQuota::MaxPushSubscriptions, jmap.max_subscriptions),
             (StorageQuota::MaxCalendars, calendar.max_calendars),

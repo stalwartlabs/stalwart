@@ -22,6 +22,7 @@ use utils::DomainPart;
 
 pub mod dsn;
 pub mod encrypt;
+pub mod lease;
 pub mod manager;
 #[cfg(stalwart_tests)]
 #[rustfmt::skip]

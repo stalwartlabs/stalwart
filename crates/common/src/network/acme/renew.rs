@@ -11,6 +11,12 @@ use crate::{
         AcmeDnsParameters, AcmeError, AcmeResult, ParsedCert, directory::AcmeRequestBuilder,
     },
 };
+// SPDX-SnippetBegin
+// SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+// SPDX-License-Identifier: LicenseRef-SEL
+#[cfg(feature = "enterprise")]
+use crate::network::acme::order::is_within_domain;
+// SPDX-SnippetEnd
 use compact_str::ToCompactString;
 use registry::{
     schema::{
@@ -110,6 +116,21 @@ impl Server {
             &domain.name,
             &cert.subject_alternative_names.into_inner(),
         );
+        // SPDX-SnippetBegin
+        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+        // SPDX-License-Identifier: LicenseRef-SEL
+        #[cfg(feature = "enterprise")]
+        if domain.member_tenant_id.is_some()
+            && let Some(name) = domains
+                .iter()
+                .find(|name| !is_within_domain(name, &domain.name, domain.aliases.as_slice()))
+        {
+            return Err(AcmeError::Invalid(format!(
+                "Tenant domain {} cannot request a certificate for {name}",
+                domain.name
+            )));
+        }
+        // SPDX-SnippetEnd
 
         if let Some(renew_at) = self
             .acme_certificate_renewal_due(&domains, renew_before, now())
@@ -161,9 +182,14 @@ impl Server {
             None
         };
         let pem_cert = request
-            .renew(self, domains, reuse_key_pem, dns_parameters)
+            .renew(self, &domains, reuse_key_pem, dns_parameters)
             .await?;
         let parsed_cert = ParsedCert::parse(&pem_cert.certificate)?;
+        if let Some(name) = parsed_cert.unrequested_name(&domains) {
+            return Err(AcmeError::Invalid(format!(
+                "Certificate issued for unrequested name {name}"
+            )));
+        }
         let mut new_sans = parsed_cert.sans.clone();
         new_sans.sort();
         let certificate = Certificate {

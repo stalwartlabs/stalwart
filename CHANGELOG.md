@@ -2,6 +2,46 @@
 
 All notable changes to this project will be documented in this file. This project adheres to [Semantic Versioning](http://semver.org/).
 
+## [1.1.0] - 2026-11-09
+
+**Add the passkey permissions to the default roles.** Passkey management needs the new `sysPasskey*` permissions, which default roles created by an earlier version do not include. Add these permissions manually using the recovery administrator or restart the server once with the environment variable `STALWART_UPDATE_ROLE_PERMISSIONS=true` to add them, then remove the variable. See [Default roles on upgraded servers](https://stalw.art/docs/auth/authorization/permissions#default-roles-on-upgraded-servers) for details.
+
+## Added
+- **Passkeys** (WebAuthn) for accounts in the internal directory:
+  - Passwordless sign-in on the built-in login page, for the authorization code and device flows, with a "Sign in with a passkey" button and browser autofill. Passkeys are not a second factor: signing in with a passkey does not ask for the TOTP code.
+  - `Passkey` objects (`x:Passkey`) to register, list, rename and delete passkeys, with the new `x:Passkey/registrationOptions` method. Registering a passkey requires the current password, and the TOTP code when one is set. Passkeys are listed in the WebUI under Account > Credentials.
+  - ES256, Ed25519 and RS256 keys, with attestation `none` or self-attested `packed`.
+  - `maxPasskeys` limit per account (default 10) in the `Authentication` settings, and as a per-account quota.
+  - The relying party ID is the host of the public URL, so the WebUI must run on that host or one of its subdomains.
+- [Stalwart Keep](https://github.com/stalwartlabs/keep) as an in-memory store, lookup store, cluster coordinator and cache swap store (`keep` feature).
+
+## Fixed
+- MTA:
+  - The reply after the message data is now read with `dataTimeout` instead of `rcptToTimeout`.
+  - Shutdown now drains outbound deliveries in progress (up to 8 seconds) and releases their queue locks, so a restart no longer causes duplicate deliveries or a 10 minute delay in clusters.
+  - A queue update that fails after a successful delivery (for example during a database failover) is now retried while the queue lock is held, instead of the message being delivered again.
+  - In clusters, a node that takes over a queued message now reads it at the latest committed version (FoundationDB) or from the primary (SQL read replicas), so a message another node has just delivered is not delivered again and its queue quota is not released twice.
+  - Milter header edits follow libmilter: `SMFIR_ADDHEADER` appends, `SMFIR_INSHEADER` inserts at its position in the whole header list, folded values are written with CRLF, and values that are not UTF-8 are accepted (also MTA hook header edits).
+- JMAP:
+  - `PushSubscription/get` now returns the `verificationCode` of verified subscriptions instead of always returning `null`.
+  - `FileNode/set` rejects a Directory `role` that another Directory in the account already has (draft-ietf-jmap-filenode-20), and `FileNode/copy` no longer copies `role`.
+  - `Email/set` body parts with a raw `header:Content-Type` (or `Content-Disposition`) no longer get a second, generated header field; giving the same header field both raw and through a body part property (`type`, `disposition`, `cid`, ...) is rejected with `invalidProperties`.
+- Calendar: an RSVP (JMAP or CalDAV) on an invitation that was stored without scheduling now sends the iTIP REPLY to the organizer.
+- DKIM: a signature whose DNS record cannot be built (such as a DKIM2 ML-DSA-44 key created before v1.0.2) no longer stops publishing, rotation and deletion of the domain's other DKIM signatures.
+- ACME: Domain `subjectAlternativeNames` are validated on save; a name containing a dot that is outside the domain and its aliases and has no public suffix (such as `webmail.test`) is rejected instead of failing every renewal.
+- Storage:
+  - MySQL/MariaDB: connections no longer switch to the local Unix socket reported by the server (`@@socket`), which could reach a different local server than the configured host.
+  - SQLite: a `path` that is a directory now stores the database there as `stalwart.db` (the setup wizard carried the RocksDB directory over), and the field is described as a database file.
+  - PostgreSQL: the wait for server replies is bounded by the new `responseTimeout` setting (default 2m) and the login handshake by `connectTimeout`; `/healthz/ready` returns 503 while the data store is not answering.
+- Bootstrap: New installations set up with an external directory (LDAP, SQL, OIDC) now get the default roles, so directory users can log in.
+- Cluster: Notifications over Redis/Valkey: subscribing is bounded by `connectTimeout` and idle subscriptions are pinged every 15 seconds, so a dead or unresponsive server is detected and the subscription is re-established.
+- Network: Listeners on a wildcard address (`0.0.0.0` or `::`) now start when the kernel binds them to a specific address, such as in FreeBSD jails without VNET.
+- Enterprise: 
+  - After a lapsed license is renewed, the metrics and tracing stores and the data store read replicas are restored without a restart.
+  - Queued messages and their contents are now scoped to the tenant that owns them.
+  - ACME renewal rejects certificates naming identifiers that were not ordered, and tenant domains can only request certificate names within the domain or its aliases (an existing tenant domain with other names stops renewing until they are removed).
+  - Successful Enterprise license renewals are now logged, with the new key's account limit and validity period.
+
 ## [1.0.3] - 2026-11-04
 
 **Third-party apps (not the WebUI) need the new Stalwart OAuth scopes.** Apps signing in through Stalwart or an external OpenID Connect provider could not manage app passwords, API keys or account settings. This access is now granted by the scopes `urn:stalwart:oauth:scope:security`, `urn:stalwart:oauth:scope:settings` and `urn:stalwart:oauth:scope:full`:

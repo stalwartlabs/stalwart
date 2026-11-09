@@ -18,6 +18,8 @@ pub mod dispatch;
 pub enum Coordinator {
     #[cfg(feature = "redis")]
     Redis(Arc<store::backend::redis::RedisStore>),
+    #[cfg(feature = "keep")]
+    Keep(Arc<store::backend::keep::KeepStore>),
     #[cfg(feature = "nats")]
     Nats(Arc<backend::nats::NatsPubSub>),
     #[cfg(feature = "zenoh")]
@@ -31,6 +33,8 @@ pub enum Coordinator {
 pub enum Publisher {
     #[cfg(feature = "redis")]
     Redis(backend::redis::pubsub::RedisPublisher),
+    #[cfg(feature = "keep")]
+    Keep(backend::keep::KeepPublisher),
     #[cfg(feature = "nats")]
     Nats(backend::nats::pubsub::NatsPublisher),
     #[cfg(feature = "zenoh")]
@@ -43,6 +47,8 @@ pub enum Publisher {
 pub enum Subscription {
     #[cfg(feature = "redis")]
     Redis(backend::redis::pubsub::RedisSubscription),
+    #[cfg(feature = "keep")]
+    Keep(store::backend::keep::keep_client::Subscription),
     #[cfg(feature = "nats")]
     Nats(async_nats::Subscriber),
     #[cfg(feature = "zenoh")]
@@ -55,6 +61,8 @@ pub enum Subscription {
 pub enum PubSubStream<'x> {
     #[cfg(feature = "redis")]
     Redis(&'x mut backend::redis::pubsub::RedisSubscription),
+    #[cfg(feature = "keep")]
+    Keep(&'x mut store::backend::keep::keep_client::Subscription),
     #[cfg(feature = "nats")]
     Nats(&'x mut async_nats::Subscriber),
     #[cfg(feature = "zenoh")]
@@ -67,6 +75,8 @@ pub enum PubSubStream<'x> {
 pub enum Msg<'x> {
     #[cfg(feature = "redis")]
     Redis(redis::Msg),
+    #[cfg(feature = "keep")]
+    Keep(store::backend::keep::keep_client::Delivery<'x>),
     #[cfg(feature = "nats")]
     Nats(async_nats::Message),
     #[cfg(feature = "zenoh")]
@@ -74,4 +84,10 @@ pub enum Msg<'x> {
     #[cfg(feature = "kafka")]
     Kafka(rdkafka::message::BorrowedMessage<'x>),
     Unimplemented(PhantomData<&'x ()>),
+}
+
+pub enum MsgKind {
+    Payload,
+    CatchUp,
+    Ignore,
 }

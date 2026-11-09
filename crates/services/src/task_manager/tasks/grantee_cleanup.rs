@@ -192,6 +192,7 @@ fn is_transient(err: &trc::Error) -> bool {
                 | StoreEvent::RocksdbError
                 | StoreEvent::SqliteError
                 | StoreEvent::RedisError
+                | StoreEvent::KeepError
                 | StoreEvent::S3Error
                 | StoreEvent::AzureError
                 | StoreEvent::FilesystemError

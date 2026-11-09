@@ -81,6 +81,15 @@ impl AccountApiHandler for Server {
                 if is_external_directory || is_recovery_admin {
                     permissions.clear(Permission::SysAccountPasswordGet.to_id() as usize);
                     permissions.clear(Permission::SysAccountPasswordUpdate.to_id() as usize);
+                    for p in [
+                        Permission::SysPasskeyCreate,
+                        Permission::SysPasskeyUpdate,
+                        Permission::SysPasskeyDestroy,
+                        Permission::SysPasskeyQuery,
+                        Permission::SysPasskeyGet,
+                    ] {
+                        permissions.clear(p.to_id() as usize);
+                    }
                 }
 
                 if is_recovery_admin {

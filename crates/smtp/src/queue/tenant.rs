@@ -8,11 +8,15 @@
  *
  */
 
-use super::{FROM_UNAUTHENTICATED, FROM_UNAUTHENTICATED_DMARC, Message};
+use super::{ArchivedMessage, FROM_UNAUTHENTICATED, FROM_UNAUTHENTICATED_DMARC, Message};
 use common::Server;
 use utils::DomainPart;
 
 impl Message {
+    pub fn has_tenant(&self, tenant_id: u32) -> bool {
+        self.tenant_ids.binary_search(&tenant_id).is_ok()
+    }
+
     pub(crate) async fn assign_tenants(&mut self, server: &Server, span_id: u64) {
         if !server.is_enterprise_edition() {
             return;
@@ -51,5 +55,11 @@ impl Message {
         }
         tenant_ids.sort_unstable();
         self.tenant_ids = tenant_ids.into_boxed_slice();
+    }
+}
+
+impl ArchivedMessage {
+    pub fn has_tenant(&self, tenant_id: u32) -> bool {
+        self.tenant_ids.iter().any(|id| id.to_native() == tenant_id)
     }
 }

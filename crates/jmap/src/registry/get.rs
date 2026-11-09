@@ -264,7 +264,8 @@ impl RegistryGet for Server {
             ObjectType::AccountSettings
             | ObjectType::ApiKey
             | ObjectType::AccountPassword
-            | ObjectType::AppPassword => account_get(get).await.map(|get| get.into_response()),
+            | ObjectType::AppPassword
+            | ObjectType::Passkey => account_get(get).await.map(|get| get.into_response()),
             ObjectType::Action => Ok(get.not_found_any().into_response()),
         }
     }

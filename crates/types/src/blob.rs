@@ -19,6 +19,8 @@ use crate::blob_hash::{BLOB_HASH_LEN, BlobHash};
 const B_LINKED: u8 = 0x10;
 const B_RESERVED: u8 = 0x20;
 const B_EMBEDDED: u8 = 0x40;
+const B_QUEUED: u8 = B_LINKED | B_RESERVED;
+const B_CLASS_MASK: u8 = B_LINKED | B_RESERVED | B_EMBEDDED;
 const B_NESTED: u8 = 0x80;
 const ENCODING_MASK: u8 = 0x0F;
 const ENCODING_NONE: u8 = 0;
@@ -53,6 +55,9 @@ pub enum BlobClass {
         collection: u8,
         document_id: u32,
     },
+    Queued {
+        queue_id: u64,
+    },
 }
 
 impl Default for BlobClass {
@@ -76,6 +81,7 @@ impl BlobClass {
             BlobClass::Reserved { account_id, .. }
             | BlobClass::Linked { account_id, .. }
             | BlobClass::Embedded { account_id, .. } => *account_id,
+            BlobClass::Queued { .. } => u32::MAX,
         }
     }
 
@@ -87,7 +93,9 @@ impl BlobClass {
                         .duration_since(SystemTime::UNIX_EPOCH)
                         .map_or(0, |d| d.as_secs())
             }
-            BlobClass::Linked { .. } | BlobClass::Embedded { .. } => true,
+            BlobClass::Linked { .. } | BlobClass::Embedded { .. } | BlobClass::Queued { .. } => {
+                true
+            }
         }
     }
 
@@ -334,27 +342,26 @@ impl BlobId {
             *byte = it.next()?;
         }
 
-        let account_id: u32 = it.next_leb128()?;
-
         BlobId {
             hash,
-            class: if (class & B_EMBEDDED) != 0 {
-                BlobClass::Embedded {
-                    account_id,
+            class: match class & B_CLASS_MASK {
+                B_QUEUED => BlobClass::Queued {
+                    queue_id: it.next_leb128()?,
+                },
+                marker if marker & B_EMBEDDED != 0 => BlobClass::Embedded {
+                    account_id: it.next_leb128()?,
                     collection: it.next()?,
                     document_id: it.next_leb128()?,
-                }
-            } else if (class & B_LINKED) != 0 {
-                BlobClass::Linked {
-                    account_id,
+                },
+                marker if marker & B_LINKED != 0 => BlobClass::Linked {
+                    account_id: it.next_leb128()?,
                     collection: it.next()?,
                     document_id: it.next_leb128()?,
-                }
-            } else {
-                BlobClass::Reserved {
-                    account_id,
+                },
+                _ => BlobClass::Reserved {
+                    account_id: it.next_leb128()?,
                     expires: it.next_leb128()?,
-                }
+                },
             },
             section: BlobSection::from_leb128(it, class)?,
         }
@@ -367,6 +374,7 @@ impl BlobId {
                 BlobClass::Linked { .. } => B_LINKED,
                 BlobClass::Embedded { .. } => B_EMBEDDED,
                 BlobClass::Reserved { .. } => B_RESERVED,
+                BlobClass::Queued { .. } => B_QUEUED,
             };
 
         let _ = writer.write_all(&[marker]);
@@ -393,6 +401,9 @@ impl BlobId {
                 let _ = writer.write_all(&account_id.to_leb128());
                 let _ = writer.write_all(&[*collection]);
                 let _ = writer.write_all(&document_id.to_leb128());
+            }
+            BlobClass::Queued { queue_id } => {
+                let _ = writer.write_all(&queue_id.to_leb128());
             }
         }
 

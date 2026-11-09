@@ -6394,6 +6394,11 @@ impl ObjectImpl for Authentication {
                 errors.push(ValidationError::min_value(Property::MaxApiKeys, 1));
             }
         }
+        if let Some(value) = &self.max_passkeys {
+            if *value < 1 {
+                errors.push(ValidationError::min_value(Property::MaxPasskeys, 1));
+            }
+        }
         errors.len() == neb
     }
 
@@ -6434,7 +6439,10 @@ impl Pickle for Authentication {
         if self.max_api_keys.is_some() {
             bitmap |= 1 << 3;
         }
-        let block = crate::pickle::begin_block(out, 12, 4, bitmap);
+        if self.max_passkeys.is_some() {
+            bitmap |= 1 << 4;
+        }
+        let block = crate::pickle::begin_block(out, 13, 5, bitmap);
         if let Some(value) = &self.directory_id {
             value.pickle(out);
         }
@@ -6463,6 +6471,9 @@ impl Pickle for Authentication {
             value.pickle(out);
         }
         if let Some(value) = &self.max_api_keys {
+            value.pickle(out);
+        }
+        if let Some(value) = &self.max_passkeys {
             value.pickle(out);
         }
         crate::pickle::end_block(out, block);
@@ -6559,6 +6570,15 @@ impl Pickle for Authentication {
         } else {
             Some(5u64)
         };
+        let field12: Option<u64> = if block.has(12) {
+            if block.flag(4) {
+                Some(Pickle::unpickle(stream)?)
+            } else {
+                None
+            }
+        } else {
+            Some(10u64)
+        };
         stream.close_block(block);
         Some(Self {
             directory_id: field0,
@@ -6578,6 +6598,7 @@ impl Pickle for Authentication {
             password_default_expiry: field9,
             max_app_passwords: field10,
             max_api_keys: field11,
+            max_passkeys: field12,
         })
     }
 }
@@ -6602,6 +6623,7 @@ impl Default for Authentication {
             password_default_expiry: Default::default(),
             max_app_passwords: Some(5u64),
             max_api_keys: Some(5u64),
+            max_passkeys: Some(10u64),
         }
     }
 }
@@ -6612,7 +6634,7 @@ impl IntoValue for Authentication {
     }
 
     fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
-        let mut map = jmap_tools::Map::with_capacity(14);
+        let mut map = jmap_tools::Map::with_capacity(15);
         map.insert_unchecked(
             Property::DirectoryId,
             self.directory_id.into_value_with(opts),
@@ -6666,6 +6688,10 @@ impl IntoValue for Authentication {
             Property::MaxApiKeys,
             self.max_api_keys.into_value_with(opts),
         );
+        map.insert_unchecked(
+            Property::MaxPasskeys,
+            self.max_passkeys.into_value_with(opts),
+        );
         JmapValue::Object(map)
     }
 }
@@ -6704,6 +6730,7 @@ impl RegistryJsonPropertyPatch for Authentication {
             }
             Some(Property::MaxAppPasswords) => self.max_app_passwords.patch(pointer, value),
             Some(Property::MaxApiKeys) => self.max_api_keys.patch(pointer, value),
+            Some(Property::MaxPasskeys) => self.max_passkeys.patch(pointer, value),
             Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
                 property: Property::Type,
                 value,
@@ -8136,7 +8163,6 @@ impl BlobSwapStore {
             BlobSwapStore::Default => true,
             BlobSwapStore::S3(inner) => inner.validate(errors),
             BlobSwapStore::Azure(inner) => inner.validate(errors),
-            BlobSwapStore::FileSystem(inner) => inner.validate(errors),
             BlobSwapStore::FoundationDb(inner) => inner.validate(errors),
             BlobSwapStore::PostgreSql(inner) => inner.validate(errors),
             BlobSwapStore::MySql(inner) => inner.validate(errors),
@@ -8180,10 +8206,6 @@ impl Pickle for BlobSwapStore {
                 2u16.pickle(out);
                 inner.pickle(out);
             }
-            BlobSwapStore::FileSystem(inner) => {
-                3u16.pickle(out);
-                inner.pickle(out);
-            }
             BlobSwapStore::FoundationDb(inner) => {
                 4u16.pickle(out);
                 inner.pickle(out);
@@ -8204,10 +8226,13 @@ impl Pickle for BlobSwapStore {
             0 => Some(BlobSwapStore::Default),
             1 => Pickle::unpickle(stream).map(BlobSwapStore::S3),
             2 => Pickle::unpickle(stream).map(BlobSwapStore::Azure),
-            3 => Pickle::unpickle(stream).map(BlobSwapStore::FileSystem),
             4 => Pickle::unpickle(stream).map(BlobSwapStore::FoundationDb),
             5 => Pickle::unpickle(stream).map(BlobSwapStore::PostgreSql),
             6 => Pickle::unpickle(stream).map(BlobSwapStore::MySql),
+            3 => {
+                let _: FileSystemStore = Pickle::unpickle(stream)?;
+                Some(Self::default())
+            }
             _ => None,
         }
     }
@@ -8237,13 +8262,6 @@ impl IntoValue for BlobSwapStore {
                 obj.as_object_mut()
                     .unwrap()
                     .insert_unchecked(Property::Type, JmapValue::Str("Azure".into()));
-                obj
-            }
-            BlobSwapStore::FileSystem(obj) => {
-                let mut obj = obj.into_value_with(opts);
-                obj.as_object_mut()
-                    .unwrap()
-                    .insert_unchecked(Property::Type, JmapValue::Str("FileSystem".into()));
                 obj
             }
             BlobSwapStore::FoundationDb(obj) => {
@@ -8282,9 +8300,6 @@ impl RegistryJsonPatch for BlobSwapStore {
                 BlobSwapStoreType::Default => *self = BlobSwapStore::Default,
                 BlobSwapStoreType::S3 => *self = BlobSwapStore::S3(Default::default()),
                 BlobSwapStoreType::Azure => *self = BlobSwapStore::Azure(Default::default()),
-                BlobSwapStoreType::FileSystem => {
-                    *self = BlobSwapStore::FileSystem(Default::default())
-                }
                 BlobSwapStoreType::FoundationDb => {
                     *self = BlobSwapStore::FoundationDb(Default::default())
                 }
@@ -8298,7 +8313,6 @@ impl RegistryJsonPatch for BlobSwapStore {
             BlobSwapStore::Default => pointer.assert_eof(),
             BlobSwapStore::S3(inner) => inner.patch(pointer, value),
             BlobSwapStore::Azure(inner) => inner.patch(pointer, value),
-            BlobSwapStore::FileSystem(inner) => inner.patch(pointer, value),
             BlobSwapStore::FoundationDb(inner) => inner.patch(pointer, value),
             BlobSwapStore::PostgreSql(inner) => inner.patch(pointer, value),
             BlobSwapStore::MySql(inner) => inner.patch(pointer, value),
@@ -8312,7 +8326,6 @@ impl BlobSwapStore {
             BlobSwapStore::Default => BlobSwapStoreType::Default,
             BlobSwapStore::S3(_) => BlobSwapStoreType::S3,
             BlobSwapStore::Azure(_) => BlobSwapStoreType::Azure,
-            BlobSwapStore::FileSystem(_) => BlobSwapStoreType::FileSystem,
             BlobSwapStore::FoundationDb(_) => BlobSwapStoreType::FoundationDb,
             BlobSwapStore::PostgreSql(_) => BlobSwapStoreType::PostgreSql,
             BlobSwapStore::MySql(_) => BlobSwapStoreType::MySql,
@@ -9231,7 +9244,7 @@ impl CacheSwap {
         match self {
             CacheSwap::Disabled => true,
             CacheSwap::LocalFile(inner) => inner.validate(errors),
-            CacheSwap::Redis(inner) => inner.validate(errors),
+            CacheSwap::InMemory(inner) => inner.validate(errors),
             CacheSwap::BlobStore(inner) => inner.validate(errors),
         }
     }
@@ -9242,7 +9255,7 @@ impl CacheSwap {
     #[cfg(feature = "enterprise")]
     fn validate_inline_secrets(&self, errors: &mut Vec<ValidationError>) {
         match self {
-            CacheSwap::Redis(inner) => inner.validate_inline_secrets(errors),
+            CacheSwap::InMemory(inner) => inner.validate_inline_secrets(errors),
             CacheSwap::BlobStore(inner) => inner.validate_inline_secrets(errors),
             _ => {}
         }
@@ -9267,7 +9280,7 @@ impl Pickle for CacheSwap {
                 1u16.pickle(out);
                 inner.pickle(out);
             }
-            CacheSwap::Redis(inner) => {
+            CacheSwap::InMemory(inner) => {
                 2u16.pickle(out);
                 inner.pickle(out);
             }
@@ -9282,7 +9295,7 @@ impl Pickle for CacheSwap {
         match u16::unpickle(stream)? {
             0 => Some(CacheSwap::Disabled),
             1 => Pickle::unpickle(stream).map(CacheSwap::LocalFile),
-            2 => Pickle::unpickle(stream).map(CacheSwap::Redis),
+            2 => Pickle::unpickle(stream).map(CacheSwap::InMemory),
             3 => Pickle::unpickle(stream).map(CacheSwap::BlobStore),
             _ => None,
         }
@@ -9308,11 +9321,11 @@ impl IntoValue for CacheSwap {
                     .insert_unchecked(Property::Type, JmapValue::Str("LocalFile".into()));
                 obj
             }
-            CacheSwap::Redis(obj) => {
+            CacheSwap::InMemory(obj) => {
                 let mut obj = obj.into_value_with(opts);
                 obj.as_object_mut()
                     .unwrap()
-                    .insert_unchecked(Property::Type, JmapValue::Str("Redis".into()));
+                    .insert_unchecked(Property::Type, JmapValue::Str("InMemory".into()));
                 obj
             }
             CacheSwap::BlobStore(obj) => {
@@ -9336,14 +9349,14 @@ impl RegistryJsonPatch for CacheSwap {
             match object_type(&pointer, &value)? {
                 CacheSwapType::Disabled => *self = CacheSwap::Disabled,
                 CacheSwapType::LocalFile => *self = CacheSwap::LocalFile(Default::default()),
-                CacheSwapType::Redis => *self = CacheSwap::Redis(Default::default()),
+                CacheSwapType::InMemory => *self = CacheSwap::InMemory(Default::default()),
                 CacheSwapType::BlobStore => *self = CacheSwap::BlobStore(Default::default()),
             }
         }
         match self {
             CacheSwap::Disabled => pointer.assert_eof(),
             CacheSwap::LocalFile(inner) => inner.patch(pointer, value),
-            CacheSwap::Redis(inner) => inner.patch(pointer, value),
+            CacheSwap::InMemory(inner) => inner.patch(pointer, value),
             CacheSwap::BlobStore(inner) => inner.patch(pointer, value),
         }
     }
@@ -9354,7 +9367,7 @@ impl CacheSwap {
         match self {
             CacheSwap::Disabled => CacheSwapType::Disabled,
             CacheSwap::LocalFile(_) => CacheSwapType::LocalFile,
-            CacheSwap::Redis(_) => CacheSwapType::Redis,
+            CacheSwap::InMemory(_) => CacheSwapType::InMemory,
             CacheSwap::BlobStore(_) => CacheSwapType::BlobStore,
         }
     }
@@ -11211,6 +11224,7 @@ impl ObjectImpl for Coordinator {
             Coordinator::Redis(inner) => inner.validate(errors),
             Coordinator::RedisCluster(inner) => inner.validate(errors),
             Coordinator::RedisSentinel(inner) => inner.validate(errors),
+            Coordinator::Keep(inner) => inner.validate(errors),
         }
     }
 
@@ -11225,6 +11239,7 @@ impl ObjectImpl for Coordinator {
             Coordinator::Nats(inner) => inner.validate_inline_secrets(errors),
             Coordinator::RedisCluster(inner) => inner.validate_inline_secrets(errors),
             Coordinator::RedisSentinel(inner) => inner.validate_inline_secrets(errors),
+            Coordinator::Keep(inner) => inner.validate_inline_secrets(errors),
             _ => {}
         }
     }
@@ -11271,6 +11286,10 @@ impl Pickle for Coordinator {
                 7u16.pickle(out);
                 inner.pickle(out);
             }
+            Coordinator::Keep(inner) => {
+                8u16.pickle(out);
+                inner.pickle(out);
+            }
         }
     }
 
@@ -11287,6 +11306,7 @@ impl Pickle for Coordinator {
             5 => Pickle::unpickle(stream).map(Coordinator::Redis),
             6 => Pickle::unpickle(stream).map(Coordinator::RedisCluster),
             7 => Pickle::unpickle(stream).map(Coordinator::RedisSentinel),
+            8 => Pickle::unpickle(stream).map(Coordinator::Keep),
             _ => None,
         }
     }
@@ -11351,6 +11371,13 @@ impl IntoValue for Coordinator {
                     .insert_unchecked(Property::Type, JmapValue::Str("RedisSentinel".into()));
                 obj
             }
+            Coordinator::Keep(obj) => {
+                let mut obj = obj.into_value_with(opts);
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("Keep".into()));
+                obj
+            }
         }
     }
 }
@@ -11375,6 +11402,7 @@ impl RegistryJsonPatch for Coordinator {
                 CoordinatorType::RedisSentinel => {
                     *self = Coordinator::RedisSentinel(Default::default())
                 }
+                CoordinatorType::Keep => *self = Coordinator::Keep(Default::default()),
             }
         }
         match self {
@@ -11386,6 +11414,7 @@ impl RegistryJsonPatch for Coordinator {
             Coordinator::Redis(inner) => inner.patch(pointer, value),
             Coordinator::RedisCluster(inner) => inner.patch(pointer, value),
             Coordinator::RedisSentinel(inner) => inner.patch(pointer, value),
+            Coordinator::Keep(inner) => inner.patch(pointer, value),
         }
     }
 }
@@ -11401,6 +11430,7 @@ impl Coordinator {
             Coordinator::Redis(_) => CoordinatorType::Redis,
             Coordinator::RedisCluster(_) => CoordinatorType::RedisCluster,
             Coordinator::RedisSentinel(_) => CoordinatorType::RedisSentinel,
+            Coordinator::Keep(_) => CoordinatorType::Keep,
         }
     }
 }
@@ -11411,6 +11441,7 @@ impl Credential {
             Credential::Password(inner) => inner.validate(errors),
             Credential::AppPassword(inner) => inner.validate(errors),
             Credential::ApiKey(inner) => inner.validate(errors),
+            Credential::Passkey(inner) => inner.validate(errors),
         }
     }
 }
@@ -11436,6 +11467,10 @@ impl Pickle for Credential {
                 2u16.pickle(out);
                 inner.pickle(out);
             }
+            Credential::Passkey(inner) => {
+                3u16.pickle(out);
+                inner.pickle(out);
+            }
         }
     }
 
@@ -11444,6 +11479,7 @@ impl Pickle for Credential {
             0 => Pickle::unpickle(stream).map(Credential::Password),
             1 => Pickle::unpickle(stream).map(Credential::AppPassword),
             2 => Pickle::unpickle(stream).map(Credential::ApiKey),
+            3 => Pickle::unpickle(stream).map(Credential::Passkey),
             _ => None,
         }
     }
@@ -11477,6 +11513,13 @@ impl IntoValue for Credential {
                     .insert_unchecked(Property::Type, JmapValue::Str("ApiKey".into()));
                 obj
             }
+            Credential::Passkey(obj) => {
+                let mut obj = obj.into_value_with(opts);
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("Passkey".into()));
+                obj
+            }
         }
     }
 }
@@ -11492,12 +11535,14 @@ impl RegistryJsonPatch for Credential {
                 CredentialType::Password => *self = Credential::Password(Default::default()),
                 CredentialType::AppPassword => *self = Credential::AppPassword(Default::default()),
                 CredentialType::ApiKey => *self = Credential::ApiKey(Default::default()),
+                CredentialType::Passkey => *self = Credential::Passkey(Default::default()),
             }
         }
         match self {
             Credential::Password(inner) => inner.patch(pointer, value),
             Credential::AppPassword(inner) => inner.patch(pointer, value),
             Credential::ApiKey(inner) => inner.patch(pointer, value),
+            Credential::Passkey(inner) => inner.patch(pointer, value),
         }
     }
 }
@@ -11508,6 +11553,7 @@ impl Credential {
             Credential::Password(_) => CredentialType::Password,
             Credential::AppPassword(_) => CredentialType::AppPassword,
             Credential::ApiKey(_) => CredentialType::ApiKey,
+            Credential::Passkey(_) => CredentialType::Passkey,
         }
     }
 }
@@ -39559,6 +39605,7 @@ impl ObjectImpl for InMemoryStore {
             InMemoryStore::Redis(inner) => inner.validate(errors),
             InMemoryStore::RedisCluster(inner) => inner.validate(errors),
             InMemoryStore::RedisSentinel(inner) => inner.validate(errors),
+            InMemoryStore::Keep(inner) => inner.validate(errors),
         }
     }
 
@@ -39573,6 +39620,7 @@ impl ObjectImpl for InMemoryStore {
             InMemoryStore::Sharded(inner) => inner.validate_inline_secrets(errors),
             InMemoryStore::RedisCluster(inner) => inner.validate_inline_secrets(errors),
             InMemoryStore::RedisSentinel(inner) => inner.validate_inline_secrets(errors),
+            InMemoryStore::Keep(inner) => inner.validate_inline_secrets(errors),
             _ => {}
         }
     }
@@ -39613,6 +39661,10 @@ impl Pickle for InMemoryStore {
                 4u16.pickle(out);
                 inner.pickle(out);
             }
+            InMemoryStore::Keep(inner) => {
+                5u16.pickle(out);
+                inner.pickle(out);
+            }
         }
     }
 
@@ -39631,6 +39683,7 @@ impl Pickle for InMemoryStore {
             2 => Pickle::unpickle(stream).map(InMemoryStore::Redis),
             3 => Pickle::unpickle(stream).map(InMemoryStore::RedisCluster),
             4 => Pickle::unpickle(stream).map(InMemoryStore::RedisSentinel),
+            5 => Pickle::unpickle(stream).map(InMemoryStore::Keep),
             _ => None,
         }
     }
@@ -39681,6 +39734,13 @@ impl IntoValue for InMemoryStore {
                     .insert_unchecked(Property::Type, JmapValue::Str("RedisSentinel".into()));
                 obj
             }
+            InMemoryStore::Keep(obj) => {
+                let mut obj = obj.into_value_with(opts);
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("Keep".into()));
+                obj
+            }
         }
     }
 }
@@ -39707,6 +39767,7 @@ impl RegistryJsonPatch for InMemoryStore {
                 InMemoryStoreType::RedisSentinel => {
                     *self = InMemoryStore::RedisSentinel(Default::default())
                 }
+                InMemoryStoreType::Keep => *self = InMemoryStore::Keep(Default::default()),
             }
         }
         match self {
@@ -39720,6 +39781,7 @@ impl RegistryJsonPatch for InMemoryStore {
             InMemoryStore::Redis(inner) => inner.patch(pointer, value),
             InMemoryStore::RedisCluster(inner) => inner.patch(pointer, value),
             InMemoryStore::RedisSentinel(inner) => inner.patch(pointer, value),
+            InMemoryStore::Keep(inner) => inner.patch(pointer, value),
         }
     }
 }
@@ -39737,6 +39799,7 @@ impl InMemoryStore {
             InMemoryStore::Redis(_) => InMemoryStoreType::Redis,
             InMemoryStore::RedisCluster(_) => InMemoryStoreType::RedisCluster,
             InMemoryStore::RedisSentinel(_) => InMemoryStoreType::RedisSentinel,
+            InMemoryStore::Keep(_) => InMemoryStoreType::Keep,
         }
     }
 }
@@ -39872,6 +39935,327 @@ impl InMemoryStoreBase {
 }
 
 // SPDX-SnippetEnd
+impl InMemorySwap {
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        let neb = errors.len();
+        let value = &self.store;
+        value.validate(errors);
+        let value = &self.chunk_size;
+        if *value < 65536 {
+            errors.push(ValidationError::min_value(Property::ChunkSize, 65536));
+        }
+        if *value > 1048576 {
+            errors.push(ValidationError::max_value(Property::ChunkSize, 1048576));
+        }
+        let value = &self.flush_changes;
+        if *value < 1 {
+            errors.push(ValidationError::min_value(Property::FlushChanges, 1));
+        }
+        let value = &self.max_account_size;
+        if *value < 2048 {
+            errors.push(ValidationError::min_value(Property::MaxAccountSize, 2048));
+        }
+        errors.len() == neb
+    }
+
+    // SPDX-SnippetBegin
+    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+    // SPDX-License-Identifier: LicenseRef-SEL
+    #[cfg(feature = "enterprise")]
+    fn validate_inline_secrets(&self, errors: &mut Vec<ValidationError>) {
+        self.store.validate_inline_secrets(errors);
+    }
+
+    // SPDX-SnippetEnd
+}
+
+impl Pickle for InMemorySwap {
+    fn pickle(&self, out: &mut Vec<u8>) {
+        let block = crate::pickle::begin_block(out, 7, 0, 0);
+        self.store.pickle(out);
+        self.chunk_size.pickle(out);
+        self.retention.pickle(out);
+        self.flush_changes.pickle(out);
+        self.flush_interval.pickle(out);
+        self.max_account_size.pickle(out);
+        self.min_account_size.pickle(out);
+        crate::pickle::end_block(out, block);
+    }
+
+    fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
+        let block = stream.open_block()?;
+        let field0: InMemorySwapStore = if block.has(0) {
+            Pickle::unpickle(stream)?
+        } else {
+            Default::default()
+        };
+        let field1: u64 = if block.has(1) {
+            Pickle::unpickle(stream)?
+        } else {
+            262144
+        };
+        let field2: Duration = if block.has(2) {
+            Pickle::unpickle(stream)?
+        } else {
+            Duration::from_millis(604800000)
+        };
+        let field3: u64 = if block.has(3) {
+            Pickle::unpickle(stream)?
+        } else {
+            2000u64
+        };
+        let field4: Duration = if block.has(4) {
+            Pickle::unpickle(stream)?
+        } else {
+            Duration::from_millis(600000)
+        };
+        let field5: u64 = if block.has(5) {
+            Pickle::unpickle(stream)?
+        } else {
+            1073741824
+        };
+        let field6: u64 = if block.has(6) {
+            Pickle::unpickle(stream)?
+        } else {
+            1048576
+        };
+        stream.close_block(block);
+        Some(Self {
+            store: field0,
+            chunk_size: field1,
+            retention: field2,
+            flush_changes: field3,
+            flush_interval: field4,
+            max_account_size: field5,
+            min_account_size: field6,
+        })
+    }
+}
+
+impl Default for InMemorySwap {
+    fn default() -> Self {
+        Self {
+            store: Default::default(),
+            chunk_size: 262144,
+            retention: Duration::from_millis(604800000),
+            flush_changes: 2000u64,
+            flush_interval: Duration::from_millis(600000),
+            max_account_size: 1073741824,
+            min_account_size: 1048576,
+        }
+    }
+}
+
+impl IntoValue for InMemorySwap {
+    fn into_value(self) -> JmapValue<'static> {
+        self.into_value_with(ValueOptions::default())
+    }
+
+    fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
+        let mut map = jmap_tools::Map::with_capacity(9);
+        map.insert_unchecked(Property::Store, self.store.into_value_with(opts));
+        map.insert_unchecked(Property::ChunkSize, self.chunk_size.into_value_with(opts));
+        map.insert_unchecked(Property::Retention, self.retention.into_value_with(opts));
+        map.insert_unchecked(
+            Property::FlushChanges,
+            self.flush_changes.into_value_with(opts),
+        );
+        map.insert_unchecked(
+            Property::FlushInterval,
+            self.flush_interval.into_value_with(opts),
+        );
+        map.insert_unchecked(
+            Property::MaxAccountSize,
+            self.max_account_size.into_value_with(opts),
+        );
+        map.insert_unchecked(
+            Property::MinAccountSize,
+            self.min_account_size.into_value_with(opts),
+        );
+        JmapValue::Object(map)
+    }
+}
+
+impl RegistryJsonPropertyPatch for InMemorySwap {
+    fn patch_property<'x>(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        match pointer.next_property() {
+            Some(Property::Store) => self.store.patch(pointer, value),
+            Some(Property::ChunkSize) => self.chunk_size.patch(pointer, value),
+            Some(Property::Retention) => self.retention.patch(pointer, value),
+            Some(Property::FlushChanges) => self.flush_changes.patch(pointer, value),
+            Some(Property::FlushInterval) => self.flush_interval.patch(pointer, value),
+            Some(Property::MaxAccountSize) => self.max_account_size.patch(pointer, value),
+            Some(Property::MinAccountSize) => self.min_account_size.patch(pointer, value),
+            Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
+                property: Property::Type,
+                value,
+            }),
+            _ => Err(PatchError::new(pointer, "Invalid property")),
+        }
+    }
+}
+
+impl InMemorySwapStore {
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        match self {
+            InMemorySwapStore::Default => true,
+            InMemorySwapStore::Redis(inner) => inner.validate(errors),
+            InMemorySwapStore::RedisCluster(inner) => inner.validate(errors),
+            InMemorySwapStore::RedisSentinel(inner) => inner.validate(errors),
+            InMemorySwapStore::Keep(inner) => inner.validate(errors),
+        }
+    }
+
+    // SPDX-SnippetBegin
+    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+    // SPDX-License-Identifier: LicenseRef-SEL
+    #[cfg(feature = "enterprise")]
+    fn validate_inline_secrets(&self, errors: &mut Vec<ValidationError>) {
+        match self {
+            InMemorySwapStore::RedisCluster(inner) => inner.validate_inline_secrets(errors),
+            InMemorySwapStore::RedisSentinel(inner) => inner.validate_inline_secrets(errors),
+            InMemorySwapStore::Keep(inner) => inner.validate_inline_secrets(errors),
+            _ => {}
+        }
+    }
+
+    // SPDX-SnippetEnd
+}
+
+impl Default for InMemorySwapStore {
+    fn default() -> Self {
+        InMemorySwapStore::Default
+    }
+}
+
+impl Pickle for InMemorySwapStore {
+    fn pickle(&self, out: &mut Vec<u8>) {
+        match self {
+            InMemorySwapStore::Default => {
+                0u16.pickle(out);
+            }
+            InMemorySwapStore::Redis(inner) => {
+                1u16.pickle(out);
+                inner.pickle(out);
+            }
+            InMemorySwapStore::RedisCluster(inner) => {
+                2u16.pickle(out);
+                inner.pickle(out);
+            }
+            InMemorySwapStore::RedisSentinel(inner) => {
+                3u16.pickle(out);
+                inner.pickle(out);
+            }
+            InMemorySwapStore::Keep(inner) => {
+                4u16.pickle(out);
+                inner.pickle(out);
+            }
+        }
+    }
+
+    fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
+        match u16::unpickle(stream)? {
+            0 => Some(InMemorySwapStore::Default),
+            1 => Pickle::unpickle(stream).map(InMemorySwapStore::Redis),
+            2 => Pickle::unpickle(stream).map(InMemorySwapStore::RedisCluster),
+            3 => Pickle::unpickle(stream).map(InMemorySwapStore::RedisSentinel),
+            4 => Pickle::unpickle(stream).map(InMemorySwapStore::Keep),
+            _ => None,
+        }
+    }
+}
+
+impl IntoValue for InMemorySwapStore {
+    fn into_value(self) -> JmapValue<'static> {
+        self.into_value_with(ValueOptions::default())
+    }
+
+    fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
+        match self {
+            InMemorySwapStore::Default => {
+                let mut obj = jmap_tools::Map::new();
+                obj.insert_unchecked(Property::Type, JmapValue::Str("Default".into()));
+                JmapValue::Object(obj)
+            }
+            InMemorySwapStore::Redis(obj) => {
+                let mut obj = obj.into_value_with(opts);
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("Redis".into()));
+                obj
+            }
+            InMemorySwapStore::RedisCluster(obj) => {
+                let mut obj = obj.into_value_with(opts);
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("RedisCluster".into()));
+                obj
+            }
+            InMemorySwapStore::RedisSentinel(obj) => {
+                let mut obj = obj.into_value_with(opts);
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("RedisSentinel".into()));
+                obj
+            }
+            InMemorySwapStore::Keep(obj) => {
+                let mut obj = obj.into_value_with(opts);
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("Keep".into()));
+                obj
+            }
+        }
+    }
+}
+
+impl RegistryJsonPatch for InMemorySwapStore {
+    fn patch<'x>(
+        &mut self,
+        pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        if !pointer.has_next() {
+            match object_type(&pointer, &value)? {
+                InMemorySwapStoreType::Default => *self = InMemorySwapStore::Default,
+                InMemorySwapStoreType::Redis => {
+                    *self = InMemorySwapStore::Redis(Default::default())
+                }
+                InMemorySwapStoreType::RedisCluster => {
+                    *self = InMemorySwapStore::RedisCluster(Default::default())
+                }
+                InMemorySwapStoreType::RedisSentinel => {
+                    *self = InMemorySwapStore::RedisSentinel(Default::default())
+                }
+                InMemorySwapStoreType::Keep => *self = InMemorySwapStore::Keep(Default::default()),
+            }
+        }
+        match self {
+            InMemorySwapStore::Default => pointer.assert_eof(),
+            InMemorySwapStore::Redis(inner) => inner.patch(pointer, value),
+            InMemorySwapStore::RedisCluster(inner) => inner.patch(pointer, value),
+            InMemorySwapStore::RedisSentinel(inner) => inner.patch(pointer, value),
+            InMemorySwapStore::Keep(inner) => inner.patch(pointer, value),
+        }
+    }
+}
+
+impl InMemorySwapStore {
+    pub fn object_type(&self) -> InMemorySwapStoreType {
+        match self {
+            InMemorySwapStore::Default => InMemorySwapStoreType::Default,
+            InMemorySwapStore::Redis(_) => InMemorySwapStoreType::Redis,
+            InMemorySwapStore::RedisCluster(_) => InMemorySwapStoreType::RedisCluster,
+            InMemorySwapStore::RedisSentinel(_) => InMemorySwapStoreType::RedisSentinel,
+            InMemorySwapStore::Keep(_) => InMemorySwapStoreType::Keep,
+        }
+    }
+}
+
 impl ObjectImpl for IndexQueueStatus {
     const FLAGS: u64 = OBJ_NOT_STORED | OBJ_NO_CREATE | OBJ_NO_DESTROY;
     const VERSION: u8 = 0;
@@ -41095,6 +41479,538 @@ impl RegistryJsonPropertyPatch for KafkaCoordinator {
     }
 }
 
+impl KeepStore {
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        let neb = errors.len();
+        let value = &self.hosts;
+        for value in value.iter() {
+            if value.is_empty() {
+                errors.push(ValidationError::required(Property::Hosts));
+            }
+        }
+        if value.len() < 1 {
+            errors.push(ValidationError::min_items(Property::Hosts, 1));
+        }
+        let value = &self.secret;
+        value.validate(errors);
+        let value = &self.tls;
+        value.validate(errors);
+        let value = &self.connections;
+        if *value < 1 {
+            errors.push(ValidationError::min_value(Property::Connections, 1));
+        }
+        if *value > 1024 {
+            errors.push(ValidationError::max_value(Property::Connections, 1024));
+        }
+        let value = &self.shard_connections;
+        if *value < 1 {
+            errors.push(ValidationError::min_value(Property::ShardConnections, 1));
+        }
+        if *value > 8 {
+            errors.push(ValidationError::max_value(Property::ShardConnections, 8));
+        }
+        errors.len() == neb
+    }
+
+    // SPDX-SnippetBegin
+    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+    // SPDX-License-Identifier: LicenseRef-SEL
+    #[cfg(feature = "enterprise")]
+    fn validate_inline_secrets(&self, errors: &mut Vec<ValidationError>) {
+        if let Some(source) = self.secret.external_source() {
+            errors.push(ValidationError::invalid(Property::Secret, source));
+        }
+    }
+
+    // SPDX-SnippetEnd
+}
+
+impl Pickle for KeepStore {
+    fn pickle(&self, out: &mut Vec<u8>) {
+        let mut bitmap = 0u64;
+        if self.cluster_discovery {
+            bitmap |= 1 << 0;
+        }
+        let block = crate::pickle::begin_block(out, 10, 1, bitmap);
+        self.hosts.pickle(out);
+        self.secret.pickle(out);
+        self.tls.pickle(out);
+        self.connections.pickle(out);
+        self.shard_connections.pickle(out);
+        self.stream_mode.pickle(out);
+        self.connect_timeout.pickle(out);
+        self.attempt_timeout.pickle(out);
+        self.deadline.pickle(out);
+        crate::pickle::end_block(out, block);
+    }
+
+    fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
+        let block = stream.open_block()?;
+        let field0: Map<String> = if block.has(0) {
+            Pickle::unpickle(stream)?
+        } else {
+            Map::new(vec!["127.0.0.1:7000".to_string()])
+        };
+        let field1: bool = if block.has(1) { block.flag(0) } else { false };
+        let field2: SecretKeyOptional = if block.has(2) {
+            Pickle::unpickle(stream)?
+        } else {
+            Default::default()
+        };
+        let field3: KeepTls = if block.has(3) {
+            Pickle::unpickle(stream)?
+        } else {
+            KeepTls::Disabled
+        };
+        let field4: u64 = if block.has(4) {
+            Pickle::unpickle(stream)?
+        } else {
+            16u64
+        };
+        let field5: u64 = if block.has(5) {
+            Pickle::unpickle(stream)?
+        } else {
+            2u64
+        };
+        let field6: KeepStreamMode = if block.has(6) {
+            Pickle::unpickle(stream)?
+        } else {
+            KeepStreamMode::Everywhere
+        };
+        let field7: Duration = if block.has(7) {
+            Pickle::unpickle(stream)?
+        } else {
+            Duration::from_millis(5000)
+        };
+        let field8: Duration = if block.has(8) {
+            Pickle::unpickle(stream)?
+        } else {
+            Duration::from_millis(1000)
+        };
+        let field9: Duration = if block.has(9) {
+            Pickle::unpickle(stream)?
+        } else {
+            Duration::from_millis(5000)
+        };
+        stream.close_block(block);
+        Some(Self {
+            hosts: field0,
+            cluster_discovery: field1,
+            secret: field2,
+            tls: field3,
+            connections: field4,
+            shard_connections: field5,
+            stream_mode: field6,
+            connect_timeout: field7,
+            attempt_timeout: field8,
+            deadline: field9,
+        })
+    }
+}
+
+impl Default for KeepStore {
+    fn default() -> Self {
+        Self {
+            hosts: Map::new(vec!["127.0.0.1:7000".to_string()]),
+            cluster_discovery: false,
+            secret: Default::default(),
+            tls: KeepTls::Disabled,
+            connections: 16u64,
+            shard_connections: 2u64,
+            stream_mode: KeepStreamMode::Everywhere,
+            connect_timeout: Duration::from_millis(5000),
+            attempt_timeout: Duration::from_millis(1000),
+            deadline: Duration::from_millis(5000),
+        }
+    }
+}
+
+impl IntoValue for KeepStore {
+    fn into_value(self) -> JmapValue<'static> {
+        self.into_value_with(ValueOptions::default())
+    }
+
+    fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
+        let mut map = jmap_tools::Map::with_capacity(12);
+        map.insert_unchecked(Property::Hosts, self.hosts.into_value_with(opts));
+        map.insert_unchecked(
+            Property::ClusterDiscovery,
+            self.cluster_discovery.into_value_with(opts),
+        );
+        map.insert_unchecked(Property::Secret, self.secret.into_value_with(opts));
+        map.insert_unchecked(Property::Tls, self.tls.into_value_with(opts));
+        map.insert_unchecked(
+            Property::Connections,
+            self.connections.into_value_with(opts),
+        );
+        map.insert_unchecked(
+            Property::ShardConnections,
+            self.shard_connections.into_value_with(opts),
+        );
+        map.insert_unchecked(Property::StreamMode, self.stream_mode.into_value_with(opts));
+        map.insert_unchecked(
+            Property::ConnectTimeout,
+            self.connect_timeout.into_value_with(opts),
+        );
+        map.insert_unchecked(
+            Property::AttemptTimeout,
+            self.attempt_timeout.into_value_with(opts),
+        );
+        map.insert_unchecked(Property::Deadline, self.deadline.into_value_with(opts));
+        JmapValue::Object(map)
+    }
+}
+
+impl RegistryJsonPropertyPatch for KeepStore {
+    fn patch_property<'x>(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        match pointer.next_property() {
+            Some(Property::Hosts) => self.hosts.patch(pointer, value),
+            Some(Property::ClusterDiscovery) => self.cluster_discovery.patch(pointer, value),
+            Some(Property::Secret) => self.secret.patch(pointer, value),
+            Some(Property::Tls) => self.tls.patch(pointer, value),
+            Some(Property::Connections) => self.connections.patch(pointer, value),
+            Some(Property::ShardConnections) => self.shard_connections.patch(pointer, value),
+            Some(Property::StreamMode) => self.stream_mode.patch(pointer, value),
+            Some(Property::ConnectTimeout) => self.connect_timeout.patch(pointer, value),
+            Some(Property::AttemptTimeout) => self.attempt_timeout.patch(pointer, value),
+            Some(Property::Deadline) => self.deadline.patch(pointer, value),
+            Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
+                property: Property::Type,
+                value,
+            }),
+            _ => Err(PatchError::new(pointer, "Invalid property")),
+        }
+    }
+}
+
+impl KeepTls {
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        match self {
+            KeepTls::Disabled => true,
+            KeepTls::RawPublicKeys(inner) => inner.validate(errors),
+            KeepTls::Authority(inner) => inner.validate(errors),
+        }
+    }
+}
+
+impl Default for KeepTls {
+    fn default() -> Self {
+        KeepTls::Disabled
+    }
+}
+
+impl Pickle for KeepTls {
+    fn pickle(&self, out: &mut Vec<u8>) {
+        match self {
+            KeepTls::Disabled => {
+                0u16.pickle(out);
+            }
+            KeepTls::RawPublicKeys(inner) => {
+                1u16.pickle(out);
+                inner.pickle(out);
+            }
+            KeepTls::Authority(inner) => {
+                2u16.pickle(out);
+                inner.pickle(out);
+            }
+        }
+    }
+
+    fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
+        match u16::unpickle(stream)? {
+            0 => Some(KeepTls::Disabled),
+            1 => Pickle::unpickle(stream).map(KeepTls::RawPublicKeys),
+            2 => Pickle::unpickle(stream).map(KeepTls::Authority),
+            _ => None,
+        }
+    }
+}
+
+impl IntoValue for KeepTls {
+    fn into_value(self) -> JmapValue<'static> {
+        self.into_value_with(ValueOptions::default())
+    }
+
+    fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
+        match self {
+            KeepTls::Disabled => {
+                let mut obj = jmap_tools::Map::new();
+                obj.insert_unchecked(Property::Type, JmapValue::Str("Disabled".into()));
+                JmapValue::Object(obj)
+            }
+            KeepTls::RawPublicKeys(obj) => {
+                let mut obj = obj.into_value_with(opts);
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("RawPublicKeys".into()));
+                obj
+            }
+            KeepTls::Authority(obj) => {
+                let mut obj = obj.into_value_with(opts);
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("Authority".into()));
+                obj
+            }
+        }
+    }
+}
+
+impl RegistryJsonPatch for KeepTls {
+    fn patch<'x>(
+        &mut self,
+        pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        if !pointer.has_next() {
+            match object_type(&pointer, &value)? {
+                KeepTlsType::Disabled => *self = KeepTls::Disabled,
+                KeepTlsType::RawPublicKeys => *self = KeepTls::RawPublicKeys(Default::default()),
+                KeepTlsType::Authority => *self = KeepTls::Authority(Default::default()),
+            }
+        }
+        match self {
+            KeepTls::Disabled => pointer.assert_eof(),
+            KeepTls::RawPublicKeys(inner) => inner.patch(pointer, value),
+            KeepTls::Authority(inner) => inner.patch(pointer, value),
+        }
+    }
+}
+
+impl KeepTls {
+    pub fn object_type(&self) -> KeepTlsType {
+        match self {
+            KeepTls::Disabled => KeepTlsType::Disabled,
+            KeepTls::RawPublicKeys(_) => KeepTlsType::RawPublicKeys,
+            KeepTls::Authority(_) => KeepTlsType::Authority,
+        }
+    }
+}
+
+impl KeepTlsAuthority {
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        let neb = errors.len();
+        let value = &self.ca_path;
+        if value.is_empty() {
+            errors.push(ValidationError::required(Property::CaPath));
+        }
+        let value = &self.cert_path;
+        if value.is_empty() {
+            errors.push(ValidationError::required(Property::CertPath));
+        }
+        let value = &self.key_path;
+        if value.is_empty() {
+            errors.push(ValidationError::required(Property::KeyPath));
+        }
+        if let Some(value) = &self.server_name {
+            if value.is_empty() {
+                errors.push(ValidationError::required(Property::ServerName));
+            }
+        }
+        errors.len() == neb
+    }
+}
+
+impl Pickle for KeepTlsAuthority {
+    fn pickle(&self, out: &mut Vec<u8>) {
+        let mut bitmap = 0u64;
+        if self.server_name.is_some() {
+            bitmap |= 1 << 0;
+        }
+        let block = crate::pickle::begin_block(out, 4, 1, bitmap);
+        self.ca_path.pickle(out);
+        self.cert_path.pickle(out);
+        self.key_path.pickle(out);
+        if let Some(value) = &self.server_name {
+            value.pickle(out);
+        }
+        crate::pickle::end_block(out, block);
+    }
+
+    fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
+        let block = stream.open_block()?;
+        let field0: String = if block.has(0) {
+            Pickle::unpickle(stream)?
+        } else {
+            Default::default()
+        };
+        let field1: String = if block.has(1) {
+            Pickle::unpickle(stream)?
+        } else {
+            Default::default()
+        };
+        let field2: String = if block.has(2) {
+            Pickle::unpickle(stream)?
+        } else {
+            Default::default()
+        };
+        let field3: Option<String> = if block.has(3) {
+            if block.flag(0) {
+                Some(Pickle::unpickle(stream)?)
+            } else {
+                None
+            }
+        } else {
+            Default::default()
+        };
+        stream.close_block(block);
+        Some(Self {
+            ca_path: field0,
+            cert_path: field1,
+            key_path: field2,
+            server_name: field3,
+        })
+    }
+}
+
+impl Default for KeepTlsAuthority {
+    fn default() -> Self {
+        Self {
+            ca_path: Default::default(),
+            cert_path: Default::default(),
+            key_path: Default::default(),
+            server_name: Default::default(),
+        }
+    }
+}
+
+impl IntoValue for KeepTlsAuthority {
+    fn into_value(self) -> JmapValue<'static> {
+        self.into_value_with(ValueOptions::default())
+    }
+
+    fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
+        let mut map = jmap_tools::Map::with_capacity(6);
+        map.insert_unchecked(Property::CaPath, self.ca_path.into_value_with(opts));
+        map.insert_unchecked(Property::CertPath, self.cert_path.into_value_with(opts));
+        map.insert_unchecked(Property::KeyPath, self.key_path.into_value_with(opts));
+        map.insert_unchecked(Property::ServerName, self.server_name.into_value_with(opts));
+        JmapValue::Object(map)
+    }
+}
+
+impl RegistryJsonPropertyPatch for KeepTlsAuthority {
+    fn patch_property<'x>(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        match pointer.next_property() {
+            Some(Property::CaPath) => self
+                .ca_path
+                .patch(pointer.with_validators(&[StringValidator::Trim]), value),
+            Some(Property::CertPath) => self
+                .cert_path
+                .patch(pointer.with_validators(&[StringValidator::Trim]), value),
+            Some(Property::KeyPath) => self
+                .key_path
+                .patch(pointer.with_validators(&[StringValidator::Trim]), value),
+            Some(Property::ServerName) => self
+                .server_name
+                .patch(pointer.with_validators(&[StringValidator::Trim]), value),
+            Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
+                property: Property::Type,
+                value,
+            }),
+            _ => Err(PatchError::new(pointer, "Invalid property")),
+        }
+    }
+}
+
+impl KeepTlsRawPublicKeys {
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        let neb = errors.len();
+        let value = &self.key_path;
+        if value.is_empty() {
+            errors.push(ValidationError::required(Property::KeyPath));
+        }
+        let value = &self.server_keys_path;
+        if value.is_empty() {
+            errors.push(ValidationError::required(Property::ServerKeysPath));
+        }
+        errors.len() == neb
+    }
+}
+
+impl Pickle for KeepTlsRawPublicKeys {
+    fn pickle(&self, out: &mut Vec<u8>) {
+        let block = crate::pickle::begin_block(out, 2, 0, 0);
+        self.key_path.pickle(out);
+        self.server_keys_path.pickle(out);
+        crate::pickle::end_block(out, block);
+    }
+
+    fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
+        let block = stream.open_block()?;
+        let field0: String = if block.has(0) {
+            Pickle::unpickle(stream)?
+        } else {
+            Default::default()
+        };
+        let field1: String = if block.has(1) {
+            Pickle::unpickle(stream)?
+        } else {
+            Default::default()
+        };
+        stream.close_block(block);
+        Some(Self {
+            key_path: field0,
+            server_keys_path: field1,
+        })
+    }
+}
+
+impl Default for KeepTlsRawPublicKeys {
+    fn default() -> Self {
+        Self {
+            key_path: Default::default(),
+            server_keys_path: Default::default(),
+        }
+    }
+}
+
+impl IntoValue for KeepTlsRawPublicKeys {
+    fn into_value(self) -> JmapValue<'static> {
+        self.into_value_with(ValueOptions::default())
+    }
+
+    fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
+        let mut map = jmap_tools::Map::with_capacity(4);
+        map.insert_unchecked(Property::KeyPath, self.key_path.into_value_with(opts));
+        map.insert_unchecked(
+            Property::ServerKeysPath,
+            self.server_keys_path.into_value_with(opts),
+        );
+        JmapValue::Object(map)
+    }
+}
+
+impl RegistryJsonPropertyPatch for KeepTlsRawPublicKeys {
+    fn patch_property<'x>(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        match pointer.next_property() {
+            Some(Property::KeyPath) => self
+                .key_path
+                .patch(pointer.with_validators(&[StringValidator::Trim]), value),
+            Some(Property::ServerKeysPath) => self
+                .server_keys_path
+                .patch(pointer.with_validators(&[StringValidator::Trim]), value),
+            Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
+                property: Property::Type,
+                value,
+            }),
+            _ => Err(PatchError::new(pointer, "Invalid property")),
+        }
+    }
+}
+
 impl KeySource {
     fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
         match self {
@@ -42123,6 +43039,7 @@ impl LookupStore {
             LookupStore::Redis(inner) => inner.validate(errors),
             LookupStore::RedisCluster(inner) => inner.validate(errors),
             LookupStore::RedisSentinel(inner) => inner.validate(errors),
+            LookupStore::Keep(inner) => inner.validate(errors),
         }
     }
 
@@ -42137,6 +43054,7 @@ impl LookupStore {
             LookupStore::Sharded(inner) => inner.validate_inline_secrets(errors),
             LookupStore::RedisCluster(inner) => inner.validate_inline_secrets(errors),
             LookupStore::RedisSentinel(inner) => inner.validate_inline_secrets(errors),
+            LookupStore::Keep(inner) => inner.validate_inline_secrets(errors),
             _ => {}
         }
     }
@@ -42186,6 +43104,10 @@ impl Pickle for LookupStore {
                 6u16.pickle(out);
                 inner.pickle(out);
             }
+            LookupStore::Keep(inner) => {
+                7u16.pickle(out);
+                inner.pickle(out);
+            }
         }
     }
 
@@ -42203,6 +43125,7 @@ impl Pickle for LookupStore {
             4 => Pickle::unpickle(stream).map(LookupStore::Redis),
             5 => Pickle::unpickle(stream).map(LookupStore::RedisCluster),
             6 => Pickle::unpickle(stream).map(LookupStore::RedisSentinel),
+            7 => Pickle::unpickle(stream).map(LookupStore::Keep),
             _ => None,
         }
     }
@@ -42269,6 +43192,13 @@ impl IntoValue for LookupStore {
                     .insert_unchecked(Property::Type, JmapValue::Str("RedisSentinel".into()));
                 obj
             }
+            LookupStore::Keep(obj) => {
+                let mut obj = obj.into_value_with(opts);
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("Keep".into()));
+                obj
+            }
         }
     }
 }
@@ -42297,6 +43227,7 @@ impl RegistryJsonPatch for LookupStore {
                 LookupStoreType::RedisSentinel => {
                     *self = LookupStore::RedisSentinel(Default::default())
                 }
+                LookupStoreType::Keep => *self = LookupStore::Keep(Default::default()),
             }
         }
         match self {
@@ -42312,6 +43243,7 @@ impl RegistryJsonPatch for LookupStore {
             LookupStore::Redis(inner) => inner.patch(pointer, value),
             LookupStore::RedisCluster(inner) => inner.patch(pointer, value),
             LookupStore::RedisSentinel(inner) => inner.patch(pointer, value),
+            LookupStore::Keep(inner) => inner.patch(pointer, value),
         }
     }
 }
@@ -42331,6 +43263,7 @@ impl LookupStore {
             LookupStore::Redis(_) => LookupStoreType::Redis,
             LookupStore::RedisCluster(_) => LookupStoreType::RedisCluster,
             LookupStore::RedisSentinel(_) => LookupStoreType::RedisSentinel,
+            LookupStore::Keep(_) => LookupStoreType::Keep,
         }
     }
 }
@@ -52979,6 +53912,293 @@ impl RegistryJsonPropertyPatch for OtpAuth {
     }
 }
 
+impl ObjectImpl for Passkey {
+    const FLAGS: u64 = OBJ_NOT_STORED;
+    const VERSION: u8 = 0;
+    const OBJECT: ObjectType = ObjectType::Passkey;
+
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        let neb = errors.len();
+        if let Some(value) = &self.registration {
+            value.validate(errors);
+        }
+        let value = &self.description;
+        if value.is_empty() {
+            errors.push(ValidationError::required(Property::Description));
+        }
+        if value.len() > 64 {
+            errors.push(ValidationError::max_length(Property::Description, 64));
+        }
+        let value = &self.created_at;
+        if !value.is_valid() {
+            errors.push(ValidationError::invalid(Property::CreatedAt, value));
+        }
+        errors.len() == neb
+    }
+
+    fn index<'x>(&'x self, _: &mut IndexBuilder<'x>) {}
+}
+
+impl Default for Passkey {
+    fn default() -> Self {
+        Self {
+            registration: Default::default(),
+            description: Default::default(),
+            created_at: Default::default(),
+        }
+    }
+}
+
+impl IntoValue for Passkey {
+    fn into_value(self) -> JmapValue<'static> {
+        self.into_value_with(ValueOptions::default())
+    }
+
+    fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
+        let mut map = jmap_tools::Map::with_capacity(5);
+        map.insert_unchecked(
+            Property::Registration,
+            self.registration.into_value_with(opts),
+        );
+        map.insert_unchecked(
+            Property::Description,
+            self.description.into_value_with(opts),
+        );
+        map.insert_unchecked(Property::CreatedAt, self.created_at.into_value_with(opts));
+        JmapValue::Object(map)
+    }
+}
+
+impl RegistryJsonPropertyPatch for Passkey {
+    fn patch_property<'x>(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        match pointer.next_property() {
+            Some(Property::Registration) => {
+                self.registration.patch(pointer.assert_read_only()?, value)
+            }
+            Some(Property::Description) => self
+                .description
+                .patch(pointer.with_validators(&[StringValidator::Trim]), value),
+            Some(Property::CreatedAt) => pointer.assert_server_set(),
+            Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
+                property: Property::Type,
+                value,
+            }),
+            _ => Err(PatchError::new(pointer, "Invalid property")),
+        }
+    }
+}
+
+impl PasskeyCredential {
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        let neb = errors.len();
+        let value = &self.credential_id;
+        if !value.is_valid() {
+            errors.push(ValidationError::invalid(Property::CredentialId, value));
+        }
+        let value = &self.key_id;
+        if value.is_empty() {
+            errors.push(ValidationError::required(Property::KeyId));
+        }
+        let value = &self.public_key;
+        if value.is_empty() {
+            errors.push(ValidationError::required(Property::PublicKey));
+        }
+        let value = &self.description;
+        if value.is_empty() {
+            errors.push(ValidationError::required(Property::Description));
+        }
+        if value.len() > 64 {
+            errors.push(ValidationError::max_length(Property::Description, 64));
+        }
+        let value = &self.created_at;
+        if !value.is_valid() {
+            errors.push(ValidationError::invalid(Property::CreatedAt, value));
+        }
+        errors.len() == neb
+    }
+}
+
+impl Pickle for PasskeyCredential {
+    fn pickle(&self, out: &mut Vec<u8>) {
+        let block = crate::pickle::begin_block(out, 6, 0, 0);
+        self.credential_id.pickle(out);
+        self.key_id.pickle(out);
+        self.public_key.pickle(out);
+        self.algorithm.pickle(out);
+        self.description.pickle(out);
+        self.created_at.pickle(out);
+        crate::pickle::end_block(out, block);
+    }
+
+    fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
+        let block = stream.open_block()?;
+        let field0: Id = if block.has(0) {
+            Pickle::unpickle(stream)?
+        } else {
+            Default::default()
+        };
+        let field1: String = if block.has(1) {
+            Pickle::unpickle(stream)?
+        } else {
+            Default::default()
+        };
+        let field2: String = if block.has(2) {
+            Pickle::unpickle(stream)?
+        } else {
+            Default::default()
+        };
+        let field3: PasskeyAlgorithm = if block.has(3) {
+            Pickle::unpickle(stream)?
+        } else {
+            Default::default()
+        };
+        let field4: String = if block.has(4) {
+            Pickle::unpickle(stream)?
+        } else {
+            Default::default()
+        };
+        let field5: UTCDateTime = if block.has(5) {
+            Pickle::unpickle(stream)?
+        } else {
+            Default::default()
+        };
+        stream.close_block(block);
+        Some(Self {
+            credential_id: field0,
+            key_id: field1,
+            public_key: field2,
+            algorithm: field3,
+            description: field4,
+            created_at: field5,
+        })
+    }
+}
+
+impl Default for PasskeyCredential {
+    fn default() -> Self {
+        Self {
+            credential_id: Default::default(),
+            key_id: Default::default(),
+            public_key: Default::default(),
+            algorithm: Default::default(),
+            description: Default::default(),
+            created_at: Default::default(),
+        }
+    }
+}
+
+impl IntoValue for PasskeyCredential {
+    fn into_value(self) -> JmapValue<'static> {
+        self.into_value_with(ValueOptions::default())
+    }
+
+    fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
+        let mut map = jmap_tools::Map::with_capacity(8);
+        map.insert_unchecked(
+            Property::CredentialId,
+            self.credential_id.into_value_with(opts),
+        );
+        map.insert_unchecked(Property::KeyId, self.key_id.into_value_with(opts));
+        map.insert_unchecked(Property::PublicKey, self.public_key.into_value_with(opts));
+        map.insert_unchecked(Property::Algorithm, self.algorithm.into_value_with(opts));
+        map.insert_unchecked(
+            Property::Description,
+            self.description.into_value_with(opts),
+        );
+        map.insert_unchecked(Property::CreatedAt, self.created_at.into_value_with(opts));
+        JmapValue::Object(map)
+    }
+}
+
+impl RegistryJsonPropertyPatch for PasskeyCredential {
+    fn patch_property<'x>(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        match pointer.next_property() {
+            Some(Property::CredentialId) => pointer.assert_server_set(),
+            Some(Property::KeyId) => pointer.assert_server_set(),
+            Some(Property::PublicKey) => pointer.assert_server_set(),
+            Some(Property::Algorithm) => pointer.assert_server_set(),
+            Some(Property::Description) => self
+                .description
+                .patch(pointer.with_validators(&[StringValidator::Trim]), value),
+            Some(Property::CreatedAt) => pointer.assert_server_set(),
+            Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
+                property: Property::Type,
+                value,
+            }),
+            _ => Err(PatchError::new(pointer, "Invalid property")),
+        }
+    }
+}
+
+impl PasskeyRegistration {
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        let neb = errors.len();
+        let value = &self.client_data_json;
+        if value.is_empty() {
+            errors.push(ValidationError::required(Property::ClientDataJson));
+        }
+        let value = &self.attestation_object;
+        if value.is_empty() {
+            errors.push(ValidationError::required(Property::AttestationObject));
+        }
+        errors.len() == neb
+    }
+}
+
+impl Default for PasskeyRegistration {
+    fn default() -> Self {
+        Self {
+            client_data_json: Default::default(),
+            attestation_object: Default::default(),
+        }
+    }
+}
+
+impl IntoValue for PasskeyRegistration {
+    fn into_value(self) -> JmapValue<'static> {
+        self.into_value_with(ValueOptions::default())
+    }
+
+    fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
+        let mut map = jmap_tools::Map::with_capacity(4);
+        map.insert_unchecked(
+            Property::ClientDataJson,
+            self.client_data_json.into_value_with(opts),
+        );
+        map.insert_unchecked(
+            Property::AttestationObject,
+            self.attestation_object.into_value_with(opts),
+        );
+        JmapValue::Object(map)
+    }
+}
+
+impl RegistryJsonPropertyPatch for PasskeyRegistration {
+    fn patch_property<'x>(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        match pointer.next_property() {
+            Some(Property::ClientDataJson) => self.client_data_json.patch(pointer, value),
+            Some(Property::AttestationObject) => self.attestation_object.patch(pointer, value),
+            Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
+                property: Property::Type,
+                value,
+            }),
+            _ => Err(PatchError::new(pointer, "Invalid property")),
+        }
+    }
+}
+
 impl PasswordCredential {
     fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
         let neb = errors.len();
@@ -53608,7 +54828,10 @@ impl Pickle for PostgreSqlStore {
         if self.options.is_some() {
             bitmap |= 1 << 5;
         }
-        let block = crate::pickle::begin_block(out, 12, 6, bitmap);
+        if self.response_timeout.is_some() {
+            bitmap |= 1 << 6;
+        }
+        let block = crate::pickle::begin_block(out, 13, 7, bitmap);
         if let Some(value) = &self.connect_timeout {
             value.pickle(out);
         }
@@ -53635,6 +54858,9 @@ impl Pickle for PostgreSqlStore {
         }
         self.auth_secret.pickle(out);
         if let Some(value) = &self.options {
+            value.pickle(out);
+        }
+        if let Some(value) = &self.response_timeout {
             value.pickle(out);
         }
         crate::pickle::end_block(out, block);
@@ -53720,6 +54946,15 @@ impl Pickle for PostgreSqlStore {
         } else {
             Default::default()
         };
+        let field12: Option<Duration> = if block.has(12) {
+            if block.flag(6) {
+                Some(Pickle::unpickle(stream)?)
+            } else {
+                None
+            }
+        } else {
+            Some(Duration::from_millis(120000))
+        };
         stream.close_block(block);
         Some(Self {
             connect_timeout: field0,
@@ -53739,6 +54974,7 @@ impl Pickle for PostgreSqlStore {
             auth_username: field9,
             auth_secret: field10,
             options: field11,
+            response_timeout: field12,
         })
     }
 }
@@ -53747,6 +54983,7 @@ impl Default for PostgreSqlStore {
     fn default() -> Self {
         Self {
             connect_timeout: Some(Duration::from_millis(15000)),
+            response_timeout: Some(Duration::from_millis(120000)),
             use_tls: false,
             allow_invalid_certs: false,
             pool_max_connections: Default::default(),
@@ -53773,10 +55010,14 @@ impl IntoValue for PostgreSqlStore {
     }
 
     fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
-        let mut map = jmap_tools::Map::with_capacity(14);
+        let mut map = jmap_tools::Map::with_capacity(15);
         map.insert_unchecked(
             Property::ConnectTimeout,
             self.connect_timeout.into_value_with(opts),
+        );
+        map.insert_unchecked(
+            Property::ResponseTimeout,
+            self.response_timeout.into_value_with(opts),
         );
         map.insert_unchecked(Property::UseTls, self.use_tls.into_value_with(opts));
         map.insert_unchecked(
@@ -53821,6 +55062,7 @@ impl RegistryJsonPropertyPatch for PostgreSqlStore {
     ) -> PatchResult<'x> {
         match pointer.next_property() {
             Some(Property::ConnectTimeout) => self.connect_timeout.patch(pointer, value),
+            Some(Property::ResponseTimeout) => self.response_timeout.patch(pointer, value),
             Some(Property::UseTls) => self.use_tls.patch(pointer, value),
             Some(Property::AllowInvalidCerts) => self.allow_invalid_certs.patch(pointer, value),
             Some(Property::PoolMaxConnections) => self.pool_max_connections.patch(pointer, value),
@@ -55896,305 +57138,6 @@ impl RegistryJsonPropertyPatch for RedisStore {
                 value,
             }),
             _ => Err(PatchError::new(pointer, "Invalid property")),
-        }
-    }
-}
-
-impl RedisSwap {
-    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
-        let neb = errors.len();
-        let value = &self.store;
-        value.validate(errors);
-        let value = &self.chunk_size;
-        if *value < 65536 {
-            errors.push(ValidationError::min_value(Property::ChunkSize, 65536));
-        }
-        let value = &self.flush_changes;
-        if *value < 1 {
-            errors.push(ValidationError::min_value(Property::FlushChanges, 1));
-        }
-        let value = &self.max_account_size;
-        if *value < 2048 {
-            errors.push(ValidationError::min_value(Property::MaxAccountSize, 2048));
-        }
-        errors.len() == neb
-    }
-
-    // SPDX-SnippetBegin
-    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-    // SPDX-License-Identifier: LicenseRef-SEL
-    #[cfg(feature = "enterprise")]
-    fn validate_inline_secrets(&self, errors: &mut Vec<ValidationError>) {
-        self.store.validate_inline_secrets(errors);
-    }
-
-    // SPDX-SnippetEnd
-}
-
-impl Pickle for RedisSwap {
-    fn pickle(&self, out: &mut Vec<u8>) {
-        let block = crate::pickle::begin_block(out, 7, 0, 0);
-        self.store.pickle(out);
-        self.chunk_size.pickle(out);
-        self.retention.pickle(out);
-        self.flush_changes.pickle(out);
-        self.flush_interval.pickle(out);
-        self.max_account_size.pickle(out);
-        self.min_account_size.pickle(out);
-        crate::pickle::end_block(out, block);
-    }
-
-    fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
-        let block = stream.open_block()?;
-        let field0: RedisSwapStore = if block.has(0) {
-            Pickle::unpickle(stream)?
-        } else {
-            Default::default()
-        };
-        let field1: u64 = if block.has(1) {
-            Pickle::unpickle(stream)?
-        } else {
-            1048576
-        };
-        let field2: Duration = if block.has(2) {
-            Pickle::unpickle(stream)?
-        } else {
-            Duration::from_millis(604800000)
-        };
-        let field3: u64 = if block.has(3) {
-            Pickle::unpickle(stream)?
-        } else {
-            2000u64
-        };
-        let field4: Duration = if block.has(4) {
-            Pickle::unpickle(stream)?
-        } else {
-            Duration::from_millis(600000)
-        };
-        let field5: u64 = if block.has(5) {
-            Pickle::unpickle(stream)?
-        } else {
-            1073741824
-        };
-        let field6: u64 = if block.has(6) {
-            Pickle::unpickle(stream)?
-        } else {
-            1048576
-        };
-        stream.close_block(block);
-        Some(Self {
-            store: field0,
-            chunk_size: field1,
-            retention: field2,
-            flush_changes: field3,
-            flush_interval: field4,
-            max_account_size: field5,
-            min_account_size: field6,
-        })
-    }
-}
-
-impl Default for RedisSwap {
-    fn default() -> Self {
-        Self {
-            store: Default::default(),
-            chunk_size: 1048576,
-            retention: Duration::from_millis(604800000),
-            flush_changes: 2000u64,
-            flush_interval: Duration::from_millis(600000),
-            max_account_size: 1073741824,
-            min_account_size: 1048576,
-        }
-    }
-}
-
-impl IntoValue for RedisSwap {
-    fn into_value(self) -> JmapValue<'static> {
-        self.into_value_with(ValueOptions::default())
-    }
-
-    fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
-        let mut map = jmap_tools::Map::with_capacity(9);
-        map.insert_unchecked(Property::Store, self.store.into_value_with(opts));
-        map.insert_unchecked(Property::ChunkSize, self.chunk_size.into_value_with(opts));
-        map.insert_unchecked(Property::Retention, self.retention.into_value_with(opts));
-        map.insert_unchecked(
-            Property::FlushChanges,
-            self.flush_changes.into_value_with(opts),
-        );
-        map.insert_unchecked(
-            Property::FlushInterval,
-            self.flush_interval.into_value_with(opts),
-        );
-        map.insert_unchecked(
-            Property::MaxAccountSize,
-            self.max_account_size.into_value_with(opts),
-        );
-        map.insert_unchecked(
-            Property::MinAccountSize,
-            self.min_account_size.into_value_with(opts),
-        );
-        JmapValue::Object(map)
-    }
-}
-
-impl RegistryJsonPropertyPatch for RedisSwap {
-    fn patch_property<'x>(
-        &mut self,
-        mut pointer: JsonPointerPatch<'_>,
-        value: JmapValue<'x>,
-    ) -> PatchResult<'x> {
-        match pointer.next_property() {
-            Some(Property::Store) => self.store.patch(pointer, value),
-            Some(Property::ChunkSize) => self.chunk_size.patch(pointer, value),
-            Some(Property::Retention) => self.retention.patch(pointer, value),
-            Some(Property::FlushChanges) => self.flush_changes.patch(pointer, value),
-            Some(Property::FlushInterval) => self.flush_interval.patch(pointer, value),
-            Some(Property::MaxAccountSize) => self.max_account_size.patch(pointer, value),
-            Some(Property::MinAccountSize) => self.min_account_size.patch(pointer, value),
-            Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
-                property: Property::Type,
-                value,
-            }),
-            _ => Err(PatchError::new(pointer, "Invalid property")),
-        }
-    }
-}
-
-impl RedisSwapStore {
-    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
-        match self {
-            RedisSwapStore::Default => true,
-            RedisSwapStore::Redis(inner) => inner.validate(errors),
-            RedisSwapStore::RedisCluster(inner) => inner.validate(errors),
-            RedisSwapStore::RedisSentinel(inner) => inner.validate(errors),
-        }
-    }
-
-    // SPDX-SnippetBegin
-    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-    // SPDX-License-Identifier: LicenseRef-SEL
-    #[cfg(feature = "enterprise")]
-    fn validate_inline_secrets(&self, errors: &mut Vec<ValidationError>) {
-        match self {
-            RedisSwapStore::RedisCluster(inner) => inner.validate_inline_secrets(errors),
-            RedisSwapStore::RedisSentinel(inner) => inner.validate_inline_secrets(errors),
-            _ => {}
-        }
-    }
-
-    // SPDX-SnippetEnd
-}
-
-impl Default for RedisSwapStore {
-    fn default() -> Self {
-        RedisSwapStore::Default
-    }
-}
-
-impl Pickle for RedisSwapStore {
-    fn pickle(&self, out: &mut Vec<u8>) {
-        match self {
-            RedisSwapStore::Default => {
-                0u16.pickle(out);
-            }
-            RedisSwapStore::Redis(inner) => {
-                1u16.pickle(out);
-                inner.pickle(out);
-            }
-            RedisSwapStore::RedisCluster(inner) => {
-                2u16.pickle(out);
-                inner.pickle(out);
-            }
-            RedisSwapStore::RedisSentinel(inner) => {
-                3u16.pickle(out);
-                inner.pickle(out);
-            }
-        }
-    }
-
-    fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
-        match u16::unpickle(stream)? {
-            0 => Some(RedisSwapStore::Default),
-            1 => Pickle::unpickle(stream).map(RedisSwapStore::Redis),
-            2 => Pickle::unpickle(stream).map(RedisSwapStore::RedisCluster),
-            3 => Pickle::unpickle(stream).map(RedisSwapStore::RedisSentinel),
-            _ => None,
-        }
-    }
-}
-
-impl IntoValue for RedisSwapStore {
-    fn into_value(self) -> JmapValue<'static> {
-        self.into_value_with(ValueOptions::default())
-    }
-
-    fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
-        match self {
-            RedisSwapStore::Default => {
-                let mut obj = jmap_tools::Map::new();
-                obj.insert_unchecked(Property::Type, JmapValue::Str("Default".into()));
-                JmapValue::Object(obj)
-            }
-            RedisSwapStore::Redis(obj) => {
-                let mut obj = obj.into_value_with(opts);
-                obj.as_object_mut()
-                    .unwrap()
-                    .insert_unchecked(Property::Type, JmapValue::Str("Redis".into()));
-                obj
-            }
-            RedisSwapStore::RedisCluster(obj) => {
-                let mut obj = obj.into_value_with(opts);
-                obj.as_object_mut()
-                    .unwrap()
-                    .insert_unchecked(Property::Type, JmapValue::Str("RedisCluster".into()));
-                obj
-            }
-            RedisSwapStore::RedisSentinel(obj) => {
-                let mut obj = obj.into_value_with(opts);
-                obj.as_object_mut()
-                    .unwrap()
-                    .insert_unchecked(Property::Type, JmapValue::Str("RedisSentinel".into()));
-                obj
-            }
-        }
-    }
-}
-
-impl RegistryJsonPatch for RedisSwapStore {
-    fn patch<'x>(
-        &mut self,
-        pointer: JsonPointerPatch<'_>,
-        value: JmapValue<'x>,
-    ) -> PatchResult<'x> {
-        if !pointer.has_next() {
-            match object_type(&pointer, &value)? {
-                RedisSwapStoreType::Default => *self = RedisSwapStore::Default,
-                RedisSwapStoreType::Redis => *self = RedisSwapStore::Redis(Default::default()),
-                RedisSwapStoreType::RedisCluster => {
-                    *self = RedisSwapStore::RedisCluster(Default::default())
-                }
-                RedisSwapStoreType::RedisSentinel => {
-                    *self = RedisSwapStore::RedisSentinel(Default::default())
-                }
-            }
-        }
-        match self {
-            RedisSwapStore::Default => pointer.assert_eof(),
-            RedisSwapStore::Redis(inner) => inner.patch(pointer, value),
-            RedisSwapStore::RedisCluster(inner) => inner.patch(pointer, value),
-            RedisSwapStore::RedisSentinel(inner) => inner.patch(pointer, value),
-        }
-    }
-}
-
-impl RedisSwapStore {
-    pub fn object_type(&self) -> RedisSwapStoreType {
-        match self {
-            RedisSwapStore::Default => RedisSwapStoreType::Default,
-            RedisSwapStore::Redis(_) => RedisSwapStoreType::Redis,
-            RedisSwapStore::RedisCluster(_) => RedisSwapStoreType::RedisCluster,
-            RedisSwapStore::RedisSentinel(_) => RedisSwapStoreType::RedisSentinel,
         }
     }
 }

@@ -1,6 +1,6 @@
 [package]
 name = "nlp"
-version = "1.0.3"
+version = "1.1.0"
 edition = "2024"
 
 [dependencies]

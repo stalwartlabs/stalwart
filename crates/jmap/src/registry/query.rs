@@ -139,7 +139,7 @@ impl RegistryQuery for Server {
             .await
             .and_then(|response| response.build()),
 
-            ObjectType::ApiKey | ObjectType::AppPassword => {
+            ObjectType::ApiKey | ObjectType::AppPassword | ObjectType::Passkey => {
                 credential_query(RegistryQueryResponse {
                     server: self,
                     access_token,

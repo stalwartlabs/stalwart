@@ -7,7 +7,9 @@
 use super::{PostgresStore, into_error};
 use crate::{
     backend::postgres::{
-        PsqlSearchField, into_pool_error,
+        PsqlSearchField,
+        connect::PgConnect,
+        into_pool_error,
         pool::{PgManager, PgObject, PgPool},
         search::{PG_FALLBACK_LANG, PG_LANGS, PG_UNSTEMMED_LANG},
         sql::SqlStatements,
@@ -23,6 +25,7 @@ use ::registry::schema::{enums::PostgreSqlRecyclingMethod, structs};
 use ahash::AHashSet;
 use compact_str::ToCompactString;
 use deadpool_postgres::{Config, Manager, ManagerConfig, PoolConfig, RecyclingMethod, Runtime};
+use std::time::Duration;
 use tokio_postgres::NoTls;
 use utils::tls::rustls_client_config;
 
@@ -50,7 +53,13 @@ impl PostgresStore {
         )
         .into();
 
-        let primary_pool = create_pool(&cfg, config.use_tls, config.allow_invalid_certs)?;
+        let response_timeout = config.response_timeout.map(|t| t.into_inner());
+        let primary_pool = create_pool(
+            &cfg,
+            config.use_tls,
+            config.allow_invalid_certs,
+            response_timeout,
+        )?;
         let ts_configs = discover_ts_configs(&primary_pool).await;
         let sql = Arc::new(SqlStatements::new());
 
@@ -69,7 +78,12 @@ impl PostgresStore {
             cfg.port = (replica.port as u16).into();
             cfg.options = replica.options;
             replicas.push(Store::PostgreSQL(Arc::new(PostgresStore {
-                conn_pool: create_pool(&cfg, config.use_tls, config.allow_invalid_certs)?,
+                conn_pool: create_pool(
+                    &cfg,
+                    config.use_tls,
+                    config.allow_invalid_certs,
+                    response_timeout,
+                )?,
                 ts_configs: ts_configs.clone(),
                 sql: sql.clone(),
             })));
@@ -194,20 +208,26 @@ async fn create_search_tables<T: SearchableField + PsqlSearchField + 'static>(
     Ok(())
 }
 
-fn create_pool(cfg: &Config, use_tls: bool, allow_invalid_certs: bool) -> Result<PgPool, String> {
+fn create_pool(
+    cfg: &Config,
+    use_tls: bool,
+    allow_invalid_certs: bool,
+    response_timeout: Option<Duration>,
+) -> Result<PgPool, String> {
     let pg_config = cfg
         .get_pg_config()
         .map_err(|e| format!("Failed to create connection pool: {e}"))?;
-    let manager = if use_tls {
-        Manager::from_config(
-            pg_config,
-            MakeRustlsConnect::new(rustls_client_config(allow_invalid_certs)?),
-            cfg.get_manager_config(),
-        )
-    } else {
-        Manager::from_config(pg_config, NoTls, cfg.get_manager_config())
+    let connect = PgConnect {
+        config: pg_config.clone(),
+        tls: use_tls
+            .then(|| rustls_client_config(allow_invalid_certs).map(MakeRustlsConnect::new))
+            .transpose()?,
+        connect_timeout: cfg.connect_timeout,
+        response_timeout,
+        unresponsive: Default::default(),
     };
-    PgPool::builder(PgManager::new(manager))
+    let manager = Manager::from_config(pg_config, NoTls, cfg.get_manager_config());
+    PgPool::builder(PgManager::new(manager, connect))
         .config(cfg.get_pool_config())
         .runtime(Runtime::Tokio1)
         .build()

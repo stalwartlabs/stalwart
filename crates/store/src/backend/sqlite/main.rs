@@ -12,6 +12,7 @@ use crate::{
 use ::registry::schema::structs;
 use r2d2::Pool;
 use rusqlite::Connection;
+use std::path::Path;
 
 const PAGE_SIZE: u32 = 8192;
 const CACHE_SIZE_KIB: i64 = -32768;
@@ -21,6 +22,7 @@ const BUSY_TIMEOUT_MS: u32 = 30000;
 const STATEMENT_CACHE_CAPACITY: usize = 256;
 const MIN_POOL_CONNECTIONS: u32 = 4;
 const MAX_POOL_CONNECTIONS: u32 = 16;
+const DEFAULT_DATABASE_FILE: &str = "stalwart.db";
 
 impl SqliteStore {
     pub fn open(config: structs::SqliteStore) -> Result<Store, String> {
@@ -34,12 +36,19 @@ impl SqliteStore {
             |max| u32::try_from(max).unwrap_or(u32::MAX).max(1),
         );
 
+        let path = Path::new(&config.path);
+        let manager = if path.is_dir() {
+            SqliteConnectionManager::file(path.join(DEFAULT_DATABASE_FILE))
+        } else {
+            SqliteConnectionManager::file(path)
+        };
+
         Ok(Store::SQLite(Arc::new(SqliteStore {
             conn_pool: Pool::builder()
                 .max_size(pool_max_connections)
                 .max_lifetime(None)
                 .idle_timeout(None)
-                .build(SqliteConnectionManager::file(&config.path).with_init(init_connection))
+                .build(manager.with_init(init_connection))
                 .map_err(|err| format!("Failed to build connection pool: {err}"))?,
             worker_pool: rayon::ThreadPoolBuilder::new()
                 .num_threads(pool_workers)
@@ -132,3 +141,8 @@ fn init_connection(conn: &mut Connection) -> Result<(), rusqlite::Error> {
 #[rustfmt::skip]
 #[path = "../../../../../../stalwart-tests/unit/store/src/backend/sqlite/main/test_support.rs"]
 mod test_support;
+
+#[cfg(all(test, stalwart_tests))]
+#[rustfmt::skip]
+#[path = "../../../../../../stalwart-tests/unit/store/src/backend/sqlite/main/tests.rs"]
+mod tests;

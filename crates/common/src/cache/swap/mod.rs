@@ -8,8 +8,8 @@ use crate::{GroupwareResources, Inner, MessageStoreCache};
 use blob::BlobSwapStore;
 use evict::SwapEviction;
 use file::FileSwapStore;
-#[cfg(feature = "redis")]
-use redis::RedisSwapStore;
+#[cfg(any(feature = "redis", feature = "keep"))]
+use redis::InMemorySwapStore;
 use registry::schema::{prelude::ObjectType, structs};
 use std::{
     sync::{
@@ -18,7 +18,7 @@ use std::{
     },
     time::Duration,
 };
-#[cfg(feature = "redis")]
+#[cfg(any(feature = "redis", feature = "keep"))]
 use store::InMemoryStore;
 use store::{BlobStore, registry::bootstrap::Bootstrap};
 use tokio::sync::{mpsc, oneshot};
@@ -31,7 +31,7 @@ pub mod file;
 pub mod frame;
 pub mod messages;
 pub mod pointer;
-#[cfg(feature = "redis")]
+#[cfg(any(feature = "redis", feature = "keep"))]
 pub mod redis;
 pub mod resources;
 pub mod writer;
@@ -136,8 +136,8 @@ pub enum SwapBackend {
     Disabled,
     File(FileSwapStore),
     Blob(BlobSwapStore),
-    #[cfg(feature = "redis")]
-    Redis(RedisSwapStore),
+    #[cfg(any(feature = "redis", feature = "keep"))]
+    InMemory(InMemorySwapStore),
 }
 
 pub struct SwapTier {
@@ -221,8 +221,8 @@ impl SwapTier {
                     }
                 }
             }
-            #[cfg(feature = "redis")]
-            structs::CacheSwap::Redis(config) => {
+            #[cfg(any(feature = "redis", feature = "keep"))]
+            structs::CacheSwap::InMemory(config) => {
                 let cadence = SwapCadence {
                     flush_changes: config.flush_changes as u32,
                     flush_interval: config.flush_interval.into_inner(),
@@ -233,7 +233,7 @@ impl SwapTier {
                 let retention = config.retention.into_inner().as_secs();
                 match InMemoryStore::build_cache_swap(bp, config.store, &storage.memory).await {
                     Ok(store) => (
-                        SwapBackend::Redis(RedisSwapStore::new(
+                        SwapBackend::InMemory(InMemorySwapStore::new(
                             store,
                             chunk_size,
                             retention,
@@ -467,8 +467,8 @@ impl SwapTier {
             SwapBackend::Disabled => Ok(None),
             SwapBackend::File(store) => store.load(key).await,
             SwapBackend::Blob(store) => store.load(key).await,
-            #[cfg(feature = "redis")]
-            SwapBackend::Redis(store) => Box::pin(store.load(key)).await,
+            #[cfg(any(feature = "redis", feature = "keep"))]
+            SwapBackend::InMemory(store) => Box::pin(store.load(key)).await,
         };
         self.record_read(&snapshot);
         snapshot
@@ -482,8 +482,8 @@ impl SwapTier {
             SwapBackend::Disabled => Ok(()),
             SwapBackend::File(store) => store.store(key, data).await,
             SwapBackend::Blob(store) => store.store(key, data).await,
-            #[cfg(feature = "redis")]
-            SwapBackend::Redis(store) => Box::pin(store.store(key, data)).await,
+            #[cfg(any(feature = "redis", feature = "keep"))]
+            SwapBackend::InMemory(store) => Box::pin(store.store(key, data)).await,
         }
     }
 
@@ -492,8 +492,8 @@ impl SwapTier {
             SwapBackend::Disabled => Ok(()),
             SwapBackend::File(store) => store.remove(key).await,
             SwapBackend::Blob(store) => store.remove(key).await,
-            #[cfg(feature = "redis")]
-            SwapBackend::Redis(store) => Box::pin(store.remove(key)).await,
+            #[cfg(any(feature = "redis", feature = "keep"))]
+            SwapBackend::InMemory(store) => Box::pin(store.remove(key)).await,
         }
     }
 

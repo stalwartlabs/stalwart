@@ -21,7 +21,7 @@ impl InMemoryStore {
                 }
                 Err(concat!(
                     "The local in-memory store cannot be used when a cluster coordinator ",
-                    "is configured, use a Redis in-memory store or disable the coordinator"
+                    "is configured, use a Stalwart Keep or Redis in-memory store or disable the coordinator"
                 )
                 .to_string())
             }
@@ -36,6 +36,12 @@ impl InMemoryStore {
             #[cfg(feature = "redis")]
             structs::InMemoryStore::RedisSentinel(redis_sentinel_store) => {
                 crate::backend::redis::RedisStore::open_sentinel(redis_sentinel_store).await
+            }
+            #[cfg(feature = "keep")]
+            structs::InMemoryStore::Keep(keep_store) => {
+                crate::backend::keep::KeepStore::open(keep_store)
+                    .await
+                    .map(InMemoryStore::from)
             }
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>

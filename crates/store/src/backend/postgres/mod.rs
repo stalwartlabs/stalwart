@@ -21,6 +21,7 @@ use utils::error_chain;
 use self::sql::SqlStatements;
 
 pub mod blob;
+pub(crate) mod connect;
 pub mod lookup;
 pub mod main;
 pub mod pool;
@@ -72,10 +73,16 @@ pub(crate) fn is_timeout_error(err: &tokio_postgres::Error) -> bool {
 }
 
 #[inline(always)]
-fn into_pool_error(err: deadpool_postgres::PoolError) -> trc::Error {
+fn into_pool_error(err: deadpool::managed::PoolError<trc::Error>) -> trc::Error {
     match err {
-        deadpool_postgres::PoolError::Backend(err) => into_error(err),
+        deadpool::managed::PoolError::Backend(err) => err,
         err => trc::StoreEvent::PostgresqlError.reason(error_chain(&err)),
+    }
+}
+
+impl PostgresStore {
+    pub fn is_responsive(&self) -> bool {
+        !self.conn_pool.manager().is_unresponsive()
     }
 }
 

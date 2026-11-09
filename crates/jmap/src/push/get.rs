@@ -121,6 +121,19 @@ impl PushSubscriptionFetch for Server {
                             &push.device_client_id,
                         );
                     }
+                    PushSubscriptionProperty::VerificationCode => {
+                        if push.verified {
+                            result.insert_unchecked(
+                                PushSubscriptionProperty::VerificationCode,
+                                &push.verification_code,
+                            );
+                        } else {
+                            result.insert_unchecked(
+                                PushSubscriptionProperty::VerificationCode,
+                                Value::Null,
+                            );
+                        }
+                    }
                     PushSubscriptionProperty::Types => {
                         let mut types = Vec::new();
                         for typ in Bitmap::from(&push.types).into_iter() {

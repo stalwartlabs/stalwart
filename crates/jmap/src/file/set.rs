@@ -599,6 +599,13 @@ fn place_create(
     {
         return Claim::Rejected(err.into());
     }
+    if let Some(role) = create.node.role() {
+        match writer.validate_role(NodeRef::Pending(create.slot), role, unprocessed) {
+            Ok(Placement::Ready) => {}
+            Ok(Placement::Deferred) => return Claim::Deferred,
+            Err(err) => return Claim::Rejected(err.into()),
+        }
+    }
     writer.claim_name(
         None,
         Some(create.slot),
@@ -623,6 +630,9 @@ fn commit_create(
         metadata,
     } = create;
     writer.register_created(slot, parent, node.is_directory());
+    if let Some(role) = node.role() {
+        writer.register_role(NodeRef::Pending(slot), Some(role));
+    }
     node.stamp_insert(
         omitted.created && node.created == 0,
         omitted.modified && node.modified == 0,
@@ -818,6 +828,15 @@ fn place_update(
         Ok(Placement::Deferred) => return Claim::Deferred,
         Err(err) => return Claim::Rejected(err.into()),
     }
+    if update.effects.role
+        && let Some(role) = update.node.role()
+    {
+        match writer.validate_role(NodeRef::Node(document_id), role, unprocessed) {
+            Ok(Placement::Ready) => {}
+            Ok(Placement::Deferred) => return Claim::Deferred,
+            Err(err) => return Claim::Rejected(err.into()),
+        }
+    }
     if !update.effects.renamed && !update.effects.moved {
         return Claim::Accepted { renamed: false };
     }
@@ -881,6 +900,9 @@ fn commit_update(
         &update.effects,
         node.is_directory(),
     );
+    if update.effects.role {
+        writer.register_role(NodeRef::Node(document_id), node.role());
+    }
 
     let mut values = Map::with_capacity(3);
     if writer.is_readable(document_id) {
@@ -994,6 +1016,7 @@ fn claim_cycle(writer: &mut FileNodeWriter<'_>, deferred: &[Planned], cycle: &[u
         })
         .collect::<Vec<_>>();
     let mut staged = Vec::with_capacity(members.len());
+    let mut roles = Vec::new();
     let mut valid = writer
         .validate_disk_quota(members.iter().map(|update| update.growth).sum())
         .is_ok();
@@ -1010,9 +1033,22 @@ fn claim_cycle(writer: &mut FileNodeWriter<'_>, deferred: &[Planned], cycle: &[u
                 ),
                 Ok(Placement::Ready)
             )
+            || (update.effects.role
+                && update.node.role().is_some_and(|role| {
+                    roles.contains(&role)
+                        || !matches!(
+                            writer.validate_role(NodeRef::Node(document_id), role, None),
+                            Ok(Placement::Ready)
+                        )
+                }))
         {
             valid = false;
             break;
+        }
+        if update.effects.role
+            && let Some(role) = update.node.role()
+        {
+            roles.push(role);
         }
         if update.effects.moved {
             writer.stage_move(document_id, update.parent);

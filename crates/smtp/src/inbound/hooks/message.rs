@@ -101,19 +101,30 @@ impl<T: SessionStream> Session<T> {
                                 }
                             }
                             super::Modification::AddHeader { name, value } => {
-                                Modification::AddHeader { name, value }
+                                Modification::AddHeader {
+                                    name,
+                                    value: value.into_bytes(),
+                                }
                             }
                             super::Modification::InsertHeader { index, name, value } => {
-                                Modification::InsertHeader { index, name, value }
+                                Modification::InsertHeader {
+                                    index,
+                                    name,
+                                    value: value.into_bytes(),
+                                }
                             }
                             super::Modification::ChangeHeader { index, name, value } => {
-                                Modification::ChangeHeader { index, name, value }
+                                Modification::ChangeHeader {
+                                    index,
+                                    name,
+                                    value: value.into_bytes(),
+                                }
                             }
                             super::Modification::DeleteHeader { index, name } => {
                                 Modification::ChangeHeader {
                                     index,
                                     name,
-                                    value: String::new(),
+                                    value: Vec::new(),
                                 }
                             }
                         });
@@ -141,7 +152,7 @@ impl<T: SessionStream> Session<T> {
                         Action::Quarantine => {
                             modifications.push(Modification::AddHeader {
                                 name: "X-Quarantine".into(),
-                                value: "true".into(),
+                                value: b"true".to_vec(),
                             });
                             continue;
                         }

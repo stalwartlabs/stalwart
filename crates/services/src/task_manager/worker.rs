@@ -147,7 +147,12 @@ async fn run_job(
             clear_stale_due(&server, &job, lock, AssertValue::Hash(hash)).await
         }
         Ok(Some(StoredTask { task, hash })) => {
-            let outcome = with_lease(&server, lock, execute(&server, &task, server_instance)).await;
+            let outcome = with_lease(
+                &server,
+                lock,
+                Box::pin(execute(&server, &task, server_instance)),
+            )
+            .await;
             finish(
                 &server,
                 &job,

@@ -33,7 +33,10 @@ use crate::{
     principal::{availability::PrincipalGetAvailability, get::PrincipalGet, query::PrincipalQuery},
     push::{get::PushSubscriptionFetch, set::PushSubscriptionSet},
     quota::{get::QuotaGet, query::QuotaQuery},
-    registry::{get::RegistryGet, query::RegistryQuery, set::RegistrySet},
+    registry::{
+        get::RegistryGet, mapping::passkey::PasskeyRegistrationOptions, query::RegistryQuery,
+        set::RegistrySet,
+    },
     share_notification::{
         get::ShareNotificationGet, query::ShareNotificationQuery, set::ShareNotificationSet,
     },
@@ -767,6 +770,14 @@ impl RequestHandler for Server {
                 access_token.assert_is_member(req.account_id)?;
 
                 self.sieve_script_validate(*req, access_token).await?.into()
+            }
+            RequestMethod::PasskeyRegistrationOptions(mut req) => {
+                resolve_account_id(&mut req.account_id, method_name.obj, access_token)?;
+                access_token.assert_is_member(req.account_id)?;
+
+                self.passkey_registration_options(*req, session.remote_ip)
+                    .await?
+                    .into()
             }
             RequestMethod::LookupBlob(mut req) => {
                 resolve_account_id(&mut req.account_id, method_name.obj, access_token)?;

@@ -55,6 +55,16 @@ pub enum RedisPool {
     Sentinel(Pool<RedisSentinelConnectionManager>),
 }
 
+impl RedisPool {
+    pub fn connect_timeout(&self) -> std::time::Duration {
+        match self {
+            RedisPool::Single(pool) => pool.manager().timeout,
+            RedisPool::Cluster(pool) => pool.manager().timeout,
+            RedisPool::Sentinel(pool) => pool.manager().timeout,
+        }
+    }
+}
+
 impl RedisStore {
     fn new(pool: RedisPool) -> Self {
         RedisStore {

@@ -39,7 +39,7 @@ pub mod state;
 pub mod transaction;
 
 #[derive(Debug, Clone)]
-pub struct ObjectQuota([u32; StorageQuota::COUNT - 1]);
+pub struct ObjectQuota([u32; StorageQuota::COUNT]);
 
 // SPDX-SnippetBegin
 // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>

@@ -86,6 +86,7 @@ pub enum MethodFunction {
     Upload,
     Echo,
     GetAvailability,
+    RegistrationOptions,
 }
 
 impl Display for MethodName {
@@ -373,6 +374,7 @@ impl MethodName {
                 "get" => MethodFunction::Get,
                 "set" => MethodFunction::Set,
                 "query" => MethodFunction::Query,
+                "registrationOptions" => MethodFunction::RegistrationOptions,
             ).copied()?;
 
             let flags = obj.flags();
@@ -383,6 +385,7 @@ impl MethodName {
                     flags & (OBJ_NO_CREATE | OBJ_NO_UPDATE | OBJ_NO_DESTROY)
                         != (OBJ_NO_CREATE | OBJ_NO_UPDATE | OBJ_NO_DESTROY)
                 }
+                MethodFunction::RegistrationOptions => obj == ObjectType::Passkey,
                 _ => true,
             };
 
@@ -443,6 +446,7 @@ impl MethodFunction {
             MethodFunction::Upload => "upload",
             MethodFunction::Echo => "echo",
             MethodFunction::GetAvailability => "getAvailability",
+            MethodFunction::RegistrationOptions => "registrationOptions",
         }
     }
 }

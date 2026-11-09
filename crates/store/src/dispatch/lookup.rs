@@ -52,6 +52,8 @@ impl InMemoryStore {
             InMemoryStore::Local(store) => store.key_set(kv.key, kv.value, kv.expires, now()),
             #[cfg(feature = "redis")]
             InMemoryStore::Redis(store) => store.key_set(&kv.key, &kv.value, kv.expires).await,
+            #[cfg(feature = "keep")]
+            InMemoryStore::Keep(store) => store.key_set(&kv.key, &kv.value, kv.expires).await,
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -77,6 +79,8 @@ impl InMemoryStore {
             InMemoryStore::Local(store) => store.key_incr(kv.key, kv.value, kv.expires, now),
             #[cfg(feature = "redis")]
             InMemoryStore::Redis(store) => store.key_incr(&kv.key, kv.value, kv.expires).await,
+            #[cfg(feature = "keep")]
+            InMemoryStore::Keep(store) => store.key_incr(&kv.key, kv.value, kv.expires).await,
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -98,6 +102,8 @@ impl InMemoryStore {
             InMemoryStore::Local(store) => Ok(store.key_delete(key.into().as_bytes(), now())),
             #[cfg(feature = "redis")]
             InMemoryStore::Redis(store) => store.key_delete(key.into().as_bytes()).await,
+            #[cfg(feature = "keep")]
+            InMemoryStore::Keep(store) => store.key_delete(key.into().as_bytes()).await,
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -124,6 +130,8 @@ impl InMemoryStore {
             InMemoryStore::Redis(store) => {
                 store.key_delete(key.into().as_bytes()).await.map(|_| ())
             }
+            #[cfg(feature = "keep")]
+            InMemoryStore::Keep(store) => store.key_delete(key.into().as_bytes()).await.map(|_| ()),
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -148,6 +156,8 @@ impl InMemoryStore {
             }
             #[cfg(feature = "redis")]
             InMemoryStore::Redis(store) => store.key_delete_prefix(prefix).await,
+            #[cfg(feature = "keep")]
+            InMemoryStore::Keep(store) => store.key_delete_prefix(prefix).await,
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -172,6 +182,8 @@ impl InMemoryStore {
             InMemoryStore::Local(store) => store.key_get(key.into().as_bytes(), now()),
             #[cfg(feature = "redis")]
             InMemoryStore::Redis(store) => store.key_get(key.into().as_bytes()).await,
+            #[cfg(feature = "keep")]
+            InMemoryStore::Keep(store) => store.key_get(key.into().as_bytes()).await,
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -206,6 +218,8 @@ impl InMemoryStore {
             InMemoryStore::Local(store) => Ok(store.key_exists(key.into().as_bytes(), now())),
             #[cfg(feature = "redis")]
             InMemoryStore::Redis(store) => store.key_exists(key.into().as_bytes()).await,
+            #[cfg(feature = "keep")]
+            InMemoryStore::Keep(store) => store.key_exists(key.into().as_bytes()).await,
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -265,6 +279,12 @@ impl InMemoryStore {
                     .try_lock(&KeyValue::<()>::build_key(prefix, key), duration)
                     .await
             }
+            #[cfg(feature = "keep")]
+            InMemoryStore::Keep(store) => {
+                store
+                    .try_lock(&KeyValue::<()>::build_key(prefix, key), duration)
+                    .await
+            }
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -291,6 +311,12 @@ impl InMemoryStore {
             }
             #[cfg(feature = "redis")]
             InMemoryStore::Redis(store) => {
+                store
+                    .renew_lock(&KeyValue::<()>::build_key(prefix, key), duration)
+                    .await
+            }
+            #[cfg(feature = "keep")]
+            InMemoryStore::Keep(store) => {
                 store
                     .renew_lock(&KeyValue::<()>::build_key(prefix, key), duration)
                     .await
@@ -326,6 +352,8 @@ impl InMemoryStore {
             InMemoryStore::Local(store) => store.try_lease(key, token, duration, now()),
             #[cfg(feature = "redis")]
             InMemoryStore::Redis(store) => store.try_lease(&key, token, duration).await,
+            #[cfg(feature = "keep")]
+            InMemoryStore::Keep(store) => store.try_lease(&key, token, duration).await,
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -353,6 +381,8 @@ impl InMemoryStore {
             InMemoryStore::Local(store) => Ok(store.renew_lease(&key, token, duration, now())),
             #[cfg(feature = "redis")]
             InMemoryStore::Redis(store) => store.renew_lease(&key, token, duration).await,
+            #[cfg(feature = "keep")]
+            InMemoryStore::Keep(store) => store.renew_lease(&key, token, duration).await,
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -374,6 +404,8 @@ impl InMemoryStore {
             InMemoryStore::Local(store) => Ok(store.release_lease(key, token)),
             #[cfg(feature = "redis")]
             InMemoryStore::Redis(store) => store.release_lease(&key, token).await,
+            #[cfg(feature = "keep")]
+            InMemoryStore::Keep(store) => store.release_lease(&key, token).await,
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -387,9 +419,17 @@ impl InMemoryStore {
     }
 
     pub async fn remove_lock(&self, prefix: u8, key: &[u8]) -> trc::Result<()> {
-        self.key_delete(KeyValue::<()>::build_key(prefix, key))
-            .await
-            .map(|_| ())
+        let key = KeyValue::<()>::build_key(prefix, key);
+
+        #[cfg(feature = "keep")]
+        if let InMemoryStore::Keep(store) = self {
+            #[cfg(stalwart_tests)]
+            crate::dispatch::StoreOps::count_in_memory(self).await;
+
+            return store.remove_lock(&key).await.caused_by(trc::location!());
+        }
+
+        self.key_delete(key).await.map(|_| ())
     }
 
     pub fn is_sql(&self) -> bool {
@@ -411,25 +451,13 @@ impl InMemoryStore {
         match self {
             #[cfg(feature = "redis")]
             InMemoryStore::Redis(_) => true,
+            #[cfg(feature = "keep")]
+            InMemoryStore::Keep(_) => true,
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
             #[cfg(feature = "enterprise")]
             InMemoryStore::Sharded(_) => true,
-            // SPDX-SnippetEnd
-            _ => false,
-        }
-    }
-
-    pub fn supports_chunked_keys(&self) -> bool {
-        match self {
-            #[cfg(feature = "redis")]
-            InMemoryStore::Redis(_) => true,
-            // SPDX-SnippetBegin
-            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-            // SPDX-License-Identifier: LicenseRef-SEL
-            #[cfg(feature = "enterprise")]
-            InMemoryStore::Sharded(store) => store.stores.iter().all(|store| store.is_redis()),
             // SPDX-SnippetEnd
             _ => false,
         }

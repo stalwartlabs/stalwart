@@ -159,6 +159,7 @@ impl Server {
                                 })
                             }
                         }
+                        structs::Credential::Passkey(_) => {}
                     }
                 }
 

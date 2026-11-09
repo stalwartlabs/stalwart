@@ -23,6 +23,9 @@ use registry::{
 use std::sync::Arc;
 use store::{LookupStores, registry::bootstrap::Bootstrap, write::now};
 
+#[cfg(feature = "enterprise")]
+use store::Store;
+
 pub struct ReloadResult {
     pub errors: Vec<Error>,
     pub warnings: Vec<Warning>,
@@ -101,19 +104,39 @@ impl Server {
             _ => {
                 // Load stores
                 let directory = Directories::build(&mut bootstrap).await;
+                // SPDX-SnippetBegin
+                // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+                // SPDX-License-Identifier: LicenseRef-SEL
+                #[cfg(feature = "enterprise")]
+                let (metrics, tracing) = if self.core.is_enterprise_edition() {
+                    (
+                        self.core.storage.metrics.clone(),
+                        self.core.storage.tracing.clone(),
+                    )
+                } else {
+                    (
+                        Store::build_metrics(&mut bootstrap)
+                            .await
+                            .unwrap_or_default(),
+                        Store::build_tracing(&mut bootstrap)
+                            .await
+                            .unwrap_or_default(),
+                    )
+                };
+                // SPDX-SnippetEnd
                 let storage = &self.core.storage;
                 let storage = Storage {
                     registry: storage.registry.clone(),
-                    data: storage.data.clone(),
+                    data: bootstrap.data_store.clone(),
                     blob: storage.blob.clone(),
                     search: storage.search.clone(),
                     // SPDX-SnippetBegin
                     // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
                     // SPDX-License-Identifier: LicenseRef-SEL
                     #[cfg(feature = "enterprise")]
-                    metrics: storage.metrics.clone(),
+                    metrics,
                     #[cfg(feature = "enterprise")]
-                    tracing: storage.tracing.clone(),
+                    tracing,
                     // SPDX-SnippetEnd
                     memory: storage.memory.clone(),
                     coordinator: storage.coordinator.clone(),

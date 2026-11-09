@@ -12,6 +12,8 @@ pub mod ephemeral;
 pub mod foundationdb;
 pub mod fs;
 pub mod http;
+#[cfg(feature = "keep")]
+pub mod keep;
 #[cfg(all(test, stalwart_tests))]
 #[rustfmt::skip]
 #[path = "../../../../../stalwart-tests/unit/store/src/backend/iterate_tests.rs"]

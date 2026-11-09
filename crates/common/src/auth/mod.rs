@@ -38,6 +38,7 @@ pub mod active_script;
 pub mod authentication;
 pub mod credential;
 pub mod oauth;
+pub mod passkey;
 pub mod permissions;
 pub mod rate_limit;
 pub mod sasl;

@@ -382,7 +382,19 @@ async fn dkim_management(
     // Publish signatures
     if let Some((updater, origin)) = &dns_updater {
         for signature in publish_signatures {
-            let record = generate_dkim_dns_record(&signature.object, &domain.name).await?;
+            let record = match generate_dkim_dns_record(&signature.object, &domain.name).await {
+                Ok(record) => record,
+                Err(err) => {
+                    append_error(
+                        &mut temporary_errors,
+                        format_args!(
+                            "Failed to build DKIM record for selector {}: {err}.",
+                            signature.object.selector()
+                        ),
+                    );
+                    continue;
+                }
+            };
             let dns_update::DnsRecord::TXT(txt_value) = &record.record else {
                 return Ok(Outcome::fatal("DKIM record must be a TXT record"));
             };

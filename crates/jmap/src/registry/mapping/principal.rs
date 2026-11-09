@@ -185,6 +185,20 @@ pub async fn validate_account(
                                     )));
                                 }
                             }
+                            (
+                                Credential::Passkey(credential),
+                                Credential::Passkey(old_credential),
+                            ) => {
+                                if credential.key_id != old_credential.key_id
+                                    || credential.public_key != old_credential.public_key
+                                    || credential.algorithm != old_credential.algorithm
+                                    || credential.created_at != old_credential.created_at
+                                {
+                                    return Ok(Err(SetError::forbidden().with_description(
+                                        "Only the name of a passkey can be changed.",
+                                    )));
+                                }
+                            }
                             _ => {
                                 return Ok(Err(SetError::invalid_properties()
                                     .with_property(Property::Credentials)
@@ -331,6 +345,9 @@ async fn validate_credential_creation(
                     "Secondary credentials cannot be set directly.",
                 )))
         }
+        Credential::Passkey(_) => Ok(Err(SetError::invalid_properties()
+            .with_property(Property::Credentials)
+            .with_description("Passkeys can only be registered by the account owner."))),
     }
 }
 

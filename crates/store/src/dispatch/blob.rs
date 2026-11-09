@@ -116,6 +116,7 @@ impl BlobStore {
         }
     }
 
+    #[cfg_attr(not(feature = "enterprise"), allow(unused_variables))]
     fn shard_for(&self, key: &[u8]) -> &BlobStore {
         match self {
             // SPDX-SnippetBegin

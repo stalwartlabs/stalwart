@@ -10,6 +10,7 @@ use common::{
     ipc::{BroadcastEvent, PushEvent, PushNotification, QueueEvent, QueueRefresh, RegistryChange},
 };
 use compact_str::format_compact;
+use coordinator::MsgKind;
 use registry::types::EnumImpl;
 use std::{
     sync::Arc,
@@ -80,7 +81,11 @@ pub fn spawn_broadcast_subscriber(inner: Arc<Inner>, mut shutdown_rx: watch::Rec
                             message = stream.next() => match message {
                                 Some(message) => {
                                     has_received = true;
-                                    receiver.receive(message.payload()).await;
+                                    match message.kind() {
+                                        MsgKind::Payload => receiver.receive(message.payload()).await,
+                                        MsgKind::CatchUp => receiver.catch_up().await,
+                                        MsgKind::Ignore => {}
+                                    }
                                 }
                                 None => {
                                     trc::event!(Cluster(ClusterEvent::SubscriberDisconnected));

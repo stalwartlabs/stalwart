@@ -706,7 +706,8 @@ impl ParseHttp for Server {
                     }
                     "ready" => {
                         return Ok(JsonProblemResponse({
-                            if !self.core.storage.data.is_none() {
+                            let data = &self.core.storage.data;
+                            if data.is_active() && data.is_responsive() {
                                 StatusCode::OK
                             } else {
                                 StatusCode::SERVICE_UNAVAILABLE

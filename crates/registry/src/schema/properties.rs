@@ -126,6 +126,7 @@ pub enum ObjectInner {
     OAuthClient(Box<OAuthClient>),
     OAuthGrant(Box<OAuthGrant>),
     OidcProvider(Box<OidcProvider>),
+    Passkey(Box<Passkey>),
     PublicKey(Box<PublicKey>),
     QueuedMessage(Box<QueuedMessage>),
     ReportSettings(Box<ReportSettings>),
@@ -306,6 +307,7 @@ pub enum ObjectType {
     OAuthClient = 80,
     OAuthGrant = 81,
     OidcProvider = 82,
+    Passkey = 124,
     PublicKey = 83,
     QueuedMessage = 84,
     ReportSettings = 85,
@@ -422,6 +424,7 @@ pub enum Property {
     // SPDX-SnippetEnd
     AlarmId = 938,
     AlertAfter = 957,
+    Algorithm = 1064,
     Algorithms = 265,
     Aliases = 411,
     AllowCount = 903,
@@ -469,7 +472,9 @@ pub enum Property {
     AsnUrls = 116,
     AtRestEnable = 1017,
     AttemptNumber = 971,
+    AttemptTimeout = 1072,
     Attempts = 348,
+    AttestationObject = 1066,
     AttrClass = 559,
     AttrDescription = 560,
     AttrEmail = 561,
@@ -528,6 +533,7 @@ pub enum Property {
     // SPDX-SnippetEnd
     BufferSize = 764,
     Buffered = 1004,
+    CaPath = 1073,
     CaaIdentities = 19,
     CacheSize = 766,
     Canonicalization = 254,
@@ -539,6 +545,7 @@ pub enum Property {
     #[cfg(feature = "enterprise")]
     Categories = 843,
     // SPDX-SnippetEnd
+    CertPath = 1074,
     Certificate = 214,
     CertificateManagement = 413,
     ChallengeType = 10,
@@ -550,6 +557,7 @@ pub enum Property {
     ClaimUsername = 706,
     Cleartext = 807,
     ClientCapacity = 677,
+    ClientDataJson = 1065,
     ClientHash = 1012,
     ClientId = 132,
     ClientIp = 391,
@@ -559,6 +567,7 @@ pub enum Property {
     ClientName = 700,
     ClientSecret = 133,
     ClientToken = 377,
+    ClusterDiscovery = 1068,
     ClusterFile = 458,
     ColumnClass = 921,
     ColumnDescription = 922,
@@ -574,6 +583,7 @@ pub enum Property {
     ConfigName = 367,
     ConnectTimeout = 602,
     Connection = 634,
+    Connections = 1069,
     ConsumerKey = 401,
     Contact = 11,
     ContactInfo = 986,
@@ -606,12 +616,7 @@ pub enum Property {
     DateRangeEnd = 286,
     DateRangeStart = 285,
     Day = 230,
-    // SPDX-SnippetBegin
-    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-    // SPDX-License-Identifier: LicenseRef-SEL
-    #[cfg(feature = "enterprise")]
     Deadline = 860,
-    // SPDX-SnippetEnd
     DefaultAdminRoleIds = 123,
     DefaultCertificateId = 929,
     DefaultDisplayName = 24,
@@ -1008,6 +1013,7 @@ pub enum Property {
     Key = 375,
     KeyId = 1061,
     KeyName = 406,
+    KeyPath = 1075,
     KeyPrefix = 141,
     KeyRefreshInterval = 1028,
     KeyType = 1038,
@@ -1180,6 +1186,7 @@ pub enum Property {
     MaxOutputTokens = 32,
     // SPDX-SnippetEnd
     MaxParticipantIdentities = 196,
+    MaxPasskeys = 1062,
     MaxPasswordLength = 126,
     MaxPolls = 578,
     MaxPrivateSize = 586,
@@ -1443,6 +1450,7 @@ pub enum Property {
     RefreshInterval = 114,
     RefreshTokenExpiry = 720,
     Region = 356,
+    Registration = 1063,
     RejectNonFqdn = 658,
     RemoteIp = 324,
     RenewBefore = 20,
@@ -1465,6 +1473,7 @@ pub enum Property {
     ResponseHeaders = 478,
     ResponseHostname = 249,
     ResponseMessage = 252,
+    ResponseTimeout = 1067,
     Result = 273,
     ResultType = 974,
     Retention = 143,
@@ -1515,6 +1524,8 @@ pub enum Property {
     SentinelUsername = 754,
     Separator = 111,
     ServerId = 403,
+    ServerKeysPath = 1077,
+    ServerName = 1076,
     Servers = 352,
     ServiceAccountJson = 380,
     ServiceName = 753,
@@ -1522,6 +1533,7 @@ pub enum Property {
     Services = 933,
     SessionTimeout = 550,
     SessionToken = 357,
+    ShardConnections = 1070,
     ShardIndex = 973,
     SharedSecret = 388,
     // SPDX-SnippetBegin
@@ -1581,6 +1593,7 @@ pub enum Property {
     Stores = 808,
     // SPDX-SnippetEnd
     Strategy = 956,
+    StreamMode = 1071,
     StrictKeyWrapEncoding = 1054,
     SubAddressing = 418,
     SubAuthId = 371,

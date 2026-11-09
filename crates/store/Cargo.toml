@@ -1,6 +1,6 @@
 [package]
 name = "store"
-version = "1.0.3"
+version = "1.1.0"
 edition = "2024"
 
 [dependencies]
@@ -48,6 +48,8 @@ serde_json = { version = "1.0.154" }
 flate2 = "1.1"
 redis = { version = "1.8", features = [ "tokio-comp", "tokio-rustls-comp", "tls-rustls-insecure", "tls-rustls", "cluster-async", "sentinel"], optional = true }
 deadpool = { version = "0.13", features = ["managed"], optional = true }
+keep-client = { version = "1.0.0", optional = true }
+keep-proto = { version = "1.0.0", optional = true }
 arc-swap = "1.9.3"
 bitpacking = "0.9.3"
 rkyv.workspace = true
@@ -77,6 +79,7 @@ azure = ["azure_core", "azure_storage_blob", "azure_identity", "futures"]
 
 # In-memory stores
 redis = ["dep:redis", "deadpool", "deadpool/rt_tokio_1", "futures"]
+keep = ["dep:keep-client", "dep:keep-proto"]
 
 enterprise = ["utils/enterprise", "trc/enterprise", "registry/enterprise"]
 

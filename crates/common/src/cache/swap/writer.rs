@@ -488,6 +488,15 @@ impl SwapWriter {
                     Elapsed = start_time.elapsed(),
                 );
             }
+            Err(err) if err.matches(trc::EventType::Cache(trc::CacheEvent::SwapSkip)) => {
+                trc::event!(
+                    Cache(trc::CacheEvent::SwapSkip),
+                    AccountId = target.account_id,
+                    Collection = target.collection.as_str(),
+                    Size = bytes,
+                    CausedBy = err,
+                );
+            }
             Err(err) => {
                 trc::error!(
                     err.details("Failed to write the cache snapshot")

@@ -13,6 +13,7 @@ use crate::request::{
     QueryRequestMethod, SetRequestMethod, deserialize::DeserializeArguments,
 };
 use compact_str::{CompactString, ToCompactString};
+use registry::schema::prelude::ObjectType;
 use serde::{
     Deserialize, Deserializer,
     de::{self, DeserializeSeed, IgnoredAny, MapAccess, SeqAccess, Visitor},
@@ -366,6 +367,9 @@ impl<'de> DeserializeSeed<'de> for MethodArguments {
             ),
             (MethodFunction::Validate, MethodObject::SieveScript) => {
                 RequestMethod::ValidateScript(Deserialize::deserialize(deserializer)?)
+            }
+            (MethodFunction::RegistrationOptions, MethodObject::Registry(ObjectType::Passkey)) => {
+                RequestMethod::PasskeyRegistrationOptions(Deserialize::deserialize(deserializer)?)
             }
             (MethodFunction::Echo, MethodObject::Core) => {
                 RequestMethod::Echo(Deserialize::deserialize(deserializer)?)

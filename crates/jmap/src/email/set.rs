@@ -43,7 +43,7 @@ use http_proto::HttpSessionData;
 use jmap_proto::{
     error::set::{InvalidProperty, SetError, SetErrorType},
     method::set::{SetRequest, SetResponse},
-    object::email::{Email, EmailProperty, EmailValue},
+    object::email::{Email, EmailProperty, EmailValue, HeaderProperty},
     references::resolve::ResolveCreatedReference,
     request::{MaybeInvalid, capability::CapabilityIds},
     types::state::State,
@@ -57,7 +57,7 @@ use mail_builder::{
     },
     mime::{BodyPart, MimePart},
 };
-use mail_parser::MessageParser;
+use mail_parser::{HeaderForm as MimeHeaderForm, MessageParser};
 use std::{borrow::Cow, collections::HashMap, future::Future, iter};
 use store::{
     ahash::AHashMap,
@@ -416,6 +416,9 @@ impl EmailSet for Server {
                                 let mut subparts = None;
                                 let mut has_size = false;
                                 let mut has_cid = false;
+                                let mut has_location = false;
+                                let mut has_language = false;
+                                let mut content_fields = ContentFields::default();
                                 let mut headers: Vec<(Cow<str>, HeaderType)> = Vec::new();
 
                                 if let Some(obj) = value.into_object() {
@@ -453,6 +456,7 @@ impl EmailSet for Server {
                                                 charset = value.into_owned().into();
                                             }
                                             (EmailProperty::Language, Value::Array(values)) => {
+                                                has_language = true;
                                                 headers.push((
                                                     "Content-Language".into(),
                                                     Text::new(
@@ -481,35 +485,44 @@ impl EmailSet for Server {
                                                 ));
                                             }
                                             (EmailProperty::Location, Value::Str(value)) => {
+                                                has_location = true;
                                                 headers.push((
                                                     "Content-Location".into(),
                                                     Text::new(value).into(),
                                                 ));
                                             }
-                                            (EmailProperty::Header(header), Value::Str(value))
-                                                if !header.header.eq_ignore_ascii_case(
-                                                    "content-transfer-encoding",
-                                                ) =>
-                                            {
-                                                headers.push((
-                                                    header.header.into(),
-                                                    Raw::from(value).into(),
-                                                ));
-                                            }
                                             (
                                                 EmailProperty::Header(header),
-                                                Value::Array(values),
-                                            ) if !header.header.eq_ignore_ascii_case(
-                                                "content-transfer-encoding",
-                                            ) =>
-                                            {
-                                                for value in values {
-                                                    if let Some(value) = value.into_string() {
-                                                        headers.push((
-                                                            header.header.clone().into(),
-                                                            Raw::from(value).into(),
-                                                        ));
-                                                    }
+                                                value @ (Value::Str(_) | Value::Array(_)),
+                                            ) => {
+                                                let result =
+                                                    match value {
+                                                        Value::Str(value) => content_fields
+                                                            .push_raw(&mut headers, &header, value),
+                                                        values => values
+                                                            .into_array()
+                                                            .unwrap_or_default()
+                                                            .into_iter()
+                                                            .filter_map(|value| value.into_string())
+                                                            .try_for_each(|value| {
+                                                                content_fields.push_raw(
+                                                                    &mut headers,
+                                                                    &header,
+                                                                    value,
+                                                                )
+                                                            }),
+                                                    };
+                                                if let Err(description) = result {
+                                                    response.not_created.append(
+                                                        id,
+                                                        SetError::invalid_properties()
+                                                            .with_property((
+                                                                property,
+                                                                EmailProperty::Header(header),
+                                                            ))
+                                                            .with_description(description),
+                                                    );
+                                                    continue 'create;
                                                 }
                                             }
                                             (EmailProperty::Headers, _) => {
@@ -546,9 +559,57 @@ impl EmailSet for Server {
                                     }
                                 }
 
+                                // Validate raw Content-* header fields
+                                content_fields.set_typed(
+                                    ContentField::Type,
+                                    content_type.is_some()
+                                        || charset.is_some()
+                                        || (name.is_some() && content_disposition.is_none()),
+                                );
+                                content_fields.set_typed(
+                                    ContentField::Disposition,
+                                    content_disposition.is_some(),
+                                );
+                                content_fields.set_typed(ContentField::Id, has_cid);
+                                content_fields.set_typed(ContentField::Location, has_location);
+                                content_fields.set_typed(ContentField::Language, has_language);
+                                if let Some(header) = content_fields.conflict() {
+                                    response.not_created.append(
+                                        id,
+                                        SetError::invalid_properties()
+                                            .with_property((property, header.clone()))
+                                            .with_description(
+                                                "Header field is also set through a body part property.",
+                                            ),
+                                    );
+                                    continue 'create;
+                                }
+                                let has_raw_type = content_fields.has_raw(ContentField::Type);
+                                if has_raw_type
+                                    && (part_id.is_some()
+                                        || content_fields
+                                            .media_type
+                                            .as_deref()
+                                            .is_some_and(|value| value.starts_with("multipart/")))
+                                    && let Some(header) =
+                                        content_fields.property(ContentField::Type)
+                                {
+                                    response.not_created.append(
+                                        id,
+                                        SetError::invalid_properties()
+                                            .with_property((property, header.clone()))
+                                            .with_description(
+                                                "Content-Type can only be set through \"type\" on multipart or \"partId\" body parts.",
+                                            ),
+                                    );
+                                    continue 'create;
+                                }
+                                let has_cid = has_cid || content_fields.has_raw(ContentField::Id);
+
                                 // Validate content-type
-                                let content_type =
-                                    content_type.unwrap_or_else(|| "text/plain".to_string());
+                                let content_type = content_type
+                                    .or_else(|| content_fields.media_type.take())
+                                    .unwrap_or_else(|| "text/plain".to_string());
                                 let is_multipart = content_type.starts_with("multipart/");
                                 if is_multipart {
                                     if !matches!(property, EmailProperty::BodyStructure) {
@@ -626,6 +687,7 @@ impl EmailSet for Server {
                                     && matches!(property, EmailProperty::Attachments)
                                     && content_disposition
                                         .as_deref()
+                                        .or(content_fields.disposition.as_deref())
                                         .is_none_or(|d| !d.eq_ignore_ascii_case("attachment"))
                                     && content_type.split_once('/').is_some_and(|(top, _)| {
                                         hashify::set_ignore_case!(
@@ -687,7 +749,9 @@ impl EmailSet for Server {
                                         (None, None) => (),
                                     };
                                 }
-                                headers.push(("Content-Type".into(), content_type.into()));
+                                if !has_raw_type {
+                                    headers.push(("Content-Type".into(), content_type.into()));
+                                }
 
                                 // In test, sort headers to avoid randomness
                                 #[cfg(stalwart_tests)]
@@ -1758,4 +1822,122 @@ fn is_jmap_id(value: &str) -> bool {
         && value
             .bytes()
             .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, b'-' | b'_'))
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+enum ContentField {
+    Type = 1,
+    Disposition = 1 << 1,
+    Id = 1 << 2,
+    Location = 1 << 3,
+    Language = 1 << 4,
+    TransferEncoding = 1 << 5,
+}
+
+impl ContentField {
+    fn parse(name: &str) -> Option<Self> {
+        hashify::map_ignore_case!(
+            name.as_bytes(),
+            ContentField,
+            "Content-Type" => ContentField::Type,
+            "Content-Disposition" => ContentField::Disposition,
+            "Content-ID" => ContentField::Id,
+            "Content-Location" => ContentField::Location,
+            "Content-Language" => ContentField::Language,
+            "Content-Transfer-Encoding" => ContentField::TransferEncoding,
+        )
+        .copied()
+    }
+}
+
+#[derive(Default)]
+struct ContentFields {
+    raw: u8,
+    typed: u8,
+    properties: Vec<(ContentField, EmailProperty)>,
+    media_type: Option<String>,
+    disposition: Option<String>,
+}
+
+impl ContentFields {
+    fn push_raw<'x>(
+        &mut self,
+        headers: &mut Vec<(Cow<'x, str>, HeaderType<'x>)>,
+        header: &HeaderProperty,
+        value: Cow<'x, str>,
+    ) -> Result<(), &'static str> {
+        if let Some(field) = ContentField::parse(&header.header) {
+            self.add_raw(field, header, &value)?;
+        }
+        headers.push((header.header.clone().into(), Raw::from(value).into()));
+        Ok(())
+    }
+
+    fn add_raw(
+        &mut self,
+        field: ContentField,
+        header: &HeaderProperty,
+        value: &str,
+    ) -> Result<(), &'static str> {
+        if self.has_raw(field) {
+            return Err("Header field can only be set once per body part.");
+        }
+        match field {
+            ContentField::TransferEncoding => return Err("Cannot set property."),
+            ContentField::Type => {
+                let parsed = MimeHeaderForm::ContentType.parse(value.as_bytes());
+                let parsed = parsed.value();
+                let (ctype, subtype) = parsed
+                    .as_content_type()
+                    .and_then(|value| Some((value.ctype(), value.subtype()?)))
+                    .ok_or("Invalid Content-Type header field.")?;
+                let mut media_type = String::with_capacity(ctype.len() + subtype.len() + 1);
+                media_type.push_str(ctype);
+                media_type.push('/');
+                media_type.push_str(subtype);
+                media_type.make_ascii_lowercase();
+                self.media_type = Some(media_type);
+            }
+            ContentField::Disposition => {
+                let parsed = MimeHeaderForm::ContentType.parse(value.as_bytes());
+                let disposition = parsed
+                    .value()
+                    .as_content_type()
+                    .map(|value| value.ctype().to_ascii_lowercase())
+                    .ok_or("Invalid Content-Disposition header field.")?;
+                self.disposition = Some(disposition);
+            }
+            ContentField::Id | ContentField::Location | ContentField::Language => {}
+        }
+        self.raw |= field as u8;
+        self.properties
+            .push((field, EmailProperty::Header(header.clone())));
+        Ok(())
+    }
+
+    fn set_typed(&mut self, field: ContentField, is_set: bool) {
+        if is_set {
+            self.typed |= field as u8;
+        }
+    }
+
+    fn has_raw(&self, field: ContentField) -> bool {
+        self.raw & field as u8 != 0
+    }
+
+    fn conflict(&self) -> Option<&EmailProperty> {
+        let conflicts = self.raw & self.typed;
+        self.properties
+            .iter()
+            .find(|(field, _)| conflicts & *field as u8 != 0)
+            .map(|(_, property)| property)
+    }
+
+    fn property(&self, field: ContentField) -> Option<&EmailProperty> {
+        self.properties
+            .iter()
+            .find(|(current, _)| *current == field)
+            .map(|(_, property)| property)
+    }
 }

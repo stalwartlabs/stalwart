@@ -18,6 +18,12 @@ use hyper::body::Bytes;
 use registry::schema::enums::Permission;
 use std::future::Future;
 use store::ValueKey;
+// SPDX-SnippetBegin
+// SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+// SPDX-License-Identifier: LicenseRef-SEL
+#[cfg(feature = "enterprise")]
+use smtp::queue::{Message, spool::SmtpSpool};
+// SPDX-SnippetEnd
 use trc::AddContext;
 use types::acl::Acl;
 use types::blob::{BlobClass, BlobId};
@@ -307,6 +313,10 @@ impl BlobDownload for Server {
             }
             BlobClass::Reserved { account_id, .. } => access_token.is_member(*account_id),
             BlobClass::Embedded { .. } => false,
+            BlobClass::Queued { queue_id } => {
+                access_token.has_permission(Permission::SysQueuedMessageGet)
+                    && is_queued_blob_visible(self, access_token, *queue_id).await?
+            }
         };
 
         Ok(if allowed {
@@ -317,6 +327,41 @@ impl BlobDownload for Server {
             BlobAccess::Denied
         })
     }
+}
+
+// SPDX-SnippetBegin
+// SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+// SPDX-License-Identifier: LicenseRef-SEL
+#[cfg(feature = "enterprise")]
+async fn is_queued_blob_visible(
+    server: &Server,
+    access_token: &AccessToken,
+    queue_id: u64,
+) -> trc::Result<bool> {
+    let Some(tenant_id) = access_token.tenant_id() else {
+        return Ok(true);
+    };
+    match server
+        .read_message_archive(queue_id)
+        .await
+        .caused_by(trc::location!())?
+    {
+        Some(archive) => Ok(archive
+            .unarchive::<Message>()
+            .caused_by(trc::location!())?
+            .has_tenant(tenant_id)),
+        None => Ok(false),
+    }
+}
+// SPDX-SnippetEnd
+
+#[cfg(not(feature = "enterprise"))]
+async fn is_queued_blob_visible(
+    _server: &Server,
+    _access_token: &AccessToken,
+    _queue_id: u64,
+) -> trc::Result<bool> {
+    Ok(true)
 }
 
 pub(crate) fn is_shared_item_readable(

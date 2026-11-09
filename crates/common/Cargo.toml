@@ -1,6 +1,6 @@
 [package]
 name = "common"
-version = "1.0.3"
+version = "1.1.0"
 edition = "2024"
 build = "build.rs"
 
@@ -100,6 +100,7 @@ dev_mode = []
 enterprise = ["store/enterprise", "utils/enterprise", "trc/enterprise", "telemetry/enterprise", "directory/enterprise", "coordinator/enterprise", "registry/enterprise", "jmap_proto/enterprise"]
 foundation = []
 redis = ["store/redis"]
+keep = ["store/keep"]
 
 [dev-dependencies]
 tokio = { version = "1.54", features = ["full"] }

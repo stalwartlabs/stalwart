@@ -177,6 +177,7 @@ impl FileNodeCopy for Server {
                 .caused_by(trc::location!())?;
             node.acls.clear();
             node.unsubscribed.clear();
+            node.set_role(None);
             node.parent_id = 0;
 
             match create_node(

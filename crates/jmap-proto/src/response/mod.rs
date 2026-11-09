@@ -22,6 +22,7 @@ use crate::{
         import::ImportEmailResponse,
         lookup::BlobLookupResponse,
         parse::ParseResponse,
+        passkey::PasskeyRegistrationOptionsResponse,
         query::QueryResponse,
         query_changes::QueryChangesResponse,
         search_snippet::GetSearchSnippetResponse,
@@ -72,6 +73,7 @@ pub enum ResponseMethod<'x> {
     Query(QueryResponse),
     SearchSnippet(GetSearchSnippetResponse),
     ValidateScript(ValidateSieveScriptResponse),
+    PasskeyRegistrationOptions(Box<PasskeyRegistrationOptionsResponse>),
     LookupBlob(BlobLookupResponse),
     UploadBlob(BlobUploadResponse),
     Echo(Value<'x, Null, Null>),
@@ -473,6 +475,12 @@ impl<'x> From<GetSearchSnippetResponse> for ResponseMethod<'x> {
 impl<'x> From<ValidateSieveScriptResponse> for ResponseMethod<'x> {
     fn from(value: ValidateSieveScriptResponse) -> Self {
         ResponseMethod::ValidateScript(value)
+    }
+}
+
+impl<'x> From<PasskeyRegistrationOptionsResponse> for ResponseMethod<'x> {
+    fn from(value: PasskeyRegistrationOptionsResponse) -> Self {
+        ResponseMethod::PasskeyRegistrationOptions(Box::new(value))
     }
 }
 

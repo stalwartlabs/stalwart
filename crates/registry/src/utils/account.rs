@@ -7,7 +7,8 @@
 use types::id::Id;
 
 use crate::schema::prelude::{
-    Account, Credential, GroupAccount, PasswordCredential, SecondaryCredential, UserAccount,
+    Account, Credential, GroupAccount, PasskeyCredential, PasswordCredential, SecondaryCredential,
+    UserAccount,
 };
 
 impl Account {
@@ -89,6 +90,16 @@ impl UserAccount {
             .map(|credential| credential.secret)
     }
 
+    pub fn passkeys(&self) -> impl Iterator<Item = &PasskeyCredential> {
+        self.credentials.iter().filter_map(|credential| {
+            if let Credential::Passkey(credential) = credential {
+                Some(credential)
+            } else {
+                None
+            }
+        })
+    }
+
     pub fn next_credential_id(&self) -> u64 {
         self.credentials
             .0
@@ -99,6 +110,7 @@ impl UserAccount {
                 | Credential::ApiKey(credential_properties) => {
                     credential_properties.credential_id.id() + 1
                 }
+                Credential::Passkey(credential) => credential.credential_id.id() + 1,
             })
             .max()
             .unwrap_or_default()
@@ -111,6 +123,7 @@ impl Credential {
             Credential::Password(credential) => credential.credential_id,
             Credential::AppPassword(credential_properties) => credential_properties.credential_id,
             Credential::ApiKey(credential_properties) => credential_properties.credential_id,
+            Credential::Passkey(credential) => credential.credential_id,
         }
     }
 
@@ -123,6 +136,7 @@ impl Credential {
             Credential::ApiKey(credential_properties) => {
                 credential_properties.credential_id = credential_id
             }
+            Credential::Passkey(credential) => credential.credential_id = credential_id,
         }
     }
 
@@ -130,7 +144,7 @@ impl Credential {
         match self {
             Credential::AppPassword(credential_properties) => Some(credential_properties),
             Credential::ApiKey(credential_properties) => Some(credential_properties),
-            Credential::Password(_) => None,
+            Credential::Password(_) | Credential::Passkey(_) => None,
         }
     }
 
@@ -138,14 +152,14 @@ impl Credential {
         match self {
             Credential::AppPassword(credential_properties) => Some(credential_properties),
             Credential::ApiKey(credential_properties) => Some(credential_properties),
-            Credential::Password(_) => None,
+            Credential::Password(_) | Credential::Passkey(_) => None,
         }
     }
 
     pub fn as_main_credential(&self) -> Option<&PasswordCredential> {
         match self {
             Credential::Password(credential) => Some(credential),
-            Credential::AppPassword(_) | Credential::ApiKey(_) => None,
+            Credential::AppPassword(_) | Credential::ApiKey(_) | Credential::Passkey(_) => None,
         }
     }
 }

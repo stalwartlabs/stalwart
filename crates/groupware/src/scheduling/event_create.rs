@@ -7,6 +7,7 @@
 use crate::scheduling::{
     ItipError, ItipMessage,
     attendee::attendee_handle_update,
+    event_update::itip_update,
     itip::itip_finalize,
     organizer::organizer_request_full,
     recipient::{RecipientPolicy, itip_messages_per_recipient},
@@ -47,6 +48,23 @@ pub fn itip_attendee_create(
         attendee_handle_update(ical, old_itip, new_itip).inspect(|_| {
             itip_finalize(ical, &[]);
         })
+    }
+}
+
+pub fn itip_unscheduled_update(
+    ical: &mut ICalendar,
+    old_ical: &ICalendar,
+    account_emails: &[String],
+    policy: RecipientPolicy,
+) -> Result<Vec<ItipMessage<ICalendar>>, ItipError> {
+    match itip_create(ical, account_emails, policy) {
+        Err(ItipError::NotOrganizer) => match itip_update(ical, old_ical, account_emails, policy) {
+            Err(ItipError::NoSchedulingInfo | ItipError::NotOrganizerNorAttendee) => {
+                itip_attendee_create(ical, account_emails)
+            }
+            result => result,
+        },
+        result => result,
     }
 }
 

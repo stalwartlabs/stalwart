@@ -50,17 +50,12 @@ use store::{
     write::{Archive, ArchiveBytes, QueueClass, ValueClass, key::DeserializeBigEndian, now},
 };
 use trc::AddContext;
-use types::{blob::BlobId, blob_hash::BlobHash, id::Id};
-use utils::{DomainPart, map::vec_map::VecMap};
-
-// SPDX-SnippetBegin
-// SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-// SPDX-License-Identifier: LicenseRef-SEL
-#[cfg(feature = "enterprise")]
-use registry::schema::prelude::ObjectType;
-#[cfg(feature = "enterprise")]
-use store::registry::RegistryQuery;
-// SPDX-SnippetEnd
+use types::{
+    blob::{BlobClass, BlobId},
+    blob_hash::BlobHash,
+    id::Id,
+};
+use utils::map::vec_map::VecMap;
 
 pub(crate) async fn queued_message_set(
     mut set: RegistrySetResponse<'_>,
@@ -68,19 +63,12 @@ pub(crate) async fn queued_message_set(
     // Fail all create operations
     set.fail_all_create("Queued messages cannot be created");
 
-    // Obtain tenant domains
     // SPDX-SnippetBegin
     // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
     // SPDX-License-Identifier: LicenseRef-SEL
     #[cfg(feature = "enterprise")]
-    let tenant_domains = if let Some(tenant_id) = set.access_token.tenant_id() {
-        Some(tenant_domains(set.server, tenant_id).await?)
-    } else {
-        None
-    };
+    let tenant_id = set.access_token.tenant_id();
     // SPDX-SnippetEnd
-    #[cfg(not(feature = "enterprise"))]
-    let tenant_domains: Option<AHashSet<String>> = None;
 
     // Process update operations
     let mut refresh_queues = QueueNames::default();
@@ -91,19 +79,18 @@ pub(crate) async fn queued_message_set(
             continue;
         };
         let archived_message = archive.to_unarchived::<Message>()?;
-        if !tenant_domains.as_ref().is_none_or(|domains| {
-            archived_message
-                .inner
-                .return_path
-                .try_domain_part()
-                .is_some_and(|domain| domains.contains(domain))
-        }) {
+        // SPDX-SnippetBegin
+        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+        // SPDX-License-Identifier: LicenseRef-SEL
+        #[cfg(feature = "enterprise")]
+        if tenant_id.is_some_and(|tenant_id| !archived_message.inner.has_tenant(tenant_id)) {
             set.response.not_updated.append(id, SetError::not_found());
             continue;
         }
+        // SPDX-SnippetEnd
 
         // Process patches
-        let mut message = map_message(archived_message.inner);
+        let mut message = map_message(archived_message.inner, queue_id);
         message.next_retry = None;
         for (key, value) in value.into_expanded_object() {
             let ptr = match key {
@@ -276,27 +263,27 @@ pub(crate) async fn queued_message_set(
             continue;
         };
 
-        if tenant_domains.as_ref().is_none_or(|domains| {
-            message
-                .message
-                .return_path
-                .try_domain_part()
-                .is_some_and(|domain| domains.contains(domain))
-        }) {
-            let prev_events = message.message.next_events();
-            match message
-                .remove_registry(set.server, prev_events, version)
-                .await
-                .failure("Queue delete operation failed")
-            {
-                None => set.response.destroyed.push(id),
-                Some(description) => set
-                    .response
-                    .not_destroyed
-                    .append(id, SetError::forbidden().with_description(description)),
-            }
-        } else {
+        // SPDX-SnippetBegin
+        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+        // SPDX-License-Identifier: LicenseRef-SEL
+        #[cfg(feature = "enterprise")]
+        if tenant_id.is_some_and(|tenant_id| !message.message.has_tenant(tenant_id)) {
             set.response.not_destroyed.append(id, SetError::not_found());
+            continue;
+        }
+        // SPDX-SnippetEnd
+
+        let prev_events = message.message.next_events();
+        match message
+            .remove_registry(set.server, prev_events, version)
+            .await
+            .failure("Queue delete operation failed")
+        {
+            None => set.response.destroyed.push(id),
+            Some(description) => set
+                .response
+                .not_destroyed
+                .append(id, SetError::forbidden().with_description(description)),
         }
     }
 
@@ -317,19 +304,12 @@ pub(crate) async fn queued_message_get(
             .collect()
     };
 
-    // Obtain tenant domains
     // SPDX-SnippetBegin
     // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
     // SPDX-License-Identifier: LicenseRef-SEL
     #[cfg(feature = "enterprise")]
-    let tenant_domains = if let Some(tenant_id) = get.access_token.tenant_id() {
-        Some(tenant_domains(get.server, tenant_id).await?)
-    } else {
-        None
-    };
+    let tenant_id = get.access_token.tenant_id();
     // SPDX-SnippetEnd
-    #[cfg(not(feature = "enterprise"))]
-    let tenant_domains: Option<AHashSet<String>> = None;
 
     for id in ids {
         let Some(message_archive) = get.server.read_message_archive(id.id()).await? else {
@@ -339,16 +319,18 @@ pub(crate) async fn queued_message_get(
             continue;
         };
         let message_in = message_archive.unarchive::<Message>()?;
-        if tenant_domains.as_ref().is_none_or(|domains| {
-            message_in
-                .return_path
-                .try_domain_part()
-                .is_some_and(|domain| domains.contains(domain))
-        }) {
-            get.insert(id, map_message(message_in).into_value());
-        } else if client_ids {
-            get.not_found(id);
+        // SPDX-SnippetBegin
+        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+        // SPDX-License-Identifier: LicenseRef-SEL
+        #[cfg(feature = "enterprise")]
+        if tenant_id.is_some_and(|tenant_id| !message_in.has_tenant(tenant_id)) {
+            if client_ids {
+                get.not_found(id);
+            }
+            continue;
         }
+        // SPDX-SnippetEnd
+        get.insert(id, map_message(message_in, id.id()).into_value());
     }
 
     Ok(get)
@@ -745,29 +727,14 @@ async fn iterate_tenant_messages(
             .caused_by(trc::location!())
     }
 }
-
-#[cfg(feature = "enterprise")]
-async fn tenant_domains(server: &Server, tenant_id: u32) -> trc::Result<AHashSet<String>> {
-    let domain_ids = server
-        .registry()
-        .query::<Vec<Id>>(RegistryQuery::new(ObjectType::Domain).with_tenant(tenant_id.into()))
-        .await?;
-
-    let mut domains = AHashSet::with_capacity(domain_ids.len());
-
-    for domain_id in domain_ids {
-        if let Some(domain) = server.domain_by_id(domain_id.document_id()).await? {
-            domains.extend(domain.names.iter().map(|name| name.to_string()));
-        }
-    }
-
-    Ok(domains)
-}
 // SPDX-SnippetEnd
 
-fn map_message(message_in: &ArchivedMessage) -> QueuedMessage {
+fn map_message(message_in: &ArchivedMessage, queue_id: u64) -> QueuedMessage {
     let mut message_out = QueuedMessage {
-        blob_id: BlobId::new(BlobHash::from(&message_in.blob_hash), Default::default()),
+        blob_id: BlobId::new(
+            BlobHash::from(&message_in.blob_hash),
+            BlobClass::Queued { queue_id },
+        ),
         created_at: UTCDateTime::from_timestamp(message_in.created.to_native() as i64),
         env_id: message_in.env_id.as_ref().map(|v| v.to_string()),
         flags: Map::with_capacity(1),

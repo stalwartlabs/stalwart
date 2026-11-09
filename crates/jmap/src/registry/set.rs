@@ -960,7 +960,8 @@ impl RegistrySet for Server {
             ObjectType::AccountSettings
             | ObjectType::ApiKey
             | ObjectType::AccountPassword
-            | ObjectType::AppPassword => account_set(set).await.map(|set| set.into_response()),
+            | ObjectType::AppPassword
+            | ObjectType::Passkey => account_set(set).await.map(|set| set.into_response()),
 
             ObjectType::QueuedMessage => {
                 queued_message_set(set).await.map(|set| set.into_response())

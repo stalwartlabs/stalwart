@@ -134,15 +134,67 @@ impl QuotaReservation {
     }
 }
 
+#[derive(Debug, Default)]
+pub struct ReleasedQuota {
+    ids: Vec<u64>,
+    entries: Vec<Metadata>,
+    queued_bytes: u64,
+}
+
+impl ReleasedQuota {
+    pub fn ids(&self) -> &[u64] {
+        &self.ids
+    }
+
+    pub fn has_entries(&self) -> bool {
+        !self.entries.is_empty()
+    }
+
+    pub fn write(&self, batch: &mut BatchBuilder) {
+        for entry in &self.entries {
+            match entry {
+                Metadata::QueueCount { key, .. } => {
+                    batch.add(ValueClass::Queue(QueueClass::QuotaCount((*key).into())), -1);
+                }
+                Metadata::QueueSize { key, .. } => {
+                    batch.add(
+                        ValueClass::Queue(QueueClass::QuotaSize((*key).into())),
+                        -(self.queued_bytes as i64),
+                    );
+                }
+                Metadata::Headers { .. } | Metadata::Submission { .. } | Metadata::Blob(_) => {}
+            }
+        }
+    }
+
+    pub fn is_pending(&self, metadata: &[Metadata]) -> bool {
+        metadata.iter().any(|current| match current {
+            Metadata::QueueCount { id, key } | Metadata::QueueSize { id, key } => {
+                self.entries.iter().any(|entry| {
+                    matches!(entry, Metadata::QueueCount { id: rid, key: rkey }
+                        | Metadata::QueueSize { id: rid, key: rkey } if rid == id && rkey == key)
+                })
+            }
+            _ => false,
+        })
+    }
+}
+
 impl MessageWrapper {
     pub fn release_quota(&mut self, batch: &mut BatchBuilder) -> Vec<u64> {
+        let released = self.take_released_quota();
+        released.write(batch);
+        released.ids
+    }
+
+    pub fn take_released_quota(&mut self) -> ReleasedQuota {
         if !self.message.metadata.iter().any(|metadata| {
             matches!(
                 metadata,
                 Metadata::QueueSize { .. } | Metadata::QueueCount { .. }
             )
         }) {
-            return Vec::new();
+            return ReleasedQuota::default();
         }
         let mut quota_ids = Vec::with_capacity(self.message.recipients.len());
 
@@ -159,20 +211,16 @@ impl MessageWrapper {
             }
         }
 
+        let mut entries = Vec::new();
         if !quota_ids.is_empty() {
             quota_ids.sort_unstable();
-            let queued_bytes = self.message.queued_bytes();
             let mut metadata = Vec::new();
             for entry in std::mem::take(&mut self.message.metadata) {
                 match entry {
-                    Metadata::QueueCount { id, key } if quota_ids.binary_search(&id).is_ok() => {
-                        batch.add(ValueClass::Queue(QueueClass::QuotaCount(key.into())), -1);
-                    }
-                    Metadata::QueueSize { id, key } if quota_ids.binary_search(&id).is_ok() => {
-                        batch.add(
-                            ValueClass::Queue(QueueClass::QuotaSize(key.into())),
-                            -(queued_bytes as i64),
-                        );
+                    Metadata::QueueCount { id, .. } | Metadata::QueueSize { id, .. }
+                        if quota_ids.binary_search(&id).is_ok() =>
+                    {
+                        entries.push(entry);
                     }
                     _ => {
                         metadata.push(entry);
@@ -182,6 +230,15 @@ impl MessageWrapper {
             self.message.metadata = metadata.into_boxed_slice();
         }
 
-        quota_ids
+        let queued_bytes = if entries.is_empty() {
+            0
+        } else {
+            self.message.queued_bytes()
+        };
+        ReleasedQuota {
+            ids: quota_ids,
+            entries,
+            queued_bytes,
+        }
     }
 }

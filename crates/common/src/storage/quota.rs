@@ -359,7 +359,7 @@ impl TenantQuota {
 
 impl Default for ObjectQuota {
     fn default() -> Self {
-        Self([u32::MAX; StorageQuota::COUNT - 1])
+        Self([u32::MAX; StorageQuota::COUNT])
     }
 }
 

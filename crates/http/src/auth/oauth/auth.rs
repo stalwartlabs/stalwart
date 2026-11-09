@@ -30,6 +30,10 @@ use common::{
             scope::OAuthScopes,
             supported_scopes,
         },
+        passkey::{
+            PASSKEY_TIMEOUT_MS, PasskeyCeremony, PasskeyRp, assertion::PasskeyAssertion,
+            server::PasskeySignIn,
+        },
     },
 };
 use directory::Credentials;
@@ -157,6 +161,23 @@ pub enum LoginRequest {
         query: String,
         consent: bool,
     },
+    PasskeyOptions,
+    #[serde(rename_all = "camelCase")]
+    AuthCodePasskey {
+        credential: PasskeyAssertion,
+        query: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[serde(default)]
+        consent: Option<bool>,
+    },
+    #[serde(rename_all = "camelCase")]
+    AuthDevicePasskey {
+        credential: PasskeyAssertion,
+        code: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[serde(default)]
+        consent: Option<bool>,
+    },
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
@@ -181,6 +202,13 @@ pub enum LoginResponse {
     },
     Expired,
     Failure,
+    #[serde(rename_all = "camelCase")]
+    PasskeyOptions {
+        challenge: String,
+        rp_id: String,
+        timeout: u64,
+    },
+    PasskeyUnknown,
 }
 
 #[derive(Debug, serde::Serialize, PartialEq, Eq)]
@@ -266,11 +294,25 @@ impl OAuthApiHandler for Server {
                 self.authorize_code(
                     session,
                     origin,
-                    LoginCredentials {
+                    LoginCredentials::Password {
                         account_name,
                         account_secret,
                         mfa_token,
                     },
+                    &query,
+                    consent,
+                )
+                .await?
+            }
+            LoginRequest::AuthCodePasskey {
+                credential,
+                query,
+                consent,
+            } => {
+                self.authorize_code(
+                    session,
+                    origin,
+                    LoginCredentials::Passkey(credential),
                     &query,
                     consent,
                 )
@@ -291,16 +333,47 @@ impl OAuthApiHandler for Server {
                 code,
                 consent,
             } => {
-                approve_device(
-                    self,
+                self.approve_device(
                     session,
-                    account_name,
-                    account_secret,
-                    mfa_token,
+                    &issuer(self, origin),
+                    LoginCredentials::Password {
+                        account_name,
+                        account_secret,
+                        mfa_token,
+                    },
                     &code,
                     consent,
                 )
                 .await?
+            }
+            LoginRequest::AuthDevicePasskey {
+                credential,
+                code,
+                consent,
+            } => {
+                self.approve_device(
+                    session,
+                    &issuer(self, origin),
+                    LoginCredentials::Passkey(credential),
+                    &code,
+                    consent,
+                )
+                .await?
+            }
+            LoginRequest::PasskeyOptions => {
+                let issuer = issuer(self, origin);
+                if let Some(rp) = PasskeyRp::from_issuer(&issuer) {
+                    LoginResponse::PasskeyOptions {
+                        challenge: self
+                            .issue_passkey_challenge(PasskeyCeremony::SignIn)
+                            .await?
+                            .encode(),
+                        rp_id: rp.id.into_owned(),
+                        timeout: PASSKEY_TIMEOUT_MS,
+                    }
+                } else {
+                    LoginResponse::Failure
+                }
             }
         };
 
@@ -603,74 +676,101 @@ async fn authenticate_login(
     session: &HttpSessionData,
     client: &ResolvedClient,
     scopes: OAuthScopes,
-    username: String,
-    secret: String,
-    mfa_token: Option<String>,
+    credentials: LoginCredentials,
+    issuer: &str,
 ) -> trc::Result<Result<LoginAccount, LoginResponse>> {
-    match server
-        .authenticate(&AuthRequest {
-            credentials: Credentials::Basic {
-                username,
-                secret,
-                mfa_token,
-            },
-            session_id: session.session_id,
-            remote_ip: session.remote_ip,
-        })
-        .await
-    {
-        Ok(authenticated) => {
-            let access_token = authenticated.access_token;
-            let account_id = access_token.account_id();
-            if access_token.is_secondary_credential() {
-                trc::event!(
-                    Security(trc::SecurityEvent::Unauthorized),
-                    AccountId = account_id,
-                    SpanId = session.session_id,
-                    Id = access_token.credential_id(),
-                    Reason = "App passwords and API keys cannot be used for OAuth sign-in.",
-                );
+    let access_token = match credentials {
+        LoginCredentials::Password {
+            account_name,
+            account_secret,
+            mfa_token,
+        } => match server
+            .authenticate(&AuthRequest {
+                credentials: Credentials::Basic {
+                    username: account_name,
+                    secret: account_secret,
+                    mfa_token,
+                },
+                session_id: session.session_id,
+                remote_ip: session.remote_ip,
+            })
+            .await
+        {
+            Ok(authenticated) => authenticated.access_token,
+            Err(err) => return login_failure(err, session),
+        },
+        LoginCredentials::Passkey(assertion) => {
+            let Some(rp) = PasskeyRp::from_issuer(issuer) else {
                 return Ok(Err(LoginResponse::Failure));
-            }
-            if access_token.is_main_credential_expired()
-                && !client.granted_scopes(scopes).allows_expired_credential()
-            {
-                trc::event!(
-                    Auth(trc::AuthEvent::CredentialExpired),
-                    AccountId = account_id,
-                    SpanId = session.session_id,
-                    Reason = "Main credential expired, refusing sign-in to third-party client.",
-                );
-                return Ok(Err(LoginResponse::Expired));
-            }
-
-            Ok(Ok(LoginAccount {
-                account_id,
-                // SPDX-SnippetBegin
-                // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-                // SPDX-License-Identifier: LicenseRef-SEL
-                #[cfg(feature = "enterprise")]
-                tenant_id: access_token.tenant_id(),
-                // SPDX-SnippetEnd
-                credential_version: access_token.credential_version(),
-            }))
-        }
-        Err(err) => {
-            let response = match *err.as_ref() {
-                trc::EventType::Auth(trc::AuthEvent::MfaRequired) => LoginResponse::MfaRequired,
-                trc::EventType::Auth(_) | trc::EventType::Security(_) => LoginResponse::Failure,
-                _ => return Err(err),
             };
-            trc::error!(err.span_id(session.session_id));
-            Ok(Err(response))
+            match server
+                .authenticate_passkey(&assertion, &rp, session.remote_ip, session.session_id)
+                .await
+            {
+                Ok(PasskeySignIn::Authenticated(access_token)) => access_token,
+                Ok(PasskeySignIn::UnknownCredential) => {
+                    return Ok(Err(LoginResponse::PasskeyUnknown));
+                }
+                Err(err) => return login_failure(err, session),
+            }
         }
+    };
+
+    let account_id = access_token.account_id();
+    if access_token.is_secondary_credential() {
+        trc::event!(
+            Security(trc::SecurityEvent::Unauthorized),
+            AccountId = account_id,
+            SpanId = session.session_id,
+            Id = access_token.credential_id(),
+            Reason = "App passwords and API keys cannot be used for OAuth sign-in.",
+        );
+        return Ok(Err(LoginResponse::Failure));
     }
+    if access_token.is_main_credential_expired()
+        && !client.granted_scopes(scopes).allows_expired_credential()
+    {
+        trc::event!(
+            Auth(trc::AuthEvent::CredentialExpired),
+            AccountId = account_id,
+            SpanId = session.session_id,
+            Reason = "Main credential expired, refusing sign-in to third-party client.",
+        );
+        return Ok(Err(LoginResponse::Expired));
+    }
+
+    Ok(Ok(LoginAccount {
+        account_id,
+        // SPDX-SnippetBegin
+        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+        // SPDX-License-Identifier: LicenseRef-SEL
+        #[cfg(feature = "enterprise")]
+        tenant_id: access_token.tenant_id(),
+        // SPDX-SnippetEnd
+        credential_version: access_token.credential_version(),
+    }))
 }
 
-struct LoginCredentials {
-    account_name: String,
-    account_secret: String,
-    mfa_token: Option<String>,
+fn login_failure(
+    err: trc::Error,
+    session: &HttpSessionData,
+) -> trc::Result<Result<LoginAccount, LoginResponse>> {
+    let response = match *err.as_ref() {
+        trc::EventType::Auth(trc::AuthEvent::MfaRequired) => LoginResponse::MfaRequired,
+        trc::EventType::Auth(_) | trc::EventType::Security(_) => LoginResponse::Failure,
+        _ => return Err(err),
+    };
+    trc::error!(err.span_id(session.session_id));
+    Ok(Err(response))
+}
+
+enum LoginCredentials {
+    Password {
+        account_name: String,
+        account_secret: String,
+        mfa_token: Option<String>,
+    },
+    Passkey(PasskeyAssertion),
 }
 
 trait ConsentHandler: Sync + Send {
@@ -719,6 +819,14 @@ trait ConsentHandler: Sync + Send {
         account_id: u32,
         credential_version: u64,
         issuer: &str,
+    ) -> impl Future<Output = trc::Result<LoginResponse>> + Send;
+    fn approve_device(
+        &self,
+        session: &HttpSessionData,
+        issuer: &str,
+        credentials: LoginCredentials,
+        code: &str,
+        consent: Option<bool>,
     ) -> impl Future<Output = trc::Result<LoginResponse>> + Send;
 }
 
@@ -773,9 +881,8 @@ impl ConsentHandler for Server {
             session,
             &authorization.client,
             OAuthScopes::parse(authorization.scope.as_deref().unwrap_or_default()),
-            credentials.account_name,
-            credentials.account_secret,
-            credentials.mfa_token,
+            credentials,
+            &issuer,
         )
         .await?
         {
@@ -965,124 +1072,123 @@ impl ConsentHandler for Server {
 
         Ok(LoginResponse::Authenticated { location })
     }
-}
 
-async fn approve_device(
-    server: &Server,
-    session: &HttpSessionData,
-    account_name: String,
-    account_secret: String,
-    mfa_token: Option<String>,
-    code: &str,
-    consent: Option<bool>,
-) -> trc::Result<LoginResponse> {
-    let Some(consent) = consent.filter(|_| is_user_code(code)) else {
-        return Ok(LoginResponse::Failure);
-    };
-    let Some(stored) = server
-        .in_memory_store()
-        .key_get::<Archive<ArchiveBytes>>(KeyValue::<()>::build_key(KV_OAUTH, code.as_bytes()))
-        .await?
-    else {
-        return Ok(LoginResponse::Failure);
-    };
-    let oauth = stored
-        .unarchive::<OAuthCode>()
-        .caused_by(trc::location!())?;
-    if oauth.status != OAuthStatus::Pending {
-        return Ok(LoginResponse::Failure);
-    }
+    async fn approve_device(
+        &self,
+        session: &HttpSessionData,
+        issuer: &str,
+        credentials: LoginCredentials,
+        code: &str,
+        consent: Option<bool>,
+    ) -> trc::Result<LoginResponse> {
+        let Some(consent) = consent.filter(|_| is_user_code(code)) else {
+            return Ok(LoginResponse::Failure);
+        };
+        let Some(stored) = self
+            .in_memory_store()
+            .key_get::<Archive<ArchiveBytes>>(KeyValue::<()>::build_key(KV_OAUTH, code.as_bytes()))
+            .await?
+        else {
+            return Ok(LoginResponse::Failure);
+        };
+        let oauth = stored
+            .unarchive::<OAuthCode>()
+            .caused_by(trc::location!())?;
+        if oauth.status != OAuthStatus::Pending {
+            return Ok(LoginResponse::Failure);
+        }
 
-    let denied = || {
-        (
-            OAuthStatus::Denied,
-            u32::MAX,
-            0,
-            server.core.oauth.oauth_expiry_user_code,
-            LoginResponse::Denied,
-        )
-    };
-    let (status, account_id, credential_version, expiry, response) = if consent {
-        match server
-            .resolve_oauth_client(
-                oauth.client_id.as_str(),
-                &ResolveContext {
-                    mode: ResolveMode::Token,
-                    origin: None,
-                    remote_ip: session.remote_ip,
-                },
+        let denied = || {
+            (
+                OAuthStatus::Denied,
+                u32::MAX,
+                0,
+                self.core.oauth.oauth_expiry_user_code,
+                LoginResponse::Denied,
             )
+        };
+        let (status, account_id, credential_version, expiry, response) = if consent {
+            match self
+                .resolve_oauth_client(
+                    oauth.client_id.as_str(),
+                    &ResolveContext {
+                        mode: ResolveMode::Token,
+                        origin: None,
+                        remote_ip: session.remote_ip,
+                    },
+                )
+                .await?
+            {
+                Ok(client) => match authenticate_login(
+                    self,
+                    session,
+                    &client,
+                    OAuthScopes::parse(oauth.scope.as_ref().map_or("", |scope| scope.as_str())),
+                    credentials,
+                    issuer,
+                )
+                .await?
+                {
+                    // SPDX-SnippetBegin
+                    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+                    // SPDX-License-Identifier: LicenseRef-SEL
+                    #[cfg(feature = "enterprise")]
+                    Ok(login) if !client.allows_tenant(login.tenant_id) => denied(),
+                    // SPDX-SnippetEnd
+                    Ok(login) => (
+                        OAuthStatus::Authorized,
+                        login.account_id,
+                        login.credential_version,
+                        self.core.oauth.oauth_expiry_auth_code,
+                        LoginResponse::Verified,
+                    ),
+                    Err(LoginResponse::Expired) => {
+                        let (status, account_id, credential_version, expiry, _) = denied();
+                        (
+                            status,
+                            account_id,
+                            credential_version,
+                            expiry,
+                            LoginResponse::Expired,
+                        )
+                    }
+                    Err(response) => return Ok(response),
+                },
+                Err(_) => denied(),
+            }
+        } else {
+            denied()
+        };
+
+        let value = Archiver::new(OAuthCode {
+            status,
+            account_id,
+            credential_version,
+            client_id: oauth.client_id.to_string(),
+            nonce: oauth.nonce.as_ref().map(|nonce| nonce.to_string()),
+            params: String::new(),
+            code_challenge: PkceCodeChallenge::None,
+            scope: oauth.scope.as_ref().map(|scope| scope.to_string()),
+        })
+        .untrusted()
+        .serialize()
+        .caused_by(trc::location!())?;
+
+        if !self
+            .in_memory_store()
+            .key_delete(KeyValue::<()>::build_key(KV_OAUTH, code.as_bytes()))
             .await?
         {
-            Ok(client) => match authenticate_login(
-                server,
-                session,
-                &client,
-                OAuthScopes::parse(oauth.scope.as_ref().map_or("", |scope| scope.as_str())),
-                account_name,
-                account_secret,
-                mfa_token,
-            )
-            .await?
-            {
-                // SPDX-SnippetBegin
-                // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-                // SPDX-License-Identifier: LicenseRef-SEL
-                #[cfg(feature = "enterprise")]
-                Ok(login) if !client.allows_tenant(login.tenant_id) => denied(),
-                // SPDX-SnippetEnd
-                Ok(login) => (
-                    OAuthStatus::Authorized,
-                    login.account_id,
-                    login.credential_version,
-                    server.core.oauth.oauth_expiry_auth_code,
-                    LoginResponse::Verified,
-                ),
-                Err(LoginResponse::Expired) => {
-                    let (status, account_id, credential_version, expiry, _) = denied();
-                    (
-                        status,
-                        account_id,
-                        credential_version,
-                        expiry,
-                        LoginResponse::Expired,
-                    )
-                }
-                Err(response) => return Ok(response),
-            },
-            Err(_) => denied(),
+            return Ok(LoginResponse::Failure);
         }
-    } else {
-        denied()
-    };
+        self.in_memory_store()
+            .key_set(
+                KeyValue::with_prefix(KV_OAUTH, oauth.params.as_bytes(), value).expires(expiry),
+            )
+            .await?;
 
-    let value = Archiver::new(OAuthCode {
-        status,
-        account_id,
-        credential_version,
-        client_id: oauth.client_id.to_string(),
-        nonce: oauth.nonce.as_ref().map(|nonce| nonce.to_string()),
-        params: String::new(),
-        code_challenge: PkceCodeChallenge::None,
-        scope: oauth.scope.as_ref().map(|scope| scope.to_string()),
-    })
-    .untrusted()
-    .serialize()
-    .caused_by(trc::location!())?;
-
-    if !server
-        .in_memory_store()
-        .key_delete(KeyValue::<()>::build_key(KV_OAUTH, code.as_bytes()))
-        .await?
-    {
-        return Ok(LoginResponse::Failure);
+        Ok(response)
     }
-    server
-        .in_memory_store()
-        .key_set(KeyValue::with_prefix(KV_OAUTH, oauth.params.as_bytes(), value).expires(expiry))
-        .await?;
-
-    Ok(response)
 }
 
 fn query_digest(query: &str) -> blake3::Hash {

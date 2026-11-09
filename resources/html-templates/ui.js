@@ -113,6 +113,15 @@
             var allowHandler = null;
             var denyHandler = null;
             var leaving = false;
+            var passkeySupported = !!(window.PublicKeyCredential && navigator.credentials && navigator.credentials.get);
+            var passkeyAbort = null;
+            var passkeyTimer = null;
+            var passkeyRetries = 0;
+            var passkeyBusy = false;
+            var lastPasskey = null;
+            var PASSKEY_RENEW_MS = 30000;
+            var PASSKEY_RETRY_MS = 5000;
+            var PASSKEY_MAX_RETRIES = 3;
 
             if (loginHint) $('username').value = loginHint;
 
@@ -133,11 +142,14 @@
                     showFatal('The application redirect address is not allowed.');
                 } else {
                     leaving = true;
+                    cancelAutofill();
                     window.location.assign(location);
                 }
             }
 
             function showFatal(msg) {
+                stage = 'done';
+                cancelAutofill();
                 hide($('login-form'));
                 hide($('consent'));
                 hide($('app-tile'));
@@ -208,6 +220,7 @@
                     hide($('client-redirect'));
                 }
 
+                cancelAutofill();
                 hide($('login-form'));
                 hide($('app-tile'));
                 setText($('title'), isDevice ? 'Authorize device' : 'Authorize access');
@@ -244,6 +257,10 @@
                         : 'Enter your credentials to continue');
                 }
                 show($('login-form'));
+                if (passkeySupported) {
+                    show($('passkey-btn'));
+                    armAutofill();
+                }
                 focusFirst();
             }
 
@@ -257,8 +274,10 @@
 
             function enterMfaMode() {
                 inMfa = true;
+                cancelAutofill();
                 hide($('field-username'));
                 hide($('field-password'));
+                hide($('passkey-btn'));
                 show($('field-otp'));
                 setText($('title'), 'Two-factor authentication');
                 setText($('subtitle'), 'Enter the 6-digit code from your authenticator app.');
@@ -295,9 +314,7 @@
                 });
             }
 
-            function postLogin(body) {
-                var btn = $('submit-btn');
-                btn.disabled = true;
+            function postAuth(body) {
                 return fetch('/api/auth', {
                     method: 'POST',
                     credentials: 'same-origin',
@@ -315,7 +332,13 @@
                         });
                     }
                     return res.json();
-                }).then(function (json) {
+                });
+            }
+
+            function postLogin(body) {
+                var btn = $('submit-btn');
+                btn.disabled = true;
+                return postAuth(body).then(function (json) {
                     handleResponse(json);
                 }).catch(function (err) {
                     console.log('Login request failed:', err);
@@ -342,6 +365,8 @@
                             : 'The sign-in request is invalid.');
                         return;
                     case 'verified':
+                        stage = 'done';
+                        cancelAutofill();
                         hide($('login-form'));
                         hide($('consent'));
                         setText($('title'), 'Device authorized');
@@ -349,6 +374,8 @@
                         showSuccess('Device verified.');
                         return;
                     case 'denied':
+                        stage = 'done';
+                        cancelAutofill();
                         hide($('login-form'));
                         hide($('consent'));
                         setText($('title'), 'Access denied');
@@ -365,8 +392,18 @@
                         if (inMfa) leaveMfaMode();
                         showError('Your password has expired. Change it in the account portal, then sign in again.');
                         return;
+                    case 'passkeyUnknown':
+                        signalUnknownPasskey();
+                        showError('This passkey is not registered with any account. It may have been removed; sign in with your password instead.');
+                        return;
                     case 'failure':
                         if (inMfa) leaveMfaMode();
+                        if (lastPasskey) {
+                            showError(isDevice
+                                ? 'Passkey sign-in failed, or the device code has expired. Please try again.'
+                                : 'Passkey sign-in failed. Please try again.');
+                            return;
+                        }
                         showError(isDevice
                             ? 'Invalid username or password, or the device code has expired. Please try again.'
                             : 'Invalid username or password. Please try again.');
@@ -461,8 +498,170 @@
                 });
             }
 
+            function bytesToBase64Url(buffer) {
+                var bytes = new Uint8Array(buffer);
+                var binary = '';
+                for (var i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+                return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+            }
+
+            function base64UrlToBytes(value) {
+                var base64 = value.replace(/-/g, '+').replace(/_/g, '/');
+                while (base64.length % 4) base64 += '=';
+                var binary = atob(base64);
+                var bytes = new Uint8Array(binary.length);
+                for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+                return bytes;
+            }
+
+            function credentialToJson(credential) {
+                if (typeof credential.toJSON === 'function') {
+                    try { return credential.toJSON(); } catch (e) { }
+                }
+                var response = credential.response;
+                return {
+                    id: credential.id,
+                    rawId: bytesToBase64Url(credential.rawId),
+                    type: credential.type,
+                    response: {
+                        clientDataJSON: bytesToBase64Url(response.clientDataJSON),
+                        authenticatorData: bytesToBase64Url(response.authenticatorData),
+                        signature: bytesToBase64Url(response.signature),
+                        userHandle: response.userHandle ? bytesToBase64Url(response.userHandle) : null
+                    }
+                };
+            }
+
+            function isPasskeyCancel(err) {
+                return !!err && (err.name === 'NotAllowedError' || err.name === 'AbortError');
+            }
+
+            function fetchPasskeyOptions() {
+                return postAuth({ type: 'passkeyOptions' }).then(function (options) {
+                    if (!options || options.type !== 'passkeyOptions' || typeof options.challenge !== 'string') {
+                        throw new Error('passkey options unavailable');
+                    }
+                    return options;
+                });
+            }
+
+            function getPasskey(options, mediation, signal) {
+                var request = {
+                    publicKey: {
+                        challenge: base64UrlToBytes(options.challenge),
+                        rpId: options.rpId,
+                        timeout: options.timeout,
+                        userVerification: 'required',
+                        allowCredentials: []
+                    }
+                };
+                if (mediation) request.mediation = mediation;
+                if (signal) request.signal = signal;
+                return navigator.credentials.get(request).then(function (credential) {
+                    if (!credential) throw new Error('no credential returned');
+                    return { credential: credential, rpId: options.rpId };
+                });
+            }
+
+            function submitPasskey(result) {
+                var credential = credentialToJson(result.credential);
+                lastPasskey = { rpId: result.rpId, id: result.credential.id };
+                return postLogin(isDevice
+                    ? { type: 'authDevicePasskey', credential: credential, code: deviceCode, consent: true }
+                    : { type: 'authCodePasskey', credential: credential, query: query });
+            }
+
+            function signalUnknownPasskey() {
+                if (lastPasskey && window.PublicKeyCredential && typeof PublicKeyCredential.signalUnknownCredential === 'function') {
+                    PublicKeyCredential.signalUnknownCredential({ rpId: lastPasskey.rpId, credentialId: lastPasskey.id })
+                        .catch(function () { });
+                }
+            }
+
+            function cancelAutofill() {
+                if (passkeyTimer) {
+                    clearTimeout(passkeyTimer);
+                    passkeyTimer = null;
+                }
+                if (passkeyAbort) {
+                    var controller = passkeyAbort;
+                    passkeyAbort = null;
+                    controller.abort();
+                }
+            }
+
+            function armAutofill() {
+                if (!passkeySupported || typeof PublicKeyCredential.isConditionalMediationAvailable !== 'function') return;
+                PublicKeyCredential.isConditionalMediationAvailable().then(function (available) {
+                    if (available) startAutofill();
+                }).catch(function () { });
+            }
+
+            function startAutofill() {
+                cancelAutofill();
+                if (stage !== 'login' || inMfa || leaving || passkeyBusy || typeof AbortController !== 'function') return;
+                var controller = new AbortController();
+                passkeyAbort = controller;
+                var isCurrent = function () { return passkeyAbort === controller; };
+                fetchPasskeyOptions().then(function (options) {
+                    if (!isCurrent()) return false;
+                    passkeyTimer = setTimeout(startAutofill, Math.max(options.timeout - PASSKEY_RENEW_MS, PASSKEY_RETRY_MS));
+                    return getPasskey(options, 'conditional', controller.signal).then(function (result) {
+                        if (!isCurrent()) return false;
+                        cancelAutofill();
+                        passkeyRetries = 0;
+                        clearAlert();
+                        return submitPasskey(result).then(function () { return true; });
+                    });
+                }).catch(function (err) {
+                    if (!isCurrent()) return false;
+                    cancelAutofill();
+                    if (!isPasskeyCancel(err)) console.log('Passkey autofill failed:', err);
+                    if (passkeyRetries++ < PASSKEY_MAX_RETRIES) passkeyTimer = setTimeout(startAutofill, PASSKEY_RETRY_MS);
+                    return false;
+                }).then(function (submitted) {
+                    if (submitted) armAutofill();
+                });
+            }
+
+            function setPasskeyBusy(busy) {
+                passkeyBusy = busy;
+                $('passkey-btn').disabled = busy;
+                $('submit-btn').disabled = busy;
+                if (busy) {
+                    hide($('passkey-icon'));
+                    show($('passkey-spinner'));
+                    setText($('passkey-label'), 'Waiting for your passkey');
+                } else {
+                    show($('passkey-icon'));
+                    hide($('passkey-spinner'));
+                    setText($('passkey-label'), 'Sign in with a passkey');
+                }
+            }
+
+            function signInWithPasskey() {
+                if (stage !== 'login' || inMfa) return;
+                clearAlert();
+                cancelAutofill();
+                setPasskeyBusy(true);
+                fetchPasskeyOptions().then(function (options) {
+                    return getPasskey(options, null, null);
+                }).then(function (result) {
+                    return submitPasskey(result);
+                }).catch(function (err) {
+                    if (isPasskeyCancel(err)) return;
+                    console.log('Passkey sign-in failed:', err);
+                    showError('Passkey sign-in failed. Please try again or sign in with your password.');
+                }).then(function () {
+                    if (leaving) return;
+                    setPasskeyBusy(false);
+                    if (stage === 'login' && !inMfa) armAutofill();
+                });
+            }
+
             function startDevice() {
                 stage = 'code';
+                hide($('passkey-btn'));
                 hide($('field-username'));
                 hide($('field-password'));
                 show($('field-device-code'));
@@ -536,11 +735,14 @@
                     showError('Please enter your username and password.');
                     return;
                 }
+                cancelAutofill();
+                lastPasskey = null;
                 lastCreds = { account_name: username, account_secret: password };
-                postLogin(buildRequest(lastCreds, null));
+                postLogin(buildRequest(lastCreds, null)).then(armAutofill);
             }
 
             $('login-form').addEventListener('submit', submitLogin);
+            $('passkey-btn').addEventListener('click', signInWithPasskey);
             $('allow-btn').addEventListener('click', function () {
                 clearAlert();
                 if (allowHandler) allowHandler();

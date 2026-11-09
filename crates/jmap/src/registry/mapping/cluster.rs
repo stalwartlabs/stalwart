@@ -128,7 +128,7 @@ pub(crate) async fn validate_coordinator(
         return Ok(Err(SetError::invalid_properties()
             .with_property(Property::Type)
             .with_description(
-                "A cluster coordinator requires a Redis in-memory store, configure one first.",
+                "A cluster coordinator requires a Stalwart Keep or Redis in-memory store, configure one first.",
             )));
     }
 

@@ -34,6 +34,7 @@ impl MysqlStore {
             .stmt_cache_size(STMT_CACHE_SIZE)
             .client_found_rows(true)
             .setup(vec![SESSION_SETUP])
+            .prefer_socket(false)
             .tcp_port(config.port as u16);
 
         if config.use_tls {

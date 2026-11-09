@@ -19,6 +19,7 @@ pub mod get;
 pub mod import;
 pub mod lookup;
 pub mod parse;
+pub mod passkey;
 pub mod query;
 pub mod query_changes;
 pub mod search_snippet;

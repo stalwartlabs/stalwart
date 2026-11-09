@@ -204,12 +204,12 @@ impl Response {
             SMFIR_DISCARD => Response::Action(Action::Discard),
             SMFIR_ADDHEADER => Response::Modification(Modification::AddHeader {
                 name: read_nul_terminated(&mut bytes, 16)?,
-                value: read_nul_terminated(&mut bytes, frame_len)?,
+                value: read_nul_terminated_bytes(&mut bytes, frame_len)?,
             }),
             SMFIR_CHGHEADER => Response::Modification(Modification::ChangeHeader {
                 index: read_u32(&mut bytes)?,
                 name: read_nul_terminated(&mut bytes, 16)?,
-                value: read_nul_terminated(&mut bytes, frame_len)?,
+                value: read_nul_terminated_bytes(&mut bytes, frame_len)?,
             }),
             SMFIR_PROGRESS => Response::Progress,
             SMFIR_QUARANTINE => Response::Modification(Modification::Quarantine {
@@ -247,7 +247,7 @@ impl Response {
             SMFIR_INSHEADER => Response::Modification(Modification::InsertHeader {
                 index: read_u32(&mut bytes)?,
                 name: read_nul_terminated(&mut bytes, 16)?,
-                value: read_nul_terminated(&mut bytes, frame_len)?,
+                value: read_nul_terminated_bytes(&mut bytes, frame_len)?,
             }),
             _ => return None,
         }
@@ -270,6 +270,13 @@ impl Response {
 }
 
 fn read_nul_terminated(bytes: &mut std::slice::Iter<u8>, expected_len: usize) -> Option<String> {
+    String::from_utf8(read_nul_terminated_bytes(bytes, expected_len)?).ok()
+}
+
+fn read_nul_terminated_bytes(
+    bytes: &mut std::slice::Iter<u8>,
+    expected_len: usize,
+) -> Option<Vec<u8>> {
     let mut buf = Vec::with_capacity(expected_len);
     loop {
         match bytes.next()? {
@@ -277,7 +284,7 @@ fn read_nul_terminated(bytes: &mut std::slice::Iter<u8>, expected_len: usize) ->
             byte => buf.push(*byte),
         }
     }
-    String::from_utf8(buf).ok()
+    Some(buf)
 }
 
 fn read_u32(bytes: &mut std::slice::Iter<u8>) -> Option<u32> {

@@ -100,6 +100,7 @@ Key features:
   - [Header protection](https://www.rfc-editor.org/rfc/rfc9788) with Subject hiding.
 - **Secure and robust**:
   - Automatic TLS certificate provisioning with [ACME](https://datatracker.ietf.org/doc/html/rfc8555) using `TLS-ALPN-01`, `DNS-01`, `DNS-PERSIST-01` or `HTTP-01` challenges.
+  - Blob store encryption with server-held AES-256-GCM or ChaCha20-Poly1305 keys, with key rotation and re-encryption of stored data.
   - Automated blocking of IP addresses that attack, abuse or scan the server for exploits.
   - SSRF protection for outbound requests.
   - Rate limiting.
@@ -119,6 +120,7 @@ Key features:
   - **LDAP**, **OIDC**, **SQL** or built-in authentication backend support.
   - System for Cross-domain Identity Management ([SCIM](https://www.rfc-editor.org/info/rfc7643/)) v2 for automated provisioning.
   - Two-factor authentication with Time-based One-Time Passwords (`2FA-TOTP`) 
+  - Passkeys ([WebAuthn](https://www.w3.org/TR/webauthn-3/)) for passwordless, phishing-resistant sign-in.
   - Application passwords (App Passwords).
   - Roles and permissions.
   - Access Control Lists (ACLs).

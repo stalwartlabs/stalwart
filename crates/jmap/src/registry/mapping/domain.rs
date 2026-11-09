@@ -5,16 +5,18 @@
  */
 
 use crate::registry::mapping::{ObjectResponse, RegistrySetResponse, ValidationResult};
-use common::network::{dkim::generate_dkim_selector, dns::update::DnsUpdater};
+use common::network::{
+    acme::order::is_within_domain, dkim::generate_dkim_selector, dns::update::DnsUpdater,
+};
 use jmap_proto::error::set::{SetError, SetErrorType};
 use registry::{
     schema::{
         enums::{AcmeChallengeType, DkimSignatureType, DnsRecordType},
         prelude::{ObjectType, Property},
         structs::{
-            AcmeProvider, CertificateManagement, DkimManagement, DkimManagementProperties,
-            DnsManagement, DnsServer, Domain, Task, TaskDnsManagement, TaskDomainManagement,
-            TaskStatus,
+            AcmeProvider, CertificateManagement, CertificateManagementProperties, DkimManagement,
+            DkimManagementProperties, DnsManagement, DnsServer, Domain, Task, TaskDnsManagement,
+            TaskDomainManagement, TaskStatus,
         },
     },
     types::map::Map,
@@ -22,6 +24,9 @@ use registry::{
 use std::borrow::Cow;
 use types::id::Id;
 use utils::outbound::{OutboundError, OutboundPolicy};
+
+const MAX_HOSTNAME_LEN: usize = 253;
+const MAX_LABEL_LEN: usize = 63;
 
 #[cfg_attr(not(feature = "enterprise"), allow(unused_variables))]
 pub(crate) async fn validate_domain(
@@ -66,6 +71,33 @@ pub(crate) async fn validate_domain(
         return Ok(Err(SetError::invalid_properties()
             .with_property(Property::SelectorTemplate)
             .with_description(err)));
+    }
+
+    if let CertificateManagement::Automatic(CertificateManagementProperties {
+        subject_alternative_names,
+        ..
+    }) = &domain.certificate_management
+    {
+        let old_names = old_domain
+            .filter(|old| tenant_id(old) == tenant_id(domain))
+            .and_then(|old| match &old.certificate_management {
+                CertificateManagement::Automatic(props) => Some(&props.subject_alternative_names),
+                CertificateManagement::Manual => None,
+            });
+        if let Some(name) = subject_alternative_names.iter().find(|name| {
+            old_names.is_none_or(|old| !old.contains(name)) && !is_issuable_name(name, domain)
+        }) {
+            let scope = if tenant_id(domain).is_some() {
+                "within this domain or its aliases"
+            } else {
+                "under a public suffix"
+            };
+            return Ok(Err(SetError::invalid_properties()
+                .with_property(Property::SubjectAlternativeNames)
+                .with_description(format!(
+                    "{name:?} is not a valid hostname {scope}; names containing a dot are used as written"
+                ))));
+        }
     }
 
     let check_name =
@@ -181,6 +213,48 @@ pub(crate) async fn validate_domain(
     Ok(Ok(response))
 }
 
+fn is_issuable_name(name: &str, domain: &Domain) -> bool {
+    if !name.contains('.') {
+        return (name == "*" || is_ldh_label(name))
+            && name.len() + 1 + domain.name.len() <= MAX_HOSTNAME_LEN;
+    }
+    let name = if name.bytes().any(|b| b.is_ascii_uppercase()) {
+        Cow::Owned(name.to_ascii_lowercase())
+    } else {
+        Cow::Borrowed(name)
+    };
+    let hostname = name.strip_prefix("*.").unwrap_or(&name);
+    hostname.len() <= MAX_HOSTNAME_LEN
+        && hostname.split('.').all(is_ldh_label)
+        && (is_within_domain(hostname, &domain.name, domain.aliases.as_slice())
+            || (tenant_id(domain).is_none()
+                && psl::domain(hostname.as_bytes()).is_some_and(|d| d.suffix().typ().is_some())))
+}
+
+// SPDX-SnippetBegin
+// SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+// SPDX-License-Identifier: LicenseRef-SEL
+#[cfg(feature = "enterprise")]
+fn tenant_id(domain: &Domain) -> Option<Id> {
+    domain.member_tenant_id
+}
+// SPDX-SnippetEnd
+
+#[cfg(not(feature = "enterprise"))]
+fn tenant_id(_domain: &Domain) -> Option<Id> {
+    None
+}
+
+fn is_ldh_label(label: &str) -> bool {
+    !label.is_empty()
+        && label.len() <= MAX_LABEL_LEN
+        && !label.starts_with('-')
+        && !label.ends_with('-')
+        && label
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+}
+
 fn publishes_dkim(domain: &Domain) -> bool {
     domain.dns_management.publishes(DnsRecordType::Dkim)
 }
@@ -279,3 +353,8 @@ struct ServiceAccountTokenUri<'x> {
     #[serde(borrow)]
     token_uri: Option<Cow<'x, str>>,
 }
+
+#[cfg(all(test, stalwart_tests))]
+#[rustfmt::skip]
+#[path = "../../../../../../stalwart-tests/unit/jmap/src/registry/mapping/domain/tests.rs"]
+mod tests;

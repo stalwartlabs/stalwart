@@ -141,6 +141,10 @@ impl Store {
                     to: BlobLink::Document,
                 }),
             },
+            BlobClass::Queued { queue_id } => ValueKey::from(ValueClass::Blob(BlobOp::Link {
+                hash: hash.as_ref().clone(),
+                to: BlobLink::Id { id: *queue_id },
+            })),
             _ => return Ok(None),
         };
 

@@ -10,7 +10,8 @@ use crate::{LookupStores, registry::bootstrap::Bootstrap};
     feature = "mysql",
     feature = "sqlite",
     feature = "enterprise",
-    feature = "redis"
+    feature = "redis",
+    feature = "keep"
 ))]
 use registry::schema::structs::LookupStore;
 use registry::schema::structs::StoreLookup;
@@ -72,6 +73,10 @@ impl LookupStores {
                 LookupStore::RedisSentinel(redis_sentinel_store) => {
                     crate::backend::redis::RedisStore::open_sentinel(redis_sentinel_store).await
                 }
+                #[cfg(feature = "keep")]
+                LookupStore::Keep(keep_store) => crate::backend::keep::KeepStore::open(keep_store)
+                    .await
+                    .map(crate::InMemoryStore::from),
                 _ => Err(
                     "Binary was not compiled with the selected lookup store backend".to_string(),
                 ),

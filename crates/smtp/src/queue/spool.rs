@@ -10,7 +10,8 @@ use super::{
 };
 use crate::inbound::dkim::{DkimSign, SignedMessage};
 use crate::queue::encrypt::{OutboundEncryption, QueueEncryption};
-use crate::queue::quota::QuotaReservation;
+use crate::queue::lease::{Attempt, Backoff, FinalWrite, QueueLease};
+use crate::queue::quota::{QuotaReservation, ReleasedQuota};
 use crate::queue::{FROM_DKIM2_SIGNED, MessageWrapper};
 use ahash::{AHashMap, AHashSet};
 use common::config::smtp::auth::DkimSigners;
@@ -100,6 +101,11 @@ pub trait SmtpSpool: Sync + Send {
     ) -> impl Future<Output = Option<(MessageWrapper, ArchiveVersion)>> + Send;
 
     fn read_message_archive(
+        &self,
+        id: QueueId,
+    ) -> impl Future<Output = trc::Result<Option<Archive<ArchiveBytes>>>> + Send;
+
+    fn read_message_archive_fresh(
         &self,
         id: QueueId,
     ) -> impl Future<Output = trc::Result<Option<Archive<ArchiveBytes>>>> + Send;
@@ -228,15 +234,24 @@ impl SmtpSpool for Server {
         }
     }
 
-    async fn read_message_archive(
+    fn read_message_archive(
         &self,
         id: QueueId,
-    ) -> trc::Result<Option<Archive<ArchiveBytes>>> {
+    ) -> impl Future<Output = trc::Result<Option<Archive<ArchiveBytes>>>> + Send {
         self.store()
             .get_value::<Archive<ArchiveBytes>>(ValueKey::from(ValueClass::Queue(
                 QueueClass::Message(id),
             )))
-            .await
+    }
+
+    fn read_message_archive_fresh(
+        &self,
+        id: QueueId,
+    ) -> impl Future<Output = trc::Result<Option<Archive<ArchiveBytes>>>> + Send {
+        self.store()
+            .get_value_fresh::<Archive<ArchiveBytes>>(ValueKey::from(ValueClass::Queue(
+                QueueClass::Message(id),
+            )))
     }
 }
 
@@ -255,11 +270,7 @@ impl MessageWrapper {
     }
 
     fn event_class(&self, queue_name: QueueName, due: u64) -> ValueClass {
-        ValueClass::Queue(QueueClass::MessageEvent(store::write::QueueEvent {
-            due,
-            queue_id: self.queue_id,
-            queue_name: queue_name.into_inner(),
-        }))
+        queue_event_class(self.queue_id, queue_name, due)
     }
 
     // SPDX-SnippetBegin
@@ -830,119 +841,165 @@ impl MessageWrapper {
     }
 
     pub async fn save_changes(
-        mut self,
+        self,
         server: &Server,
         prev_event: Option<u64>,
         retry_at: Option<u64>,
     ) -> bool {
-        // Release quota for completed deliveries
-        let mut batch = BatchBuilder::new();
-        let released_quotas = self.release_quota(&mut batch);
+        self.save_changes_with_lease(server, prev_event, retry_at, &QueueLease::single_attempt())
+            .await
+            == FinalWrite::Committed
+    }
 
-        // Update message queue
-        if let Some(prev_event) = prev_event {
-            batch.clear(self.event_class(self.queue_name, prev_event));
-        }
-        let mut next_events = self.message.next_events();
-        if let Some(retry_at) = retry_at {
-            let due = next_events.entry(self.queue_name).or_insert(retry_at);
-            *due = std::cmp::min(*due, retry_at);
-        }
-        for (queue_name, due) in next_events {
-            batch.set(self.event_class(queue_name, due), Vec::new());
-        }
+    pub async fn save_changes_with_lease(
+        mut self,
+        server: &Server,
+        prev_event: Option<u64>,
+        retry_at: Option<u64>,
+        lease: &QueueLease,
+    ) -> FinalWrite {
+        let released = self.take_released_quota();
+        let queue_id = self.queue_id;
+        let queue_name = self.queue_name;
+        let span_id = self.span_id;
+        let message_class = ValueClass::Queue(QueueClass::Message(queue_id));
+        let write = if self.is_multi_queue {
+            QueuedWrite::Merge(Arc::new(SaveMerge {
+                message: self.message,
+                released,
+            }))
+        } else {
+            QueuedWrite::Set {
+                archiver: Archiver::new(self.message),
+                released,
+            }
+        };
 
-        if self.is_multi_queue {
-            let queue_id = self.queue_id;
-            let queue_name = self.queue_name;
-            let new_message = self.message;
-
-            batch.merge_fnc(
-                ValueClass::Queue(QueueClass::Message(queue_id)),
-                move |_, bytes| {
-                    let mut cur_message = <Archive<ArchiveBytes> as Deserialize>::deserialize(
-                        bytes.ok_or_else(|| {
-                            trc::StoreEvent::NotFound
-                                .into_err()
-                                .details("Message no longer exists.")
-                                .caused_by(trc::location!())
-                                .ctx(trc::Key::QueueId, queue_id)
-                        })?,
-                    )
-                    .and_then(|archive| archive.deserialize::<Message>())
-                    .caused_by(trc::location!())?;
-
-                    if cur_message.blob_hash.as_slice() == new_message.blob_hash.as_slice()
-                        && cur_message.recipients.len() == new_message.recipients.len()
-                    {
-                        for (cur_rcpt, rcpt) in cur_message
-                            .recipients
-                            .iter_mut()
-                            .zip(new_message.recipients.iter())
-                            .filter(|(cur_rcpt, _)| cur_rcpt.queue == queue_name)
-                        {
-                            *cur_rcpt = rcpt.clone();
+        let mut retry = lease.retry();
+        loop {
+            let attempt = retry.attempt();
+            let mut batch = BatchBuilder::new();
+            write.released().write(&mut batch);
+            if let Some(prev_event) = prev_event {
+                batch.clear(queue_event_class(queue_id, queue_name, prev_event));
+            }
+            let mut next_events = write.message().next_events();
+            if let Some(retry_at) = retry_at {
+                let due = next_events.entry(queue_name).or_insert(retry_at);
+                *due = std::cmp::min(*due, retry_at);
+            }
+            for (queue_name, due) in next_events {
+                batch.set(queue_event_class(queue_id, queue_name, due), Vec::new());
+            }
+            match &write {
+                QueuedWrite::Set { archiver, .. } => {
+                    let message_bytes = match archiver.serialize() {
+                        Ok(data) => data,
+                        Err(err) => {
+                            trc::error!(
+                                err.details("Failed to serialize message.")
+                                    .span_id(span_id)
+                                    .caused_by(trc::location!())
+                            );
+                            return FinalWrite::Failed;
                         }
-
-                        if !released_quotas.is_empty() {
-                            let mut metadata = std::mem::take(&mut cur_message.metadata).into_vec();
-                            metadata.retain(|entry| match entry {
-                                Metadata::QueueCount { id, .. }
-                                | Metadata::QueueSize { id, .. } => {
-                                    released_quotas.binary_search(id).is_err()
-                                }
-                                _ => true,
-                            });
-                            cur_message.metadata = metadata.into_boxed_slice();
-                        }
-
-                        Archiver::new(cur_message)
-                            .serialize()
-                            .caused_by(trc::location!())
-                            .map(MergeResult::Update)
-                    } else {
-                        Err(trc::StoreEvent::UnexpectedError
-                            .into_err()
-                            .details("Message blob hash or recipient count mismatch.")
-                            .caused_by(trc::location!())
-                            .ctx(trc::Key::QueueId, queue_id))
+                    };
+                    if attempt == Attempt::Retry {
+                        batch.assert_value(
+                            message_class.clone(),
+                            AssertValue::Archive(lease.version()),
+                        );
                     }
-                },
-            );
-        } else {
-            let message_bytes = match Archiver::new(self.message).serialize() {
-                Ok(data) => data,
-                Err(err) => {
-                    trc::error!(
-                        err.details("Failed to serialize message.")
-                            .span_id(self.span_id)
-                            .caused_by(trc::location!())
-                    );
-                    return false;
+                    batch.set(message_class.clone(), message_bytes);
                 }
+                QueuedWrite::Merge(merge) => {
+                    let merge = merge.clone();
+                    batch.merge_fnc(message_class.clone(), move |_, bytes| {
+                        merge.apply(bytes, queue_id, queue_name, attempt)
+                    });
+                }
+            }
+
+            let err = match server.store().write_batch(&mut batch).await {
+                Ok(_) => return FinalWrite::Committed,
+                Err(err) if attempt == Attempt::Retry && err.is_assertion_failure() => {
+                    return FinalWrite::Committed;
+                }
+                Err(err) => err,
             };
-
-            batch.set(
-                ValueClass::Queue(QueueClass::Message(self.queue_id)),
-                message_bytes,
-            );
-        }
-
-        if let Err(err) = server.store().write_batch(&mut batch).await {
-            trc::error!(
-                err.details("Failed to save changes.")
-                    .span_id(self.span_id)
-                    .caused_by(trc::location!())
-            );
-            false
-        } else {
-            true
+            let backoff = retry.next(&err);
+            if attempt == Attempt::First {
+                trc::error!(
+                    err.details("Failed to save changes.")
+                        .span_id(span_id)
+                        .caused_by(trc::location!())
+                );
+            } else if backoff.is_stop() {
+                trc::error!(
+                    err.details("Failed to save changes after retrying.")
+                        .span_id(span_id)
+                        .caused_by(trc::location!())
+                );
+            }
+            match backoff {
+                Backoff::Sleep(backoff) => tokio::time::sleep(backoff).await,
+                Backoff::Stop(outcome) => return outcome,
+            }
         }
     }
 
     pub async fn remove(self, server: &Server, prev_event: Option<u64>) -> bool {
+        self.remove_with_lease(server, prev_event, &QueueLease::single_attempt())
+            .await
+            == FinalWrite::Committed
+    }
+
+    pub async fn remove_with_lease(
+        self,
+        server: &Server,
+        prev_event: Option<u64>,
+        lease: &QueueLease,
+    ) -> FinalWrite {
+        let mut retry = lease.retry();
+        loop {
+            let attempt = retry.attempt();
+            let mut batch = self.remove_batch(prev_event, attempt);
+            let result = match server.store().write_batch(&mut batch).await {
+                Err(err) if err.is_assertion_failure() => {
+                    let mut batch = BatchBuilder::new();
+                    self.clear_events(&mut batch, prev_event);
+                    server.store().write_batch(&mut batch).await
+                }
+                result => result,
+            };
+            let err = match result {
+                Ok(_) => return FinalWrite::Committed,
+                Err(err) => err,
+            };
+            let backoff = retry.next(&err);
+            if attempt == Attempt::First {
+                trc::error!(
+                    err.details("Failed to write to update queue.")
+                        .span_id(self.span_id)
+                        .caused_by(trc::location!())
+                );
+            } else if backoff.is_stop() {
+                trc::error!(
+                    err.details("Failed to write to update queue after retrying.")
+                        .span_id(self.span_id)
+                        .caused_by(trc::location!())
+                );
+            }
+            match backoff {
+                Backoff::Sleep(backoff) => tokio::time::sleep(backoff).await,
+                Backoff::Stop(outcome) => return outcome,
+            }
+        }
+    }
+
+    fn remove_batch(&self, prev_event: Option<u64>, attempt: Attempt) -> BatchBuilder {
         let mut batch = BatchBuilder::new();
-        if self.is_multi_queue {
+        if self.is_multi_queue || attempt == Attempt::Retry {
             batch.assert_value(
                 ValueClass::Queue(QueueClass::Message(self.queue_id)),
                 AssertValue::Some,
@@ -989,25 +1046,7 @@ impl MessageWrapper {
             .clear(ValueClass::Queue(QueueClass::Message(self.queue_id)));
         self.write_delivery_results(&mut batch);
 
-        let result = match server.store().write_batch(&mut batch).await {
-            Err(err) if err.is_assertion_failure() => {
-                let mut batch = BatchBuilder::new();
-                self.clear_events(&mut batch, prev_event);
-                server.store().write_batch(&mut batch).await
-            }
-            result => result,
-        };
-
-        if let Err(err) = result {
-            trc::error!(
-                err.details("Failed to write to update queue.")
-                    .span_id(self.span_id)
-                    .caused_by(trc::location!())
-            );
-            false
-        } else {
-            true
-        }
+        batch
     }
 
     fn clear_events(&self, batch: &mut BatchBuilder, prev_event: Option<u64>) {
@@ -1028,7 +1067,8 @@ impl MessageWrapper {
     ) -> RegistryWrite {
         let mut write = LockedWrite::new(self.queue_id, self.span_id, &self.message);
         let batch = &mut write.batch;
-        let released_quotas = self.release_quota(batch);
+        let released = self.take_released_quota();
+        released.write(batch);
 
         for (queue_name, due) in prev_events {
             batch.clear(self.event_class(queue_name, due));
@@ -1067,11 +1107,11 @@ impl MessageWrapper {
                         }
                     }
 
-                    if !released_quotas.is_empty() {
+                    if !released.ids().is_empty() {
                         let mut metadata = std::mem::take(&mut cur_message.metadata).into_vec();
                         metadata.retain(|entry| match entry {
                             Metadata::QueueCount { id, .. } | Metadata::QueueSize { id, .. } => {
-                                released_quotas.binary_search(id).is_err()
+                                released.ids().binary_search(id).is_err()
                             }
                             _ => true,
                         });
@@ -1325,5 +1365,110 @@ impl<'x, 'y> QueueParams<'x, 'y> {
     pub fn with_metadata(mut self, metadata: Option<Metadata>) -> Self {
         self.metadata.extend(metadata);
         self
+    }
+}
+
+#[allow(clippy::large_enum_variant)]
+enum QueuedWrite {
+    Set {
+        archiver: Archiver<Message>,
+        released: ReleasedQuota,
+    },
+    Merge(Arc<SaveMerge>),
+}
+
+struct SaveMerge {
+    message: Message,
+    released: ReleasedQuota,
+}
+
+fn queue_event_class(queue_id: QueueId, queue_name: QueueName, due: u64) -> ValueClass {
+    ValueClass::Queue(QueueClass::MessageEvent(store::write::QueueEvent {
+        due,
+        queue_id,
+        queue_name: queue_name.into_inner(),
+    }))
+}
+
+impl QueuedWrite {
+    fn message(&self) -> &Message {
+        match self {
+            QueuedWrite::Set { archiver, .. } => &archiver.inner,
+            QueuedWrite::Merge(merge) => &merge.message,
+        }
+    }
+
+    fn released(&self) -> &ReleasedQuota {
+        match self {
+            QueuedWrite::Set { released, .. } => released,
+            QueuedWrite::Merge(merge) => &merge.released,
+        }
+    }
+}
+
+impl SaveMerge {
+    fn apply(
+        &self,
+        bytes: Option<&[u8]>,
+        queue_id: QueueId,
+        queue_name: QueueName,
+        attempt: Attempt,
+    ) -> trc::Result<MergeResult> {
+        let mut cur_message =
+            <Archive<ArchiveBytes> as Deserialize>::deserialize(bytes.ok_or_else(|| {
+                trc::StoreEvent::NotFound
+                    .into_err()
+                    .details("Message no longer exists.")
+                    .caused_by(trc::location!())
+                    .ctx(trc::Key::QueueId, queue_id)
+            })?)
+            .and_then(|archive| archive.deserialize::<Message>())
+            .caused_by(trc::location!())?;
+
+        if cur_message.blob_hash.as_slice() != self.message.blob_hash.as_slice()
+            || cur_message.recipients.len() != self.message.recipients.len()
+        {
+            return Err(trc::StoreEvent::UnexpectedError
+                .into_err()
+                .details("Message blob hash or recipient count mismatch.")
+                .caused_by(trc::location!())
+                .ctx(trc::Key::QueueId, queue_id));
+        }
+
+        if attempt == Attempt::Retry
+            && self.released.has_entries()
+            && !self.released.is_pending(&cur_message.metadata)
+        {
+            return Err(trc::StoreEvent::AssertValueFailed
+                .into_err()
+                .details("Queue changes already applied.")
+                .caused_by(trc::location!())
+                .ctx(trc::Key::QueueId, queue_id));
+        }
+
+        for (cur_rcpt, rcpt) in cur_message
+            .recipients
+            .iter_mut()
+            .zip(self.message.recipients.iter())
+            .filter(|(cur_rcpt, _)| cur_rcpt.queue == queue_name)
+        {
+            *cur_rcpt = rcpt.clone();
+        }
+
+        if !self.released.ids().is_empty() {
+            let mut metadata = std::mem::take(&mut cur_message.metadata).into_vec();
+            metadata.retain(|entry| match entry {
+                Metadata::QueueCount { id, .. } | Metadata::QueueSize { id, .. } => {
+                    self.released.ids().binary_search(id).is_err()
+                }
+                _ => true,
+            });
+            cur_message.metadata = metadata.into_boxed_slice();
+        }
+
+        Archiver::new(cur_message)
+            .serialize()
+            .caused_by(trc::location!())
+            .map(MergeResult::Update)
     }
 }

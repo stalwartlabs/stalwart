@@ -9,7 +9,9 @@ use crate::{
     registry::{
         mapping::{
             RegistryGetResponse, RegistryQueryResponse, RegistrySetResponse,
-            principal::build_set_error, public_key::PublicKeyManagement,
+            passkey::{passkey_get, passkey_set},
+            principal::build_set_error,
+            public_key::PublicKeyManagement,
         },
         query::RegistryQueryFilters,
         set::map_write_error,
@@ -379,6 +381,12 @@ pub(crate) async fn account_set(
                             }
                             api_key_total += 1;
                         }
+                        Credential::Passkey(c) => {
+                            let credential_id = c.credential_id.id();
+                            if credential_id > last_credential_id {
+                                last_credential_id = credential_id;
+                            }
+                        }
                     }
                 }
 
@@ -522,10 +530,11 @@ pub(crate) async fn account_set(
 
             // Process updates
             'outer: for (id, value) in set.update.drain(..) {
-                if let Some(mut old_credential) = account
-                    .credentials
-                    .values_mut()
-                    .find(|credential| credential.credential_id() == id)
+                if let Some(mut old_credential) =
+                    account.credentials.values_mut().find(|credential| {
+                        credential.credential_id() == id
+                            && !matches!(credential, Credential::Passkey(_))
+                    })
                 {
                     let mut credential = old_credential.clone();
                     let mut unpatched_properties = VecMap::new();
@@ -614,7 +623,10 @@ pub(crate) async fn account_set(
                     .position(|c| c.value.credential_id() == id)
                 {
                     let credentials = &mut account.credentials.inner_mut().inner;
-                    if !matches!(credentials[idx].value, Credential::Password(_)) {
+                    if !matches!(
+                        credentials[idx].value,
+                        Credential::Password(_) | Credential::Passkey(_)
+                    ) {
                         credentials.remove(idx);
                         set.response.destroyed.push(id);
                     } else {
@@ -630,6 +642,7 @@ pub(crate) async fn account_set(
                 }
             }
         }
+        ObjectType::Passkey => passkey_set(&mut set, &mut account).await?,
         _ => unreachable!(),
     }
 
@@ -817,6 +830,7 @@ pub(crate) async fn account_get(
                 get.not_found(id);
             }
         }
+        ObjectType::Passkey => passkey_get(&mut get, account),
         _ => unreachable!(),
     }
 
@@ -837,51 +851,50 @@ pub(crate) async fn credential_query(
             .details("Account not found."));
     };
 
-    let credential_type = match query.object_type {
-        ObjectType::AppPassword => CredentialType::AppPassword,
-        ObjectType::ApiKey => CredentialType::ApiKey,
+    let (credential_type, date_property) = match query.object_type {
+        ObjectType::AppPassword => (CredentialType::AppPassword, Property::ExpiresAt),
+        ObjectType::ApiKey => (CredentialType::ApiKey, Property::ExpiresAt),
+        ObjectType::Passkey => (CredentialType::Passkey, Property::CreatedAt),
         _ => unreachable!(),
     };
-    let mut expires_at_filter = None;
+    let mut date_filter = None;
 
-    query
-        .request
-        .extract_filters(|property, op, value| match property {
-            Property::ExpiresAt => {
-                if let Some(value) = value
-                    .as_str()
-                    .and_then(|value| UTCDateTime::from_str(value).ok())
-                {
-                    expires_at_filter = Some((op, value));
-                    true
-                } else {
-                    false
-                }
-            }
-            _ => false,
-        })?;
+    query.request.extract_filters(|property, op, value| {
+        if property == date_property
+            && let Some(value) = value
+                .as_str()
+                .and_then(|value| UTCDateTime::from_str(value).ok())
+        {
+            date_filter = Some((op, value));
+            true
+        } else {
+            false
+        }
+    })?;
 
     let mut matches = Vec::new();
     for credential in account.credentials.iter() {
         if credential.object_type() == credential_type {
-            let (credential_id, expires_at) = match credential {
-                Credential::AppPassword(credential) => {
+            let (credential_id, date) = match credential {
+                Credential::AppPassword(credential) | Credential::ApiKey(credential) => {
                     (credential.credential_id, credential.expires_at)
                 }
-                Credential::ApiKey(credential) => (credential.credential_id, credential.expires_at),
+                Credential::Passkey(credential) => {
+                    (credential.credential_id, Some(credential.created_at))
+                }
                 _ => unreachable!(),
             };
-            if expires_at_filter.is_none_or(|(op, filter_value)| {
-                expires_at.is_some_and(|expires_at| match op {
-                    RegistryFilterOp::Equal => expires_at == filter_value,
-                    RegistryFilterOp::GreaterThan => expires_at > filter_value,
-                    RegistryFilterOp::GreaterEqualThan => expires_at >= filter_value,
-                    RegistryFilterOp::LowerThan => expires_at < filter_value,
-                    RegistryFilterOp::LowerEqualThan => expires_at <= filter_value,
+            if date_filter.is_none_or(|(op, filter_value)| {
+                date.is_some_and(|date| match op {
+                    RegistryFilterOp::Equal => date == filter_value,
+                    RegistryFilterOp::GreaterThan => date > filter_value,
+                    RegistryFilterOp::GreaterEqualThan => date >= filter_value,
+                    RegistryFilterOp::LowerThan => date < filter_value,
+                    RegistryFilterOp::LowerEqualThan => date <= filter_value,
                     RegistryFilterOp::TextMatch => false,
                 })
             }) {
-                matches.push((credential_id, expires_at));
+                matches.push((credential_id, date));
             }
         }
     }
@@ -891,7 +904,7 @@ pub(crate) async fn credential_query(
         .extract_parameters(query.server.core.jmap.query_max_results, None)?;
 
     match params.sort_by {
-        Property::ExpiresAt => {
+        property if property == date_property => {
             if params.sort_ascending {
                 matches.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
             } else {

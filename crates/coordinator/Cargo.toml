@@ -1,6 +1,6 @@
 [package]
 name = "coordinator"
-version = "1.0.3"
+version = "1.1.0"
 edition = "2024"
 
 [dependencies]
@@ -15,12 +15,14 @@ zenoh = { version = "1.10.1", default-features = false, features = ["auth_pubkey
 rdkafka = { version = "0.39", features = ["cmake-build", "ssl"], optional = true }
 redis = { version = "1.8", features = [ "tokio-comp", "tokio-rustls-comp", "tls-rustls-insecure", "tls-rustls", "cluster-async", "sentinel"], optional = true }
 deadpool = { version = "0.13", default-features = false, features = ["managed"], optional = true }
+hashify = { version = "0.3", optional = true }
 
 [features]
 nats = ["async-nats", "futures", "dep:utils"]
 zenoh = ["dep:zenoh"]
 kafka = ["rdkafka", "futures"]
 redis = ["dep:redis", "dep:deadpool", "futures", "store/redis"]
+keep = ["dep:hashify", "store/keep"]
 enterprise = ["store/enterprise", "registry/enterprise", "utils?/enterprise", "trc/enterprise"]
 
 [lints]

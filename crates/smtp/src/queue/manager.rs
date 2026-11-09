@@ -10,7 +10,7 @@ use super::{
 };
 use crate::queue::{
     Recipient,
-    spool::{LOCK_EXPIRY, QUEUE_REFRESH},
+    spool::{LOCK_EXPIRY, QUEUE_REFRESH, SmtpSpool},
 };
 use ahash::AHashMap;
 use common::{
@@ -103,7 +103,13 @@ impl SpawnQueue for mpsc::Receiver<QueueEvent> {
     }
 
     fn discard(mut self) {
-        tokio::spawn(async move { while self.recv().await.is_some() {} });
+        tokio::spawn(async move {
+            while let Some(event) = self.recv().await {
+                if matches!(event, QueueEvent::Stop) {
+                    break;
+                }
+            }
+        });
     }
 }
 
@@ -116,6 +122,7 @@ const STARTUP_DELAY: Duration = Duration::from_secs(1);
 const CANDIDATE_OVERSCAN: usize = 4;
 const PAUSED_WAKE: Duration = Duration::from_secs(86400);
 const WALK_UNKNOWN_QUEUE_ROWS: usize = 128;
+pub const QUEUE_DRAIN_TIMEOUT: Duration = Duration::from_secs(8);
 
 impl Queue {
     pub fn new(core: Arc<Inner>, rx: mpsc::Receiver<QueueEvent>) -> Self {
@@ -147,13 +154,53 @@ impl Queue {
             .await;
             let server = self.core.build_server();
             match event {
-                Ok(Some(event)) => {
-                    self.handle_event(event, &server);
-
-                    while let Ok(event) = self.rx.try_recv() {
-                        self.handle_event(event, &server);
+                Ok(Some(mut event)) => loop {
+                    match event {
+                        QueueEvent::WorkerDone {
+                            queue_id,
+                            queue_name,
+                            status,
+                        } => {
+                            let is_cluster = server.core.storage.coordinator.is_enabled();
+                            virtual_queue(&mut self.queues, queue_name, &server)
+                                .worker_done(queue_id, status, is_cluster);
+                        }
+                        QueueEvent::Refresh(QueueRefresh::Queued(events)) => {
+                            let now = now();
+                            for event in events {
+                                virtual_queue(&mut self.queues, event.queue_name, &server)
+                                    .add_event(event.queue_id, event.due, self.revision, now);
+                            }
+                        }
+                        QueueEvent::Refresh(QueueRefresh::Queues(names)) => {
+                            for name in names.iter() {
+                                virtual_queue(&mut self.queues, name, &server)
+                                    .request_rescan(Rescan::Coalesced);
+                            }
+                        }
+                        QueueEvent::Refresh(QueueRefresh::All) => {
+                            self.is_walk_due = true;
+                        }
+                        QueueEvent::Paused(paused) => {
+                            self.core
+                                .data
+                                .queue_status
+                                .store(!paused, Ordering::Relaxed);
+                            self.is_paused = paused;
+                            self.is_walk_due |= !paused;
+                        }
+                        QueueEvent::ReloadSettings => {
+                            self.reload_settings(&server);
+                        }
+                        QueueEvent::Stop => {
+                            self.stop(&server).await;
+                        }
                     }
-                }
+                    match self.rx.try_recv() {
+                        Ok(next) => event = next,
+                        Err(_) => break,
+                    }
+                },
                 Err(_) => {}
                 Ok(None) => {
                     break;
@@ -169,52 +216,34 @@ impl Queue {
         }
     }
 
-    fn handle_event(&mut self, event: QueueEvent, server: &Server) {
-        match event {
-            QueueEvent::WorkerDone {
-                queue_id,
-                queue_name,
-                status,
-            } => {
-                let is_cluster = server.core.storage.coordinator.is_enabled();
-                virtual_queue(&mut self.queues, queue_name, server)
-                    .worker_done(queue_id, status, is_cluster);
-            }
-            QueueEvent::Refresh(QueueRefresh::Queued(events)) => {
-                let now = now();
-                for event in events {
-                    virtual_queue(&mut self.queues, event.queue_name, server).add_event(
-                        event.queue_id,
-                        event.due,
-                        self.revision,
-                        now,
-                    );
+    async fn stop(&mut self, server: &Server) {
+        let deadline = tokio::time::Instant::now() + QUEUE_DRAIN_TIMEOUT;
+        let is_cluster = server.core.storage.coordinator.is_enabled();
+        while self.queues.iter().any(|queue| queue.in_flight > 0) {
+            match tokio::time::timeout_at(deadline, self.rx.recv()).await {
+                Ok(Some(QueueEvent::WorkerDone {
+                    queue_id,
+                    queue_name,
+                    status,
+                })) => {
+                    virtual_queue(&mut self.queues, queue_name, server)
+                        .worker_done(queue_id, status, is_cluster);
                 }
-            }
-            QueueEvent::Refresh(QueueRefresh::Queues(names)) => {
-                for name in names.iter() {
-                    virtual_queue(&mut self.queues, name, server).request_rescan(Rescan::Coalesced);
-                }
-            }
-            QueueEvent::Refresh(QueueRefresh::All) => {
-                self.is_walk_due = true;
-            }
-            QueueEvent::Paused(paused) => {
-                self.core
-                    .data
-                    .queue_status
-                    .store(!paused, Ordering::Relaxed);
-                self.is_paused = paused;
-                self.is_walk_due |= !paused;
-            }
-            QueueEvent::ReloadSettings => {
-                self.reload_settings(server);
-            }
-            QueueEvent::Stop => {
-                self.rx.close();
-                self.is_paused = true;
+                Ok(Some(_)) => {}
+                Ok(None) | Err(_) => break,
             }
         }
+
+        for queue in &self.queues {
+            for (queue_id, tracked) in &queue.tracked {
+                if tracked.state == TrackedState::InFlight {
+                    server.unlock_event(*queue_id, queue.name).await;
+                }
+            }
+        }
+
+        self.rx.close();
+        self.is_paused = true;
     }
 
     fn reload_settings(&mut self, server: &Server) {

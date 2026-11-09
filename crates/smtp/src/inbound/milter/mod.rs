@@ -125,17 +125,17 @@ pub enum Modification {
     },
     AddHeader {
         name: String,
-        value: String,
+        value: Vec<u8>,
     },
     InsertHeader {
         index: u32,
         name: String,
-        value: String,
+        value: Vec<u8>,
     },
     ChangeHeader {
         index: u32,
         name: String,
-        value: String,
+        value: Vec<u8>,
     },
     Quarantine {
         reason: String,
@@ -319,17 +319,34 @@ impl Display for Modification {
                 write!(f, "REPLACE_BODY ({} bytes)", value.len())
             }
             Modification::AddHeader { name, value } => {
-                write!(f, "ADD_HEADER ({}: {})", name, value)
+                write!(
+                    f,
+                    "ADD_HEADER ({}: {})",
+                    name,
+                    String::from_utf8_lossy(value)
+                )
             }
             Modification::ChangeHeader { index, name, value } => {
-                write!(f, "CHANGE_HEADER (index: {}, {}: {})", index, name, value)
+                write!(
+                    f,
+                    "CHANGE_HEADER (index: {}, {}: {})",
+                    index,
+                    name,
+                    String::from_utf8_lossy(value)
+                )
             }
             Modification::Quarantine { reason } => write!(f, "QUARANTINE ({})", reason),
             Modification::ChangeFrom { sender, args } => {
                 write!(f, "CHANGE_FROM (<{}> {})", sender, args)
             }
             Modification::InsertHeader { index, name, value } => {
-                write!(f, "INSERT_HEADER (index: {}, {}: {})", index, name, value)
+                write!(
+                    f,
+                    "INSERT_HEADER (index: {}, {}: {})",
+                    index,
+                    name,
+                    String::from_utf8_lossy(value)
+                )
             }
         }
     }

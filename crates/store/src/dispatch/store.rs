@@ -79,6 +79,34 @@ impl Store {
         result
     }
 
+    pub async fn get_value_fresh<U>(&self, key: impl Key) -> trc::Result<Option<U>>
+    where
+        U: Deserialize + 'static,
+    {
+        match self {
+            #[cfg(feature = "foundation")]
+            Self::FoundationDb(store) => {
+                #[cfg(stalwart_tests)]
+                let key = {
+                    let key = crate::dispatch::StoreOps::count_get_value(key);
+                    crate::dispatch::ops::wait(crate::dispatch::Latency::GetValue).await;
+                    key
+                };
+                let result = store.get_value_fresh(key).await.caused_by(trc::location!());
+                #[cfg(stalwart_tests)]
+                crate::dispatch::StoreOps::count_get_value_hit(&result);
+                result
+            }
+            // SPDX-SnippetBegin
+            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+            // SPDX-License-Identifier: LicenseRef-SEL
+            #[cfg(all(feature = "enterprise", any(feature = "postgres", feature = "mysql")))]
+            Self::SQLReadReplica(store) => Box::pin(store.primary_store().get_value(key)).await,
+            // SPDX-SnippetEnd
+            _ => self.get_value(key).await,
+        }
+    }
+
     pub async fn key_exists(&self, key: impl Key) -> trc::Result<bool> {
         #[cfg(stalwart_tests)]
         {

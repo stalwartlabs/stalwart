@@ -26,7 +26,10 @@ use common::{
     },
     storage::dav::{FILE_KIND_SYMLINK, MAX_FILE_NODE_DEPTH},
 };
-use groupware::{DestroyArchive, file::FileNode};
+use groupware::{
+    DestroyArchive,
+    file::{FileNode, FileNodeRole},
+};
 use jmap_proto::{
     error::set::SetError,
     object::file_node::{self, FileNodeProperty, FileNodeValue, OnExists},
@@ -108,6 +111,7 @@ pub(super) struct FileNodeWriter<'x> {
     logged_subtrees: Vec<u32>,
     cached_heights: AHashMap<u32, usize>,
     rename_suffixes: AHashMap<(ParentRef, String), u32>,
+    roles: Option<Vec<(u8, NodeRef)>>,
     quota: FileNodeQuota,
     created: usize,
     destroyed_counts: ObjectCounts,
@@ -163,6 +167,7 @@ impl<'x> FileNodeWriter<'x> {
             logged_subtrees: Vec::new(),
             cached_heights: AHashMap::new(),
             rename_suffixes: AHashMap::new(),
+            roles: None,
             quota: FileNodeQuota::unlimited(),
             created: 0,
             destroyed_counts: ObjectCounts::default(),
@@ -519,6 +524,56 @@ impl<'x> FileNodeWriter<'x> {
             ));
         }
         Ok(Placement::Ready)
+    }
+
+    pub fn validate_role(
+        &mut self,
+        claimant: NodeRef,
+        role: FileNodeRole,
+        unprocessed: Option<&AHashSet<NodeRef>>,
+    ) -> Result<Placement, SetError<FileNodeProperty>> {
+        let role_id = role.id();
+        self.load_roles();
+        let holder = self.roles.iter().flatten().find_map(|(id, holder)| {
+            (*id == role_id
+                && *holder != claimant
+                && !matches!(holder, NodeRef::Node(document_id) if self.destroyed.contains(document_id)))
+            .then_some(*holder)
+        });
+        match holder {
+            None => Ok(Placement::Ready),
+            Some(holder)
+                if unprocessed.is_some_and(|unprocessed| unprocessed.contains(&holder)) =>
+            {
+                Ok(Placement::Deferred)
+            }
+            Some(_) => Err(invalid(
+                FileNodeProperty::Role,
+                "Another Directory in this account already has this role.",
+            )),
+        }
+    }
+
+    pub fn register_role(&mut self, holder: NodeRef, role: Option<FileNodeRole>) {
+        let roles = self.load_roles();
+        roles
+            .retain(|(id, current)| *current != holder && role.is_none_or(|role| *id != role.id()));
+        if let Some(role) = role {
+            roles.push((role.id(), holder));
+        }
+    }
+
+    fn load_roles(&mut self) -> &mut Vec<(u8, NodeRef)> {
+        let cache = self.cache;
+        self.roles.get_or_insert_with(|| {
+            cache
+                .containers()
+                .filter_map(|resource| {
+                    let role = resource.file_role();
+                    (role != 0).then(|| (role, NodeRef::Node(resource.document_id())))
+                })
+                .collect()
+        })
     }
 
     pub fn can_add_to(&self, parent: ParentRef) -> bool {

@@ -17,7 +17,7 @@ use imap::core::ImapSessionManager;
 use managesieve::core::ManageSieveSessionManager;
 use pop3::Pop3SessionManager;
 use services::{StartServices, broadcast::subscriber::spawn_broadcast_subscriber};
-use smtp::{StartQueueManager, core::SmtpSessionManager};
+use smtp::{StartQueueManager, core::SmtpSessionManager, drain_queue_manager};
 use std::{process::ExitCode, time::Duration};
 use trc::Collector;
 use utils::{
@@ -148,7 +148,7 @@ async fn async_main() -> ExitCode {
     let _ = shutdown_tx.send(true);
 
     // Persist the newest cache snapshots before the process exits
-    inner.cache.swap.stop().await;
+    tokio::join!(inner.cache.swap.stop(), drain_queue_manager(&inner));
 
     // Shutdown collector
     Collector::shutdown();

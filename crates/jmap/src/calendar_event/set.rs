@@ -71,7 +71,7 @@ use groupware::{
     },
     scheduling::{
         ItipError, ItipMessages,
-        event_create::{itip_attendee_create, itip_create},
+        event_create::{itip_attendee_create, itip_create, itip_unscheduled_update},
         event_update::itip_update,
         itip::{itip_assign_organizer, itip_unreachable_recipient},
         recipient::RecipientPolicy,
@@ -1086,8 +1086,9 @@ impl CalendarEventSet for Server {
                         policy,
                     )
                 } else {
-                    itip_create(
+                    itip_unscheduled_update(
                         &mut new_content.data.event,
+                        &previous_event,
                         account_info.addresses(),
                         policy,
                     )
@@ -1105,13 +1106,10 @@ impl CalendarEventSet for Server {
                             .sum::<usize>()
                             < self.core.groupware.itip_outbound_max_recipients
                         {
-                            // Only update schedule tag if the user is the organizer
-                            if is_organizer {
-                                if let Some(schedule_tag) = &mut new_calendar_event.schedule_tag {
-                                    *schedule_tag += 1;
-                                } else {
-                                    new_calendar_event.schedule_tag = Some(1);
-                                }
+                            match &mut new_calendar_event.schedule_tag {
+                                Some(schedule_tag) if is_organizer => *schedule_tag += 1,
+                                Some(_) => {}
+                                None => new_calendar_event.schedule_tag = Some(1),
                             }
 
                             itip_messages = Some(ItipMessages::new(messages));

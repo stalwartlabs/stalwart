@@ -89,7 +89,7 @@ impl AcmeRequestBuilder {
     pub async fn renew(
         &self,
         server: &Server,
-        domains: Vec<String>,
+        domains: &[String],
         reuse_key_pem: Option<String>,
         dns_parameters: Option<AcmeDnsParameters>,
     ) -> AcmeResult<PemCert> {
@@ -97,7 +97,7 @@ impl AcmeRequestBuilder {
         let result = self
             .run_order(
                 server,
-                &domains,
+                domains,
                 reuse_key_pem,
                 dns_parameters.as_ref(),
                 &mut published,
@@ -472,6 +472,20 @@ pub fn qualify_hostname(hostname: &str, domain: &str) -> String {
     }
 }
 
+pub fn is_within_domain(hostname: &str, domain: &str, aliases: &[String]) -> bool {
+    is_within_zone(hostname, domain) || aliases.iter().any(|alias| is_within_zone(hostname, alias))
+}
+
+fn is_within_zone(hostname: &str, zone: &str) -> bool {
+    hostname
+        .len()
+        .checked_sub(zone.len())
+        .and_then(|split| hostname.split_at_checked(split))
+        .is_some_and(|(prefix, suffix)| {
+            suffix.eq_ignore_ascii_case(zone) && (prefix.is_empty() || prefix.ends_with('.'))
+        })
+}
+
 fn chain_matches(pem_chain: &str, preferred: &str) -> bool {
     let Ok(blocks) = pem::parse_many(pem_chain) else {
         return false;
@@ -541,6 +555,14 @@ impl ParsedCert {
                     ),
                 }
             })
+    }
+
+    pub fn unrequested_name(&self, requested: &[String]) -> Option<&str> {
+        self.sans.iter().map(String::as_str).find(|name| {
+            !requested
+                .iter()
+                .any(|requested| requested.eq_ignore_ascii_case(name))
+        })
     }
 }
 

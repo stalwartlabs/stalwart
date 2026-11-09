@@ -311,6 +311,7 @@ impl JmapAuthorization for AccessToken {
             },
             RequestMethod::SearchSnippet(_) => Permission::JmapSearchSnippetGet,
             RequestMethod::ValidateScript(_) => Permission::JmapSieveScriptValidate,
+            RequestMethod::PasskeyRegistrationOptions(_) => Permission::SysPasskeyCreate,
             RequestMethod::LookupBlob(_) => Permission::JmapBlobLookup,
             RequestMethod::UploadBlob(_) => Permission::JmapBlobUpload,
             RequestMethod::Echo(_) => Permission::JmapCoreEcho,

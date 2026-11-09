@@ -6,6 +6,8 @@
 
 #[cfg(feature = "kafka")]
 pub mod kafka;
+#[cfg(feature = "keep")]
+pub mod keep;
 #[cfg(feature = "nats")]
 pub mod nats;
 #[cfg(feature = "redis")]

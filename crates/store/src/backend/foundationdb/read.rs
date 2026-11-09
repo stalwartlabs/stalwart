@@ -27,6 +27,11 @@ use std::{
     time::Instant,
 };
 
+enum ReadAt {
+    Cached,
+    Fresh,
+}
+
 #[allow(dead_code)]
 pub(crate) enum ChunkedValue {
     Single(FdbSlice),
@@ -35,14 +40,34 @@ pub(crate) enum ChunkedValue {
 }
 
 impl FdbStore {
-    pub(crate) async fn get_value<U>(&self, key: impl Key) -> trc::Result<Option<U>>
+    pub(crate) fn get_value<U>(&self, key: impl Key) -> impl Future<Output = trc::Result<Option<U>>>
+    where
+        U: Deserialize,
+    {
+        self.get_value_at(key, ReadAt::Cached)
+    }
+
+    pub(crate) fn get_value_fresh<U>(
+        &self,
+        key: impl Key,
+    ) -> impl Future<Output = trc::Result<Option<U>>>
+    where
+        U: Deserialize,
+    {
+        self.get_value_at(key, ReadAt::Fresh)
+    }
+
+    async fn get_value_at<U>(&self, key: impl Key, read_at: ReadAt) -> trc::Result<Option<U>>
     where
         U: Deserialize,
     {
         let key = key.serialize(WITH_SUBSPACE);
         let mut retry_count = 0;
         let start = Instant::now();
-        let mut trx = self.read_trx().await?;
+        let mut trx = match read_at {
+            ReadAt::Cached => self.read_trx().await?,
+            ReadAt::Fresh => self.fresh_trx().await?,
+        };
 
         loop {
             match read_chunked_value(&key, &trx, true).await {
@@ -340,9 +365,23 @@ impl FdbStore {
         self.apply_read_version(trx).await
     }
 
+    async fn fresh_trx(&self) -> trc::Result<Transaction> {
+        let trx = self.db.create_trx().map_err(into_error)?;
+        trx.set_option(TransactionOption::ReadYourWritesDisable)
+            .map_err(into_error)?;
+        let read_version = trx.get_read_version().await.map_err(into_error)?;
+        self.version.refreshed(read_version);
+        Ok(trx)
+    }
+
     pub(super) async fn apply_read_version(&self, trx: Transaction) -> trc::Result<Transaction> {
         trx.set_option(TransactionOption::ReadYourWritesDisable)
             .map_err(into_error)?;
+        #[cfg(stalwart_tests)]
+        if let Some(version) = super::probe::pinned_read_version() {
+            trx.set_read_version(version);
+            return Ok(trx);
+        }
         let version = self.version.current();
         let age = self.version.age();
 
@@ -359,6 +398,9 @@ impl FdbStore {
             let read_version = trx.get_read_version().await.map_err(into_error)?;
             self.version.refreshed(read_version);
         }
+
+        #[cfg(stalwart_tests)]
+        super::probe::read_version_applied(&trx).await;
 
         Ok(trx)
     }

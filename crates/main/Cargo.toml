@@ -7,7 +7,7 @@ homepage = "https://stalw.art"
 keywords = ["imap", "jmap", "smtp", "email", "mail", "webdav", "server"]
 categories = ["email"]
 license = "AGPL-3.0-only OR LicenseRef-SEL"
-version = "1.0.3"
+version = "1.1.0"
 edition = "2024"
 
 [[bin]]
@@ -52,7 +52,7 @@ tikv-jemallocator = { version = "0.7", features = ["unprefixed_malloc_on_support
 [features]
 #default = ["sqlite", "postgres", "mysql", "rocks", "s3", "redis", "azure", "nats", "enterprise", "zenoh", "kafka"]
 #default = ["sqlite", "postgres", "mysql", "rocks", "s3", "redis", "azure", "nats", "enterprise"]
-default = ["rocks", "enterprise"]
+default = ["rocks", "enterprise", "keep"]
 sqlite = ["store/sqlite", "directory/sqlite"]
 foundationdb = ["store/foundation", "common/foundation"]
 postgres = ["store/postgres", "directory/postgres"]
@@ -60,6 +60,7 @@ mysql = ["store/mysql", "directory/mysql"]
 rocks = ["store/rocks"]
 s3 = ["store/s3"]
 redis = ["store/redis", "coordinator/redis", "common/redis"]
+keep = ["store/keep", "coordinator/keep", "common/keep"]
 azure = ["store/azure"]
 nats = ["coordinator/nats"]
 zenoh = ["coordinator/zenoh"]
