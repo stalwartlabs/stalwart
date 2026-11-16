@@ -1,6 +1,6 @@
 [package]
 name = "s3"
-version = "1.1.0"
+version = "1.1.1"
 edition = "2024"
 license = "AGPL-3.0-only OR LicenseRef-SEL"
 publish = false
@@ -23,3 +23,4 @@ workspace = true
 
 [dev-dependencies]
 jiff = "0.2.38"
+tokio = { version = "1.54", features = ["macros", "rt", "net", "io-util", "time"] }

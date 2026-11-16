@@ -349,6 +349,7 @@ impl ICalendar {
         let mut start_date = None;
         let mut start_is_date = false;
         let mut has_owner = false;
+        let mut has_rrule = false;
         let is_todo = state.component_type == ICalendarComponentType::VTodo;
 
         for entry in entries {
@@ -1556,7 +1557,8 @@ impl ICalendar {
                     ICalendarProperty::Rrule,
                     Some(ICalendarValue::RecurrenceRule(value)),
                     ICalendarComponentType::VEvent | ICalendarComponentType::VTodo,
-                ) if !is_todo || start_date.is_some() => {
+                ) if !has_rrule && (!is_todo || start_date.is_some()) => {
+                    has_rrule = true;
                     let mut rrule = Map::from(Vec::with_capacity(4));
 
                     rrule.insert_unchecked(

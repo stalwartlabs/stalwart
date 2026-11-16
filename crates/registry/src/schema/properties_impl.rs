@@ -202,6 +202,7 @@ impl EnumImpl for ObjectType {
             b"Jmap" => ObjectType::Jmap,
             b"Log" => ObjectType::Log,
             b"MailingList" => ObjectType::MailingList,
+            b"MaskedEmail" => ObjectType::MaskedEmail,
             b"MemoryLookupKey" => ObjectType::MemoryLookupKey,
             b"MemoryLookupKeyValue" => ObjectType::MemoryLookupKeyValue,
             b"Metadata" => ObjectType::Metadata,
@@ -342,12 +343,7 @@ impl EnumImpl for ObjectType {
             ObjectType::Jmap => "Jmap",
             ObjectType::Log => "Log",
             ObjectType::MailingList => "MailingList",
-            // SPDX-SnippetBegin
-            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-            // SPDX-License-Identifier: LicenseRef-SEL
-            #[cfg(feature = "enterprise")]
             ObjectType::MaskedEmail => "MaskedEmail",
-            // SPDX-SnippetEnd
             ObjectType::MemoryLookupKey => "MemoryLookupKey",
             ObjectType::MemoryLookupKeyValue => "MemoryLookupKeyValue",
             ObjectType::Metadata => "Metadata",
@@ -527,12 +523,7 @@ impl EnumImpl for ObjectType {
             49 => Some(ObjectType::Jmap),
             50 => Some(ObjectType::Log),
             51 => Some(ObjectType::MailingList),
-            // SPDX-SnippetBegin
-            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-            // SPDX-License-Identifier: LicenseRef-SEL
-            #[cfg(feature = "enterprise")]
             52 => Some(ObjectType::MaskedEmail),
-            // SPDX-SnippetEnd
             53 => Some(ObjectType::MemoryLookupKey),
             54 => Some(ObjectType::MemoryLookupKeyValue),
             55 => Some(ObjectType::Metadata),
@@ -1919,6 +1910,7 @@ impl EnumImpl for Property {
             b"count" => Property::Count,
             b"create" => Property::Create,
             b"createdAt" => Property::CreatedAt,
+            b"createdBy" => Property::CreatedBy,
             b"credentialId" => Property::CredentialId,
             b"credentials" => Property::Credentials,
             b"currentSecret" => Property::CurrentSecret,
@@ -2027,7 +2019,9 @@ impl EnumImpl for Property {
             b"emailAddress" => Property::EmailAddress,
             b"emailAddresses" => Property::EmailAddresses,
             b"emailAddressesNegative" => Property::EmailAddressesNegative,
+            b"emailDomain" => Property::EmailDomain,
             b"emailLimit" => Property::EmailLimit,
+            b"emailPrefix" => Property::EmailPrefix,
             b"enable" => Property::Enable,
             b"enableAssistedDiscovery" => Property::EnableAssistedDiscovery,
             b"enableEdns" => Property::EnableEdns,
@@ -2112,6 +2106,7 @@ impl EnumImpl for Property {
             b"flushChanges" => Property::FlushChanges,
             b"flushInterval" => Property::FlushInterval,
             b"folderId" => Property::FolderId,
+            b"forDomain" => Property::ForDomain,
             b"format" => Property::Format,
             b"forwardedHops" => Property::ForwardedHops,
             b"from" => Property::From,
@@ -2316,6 +2311,7 @@ impl EnumImpl for Property {
             b"maxMailboxNameLength" => Property::MaxMailboxNameLength,
             b"maxMailboxes" => Property::MaxMailboxes,
             b"maxMailboxesPerEmail" => Property::MaxMailboxesPerEmail,
+            b"maxMaskedAddresses" => Property::MaxMaskedAddresses,
             b"maxMatchVars" => Property::MaxMatchVars,
             b"maxMediaSize" => Property::MaxMediaSize,
             b"maxMessageSize" => Property::MaxMessageSize,
@@ -2988,12 +2984,7 @@ impl EnumImpl for Property {
             Property::Count => "count",
             Property::Create => "create",
             Property::CreatedAt => "createdAt",
-            // SPDX-SnippetBegin
-            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-            // SPDX-License-Identifier: LicenseRef-SEL
-            #[cfg(feature = "enterprise")]
             Property::CreatedBy => "createdBy",
-            // SPDX-SnippetEnd
             Property::CredentialId => "credentialId",
             Property::Credentials => "credentials",
             Property::CurrentSecret => "currentSecret",
@@ -3113,15 +3104,13 @@ impl EnumImpl for Property {
             // SPDX-License-Identifier: LicenseRef-SEL
             #[cfg(feature = "enterprise")]
             Property::EmailAlert => "emailAlert",
-            #[cfg(feature = "enterprise")]
-            Property::EmailDomain => "emailDomain",
             // SPDX-SnippetEnd
+            Property::EmailDomain => "emailDomain",
             Property::EmailLimit => "emailLimit",
+            Property::EmailPrefix => "emailPrefix",
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
-            #[cfg(feature = "enterprise")]
-            Property::EmailPrefix => "emailPrefix",
             #[cfg(feature = "enterprise")]
             Property::EmailTemplate => "emailTemplate",
             // SPDX-SnippetEnd
@@ -3247,12 +3236,7 @@ impl EnumImpl for Property {
             Property::FlushChanges => "flushChanges",
             Property::FlushInterval => "flushInterval",
             Property::FolderId => "folderId",
-            // SPDX-SnippetBegin
-            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-            // SPDX-License-Identifier: LicenseRef-SEL
-            #[cfg(feature = "enterprise")]
             Property::ForDomain => "forDomain",
-            // SPDX-SnippetEnd
             Property::Format => "format",
             Property::ForwardedHops => "forwardedHops",
             Property::From => "from",
@@ -3551,12 +3535,7 @@ impl EnumImpl for Property {
             Property::MaxMailboxNameLength => "maxMailboxNameLength",
             Property::MaxMailboxes => "maxMailboxes",
             Property::MaxMailboxesPerEmail => "maxMailboxesPerEmail",
-            // SPDX-SnippetBegin
-            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-            // SPDX-License-Identifier: LicenseRef-SEL
-            #[cfg(feature = "enterprise")]
             Property::MaxMaskedAddresses => "maxMaskedAddresses",
-            // SPDX-SnippetEnd
             Property::MaxMatchVars => "maxMatchVars",
             Property::MaxMediaSize => "maxMediaSize",
             Property::MaxMessageSize => "maxMessageSize",
@@ -4382,12 +4361,7 @@ impl EnumImpl for Property {
             301 => Some(Property::Count),
             444 => Some(Property::Create),
             60 => Some(Property::CreatedAt),
-            // SPDX-SnippetBegin
-            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-            // SPDX-License-Identifier: LicenseRef-SEL
-            #[cfg(feature = "enterprise")]
             575 => Some(Property::CreatedBy),
-            // SPDX-SnippetEnd
             730 => Some(Property::CredentialId),
             385 => Some(Property::Credentials),
             4 => Some(Property::CurrentSecret),
@@ -4507,15 +4481,13 @@ impl EnumImpl for Property {
             // SPDX-License-Identifier: LicenseRef-SEL
             #[cfg(feature = "enterprise")]
             49 => Some(Property::EmailAlert),
-            #[cfg(feature = "enterprise")]
-            577 => Some(Property::EmailDomain),
             // SPDX-SnippetEnd
+            577 => Some(Property::EmailDomain),
             893 => Some(Property::EmailLimit),
+            576 => Some(Property::EmailPrefix),
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
-            #[cfg(feature = "enterprise")]
-            576 => Some(Property::EmailPrefix),
             #[cfg(feature = "enterprise")]
             212 => Some(Property::EmailTemplate),
             // SPDX-SnippetEnd
@@ -4641,12 +4613,7 @@ impl EnumImpl for Property {
             144 => Some(Property::FlushChanges),
             145 => Some(Property::FlushInterval),
             410 => Some(Property::FolderId),
-            // SPDX-SnippetBegin
-            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-            // SPDX-License-Identifier: LicenseRef-SEL
-            #[cfg(feature = "enterprise")]
             574 => Some(Property::ForDomain),
-            // SPDX-SnippetEnd
             493 => Some(Property::Format),
             480 => Some(Property::ForwardedHops),
             76 => Some(Property::From),
@@ -4945,12 +4912,7 @@ impl EnumImpl for Property {
             428 => Some(Property::MaxMailboxNameLength),
             436 => Some(Property::MaxMailboxes),
             439 => Some(Property::MaxMailboxesPerEmail),
-            // SPDX-SnippetBegin
-            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-            // SPDX-License-Identifier: LicenseRef-SEL
-            #[cfg(feature = "enterprise")]
             437 => Some(Property::MaxMaskedAddresses),
-            // SPDX-SnippetEnd
             829 => Some(Property::MaxMatchVars),
             31 => Some(Property::MaxMediaSize),
             426 => Some(Property::MaxMessageSize),
@@ -5643,12 +5605,7 @@ impl ObjectType {
             ObjectType::Jmap => Jmap::FLAGS,
             ObjectType::Log => Log::FLAGS,
             ObjectType::MailingList => MailingList::FLAGS,
-            // SPDX-SnippetBegin
-            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-            // SPDX-License-Identifier: LicenseRef-SEL
-            #[cfg(feature = "enterprise")]
             ObjectType::MaskedEmail => MaskedEmail::FLAGS,
-            // SPDX-SnippetEnd
             ObjectType::MemoryLookupKey => MemoryLookupKey::FLAGS,
             ObjectType::MemoryLookupKeyValue => MemoryLookupKeyValue::FLAGS,
             ObjectType::Metadata => Metadata::FLAGS,
@@ -5965,16 +5922,11 @@ impl ObjectType {
                 ),
                 // SPDX-SnippetEnd
             ],
-            // SPDX-SnippetBegin
-            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-            // SPDX-License-Identifier: LicenseRef-SEL
-            #[cfg(feature = "enterprise")]
             ObjectType::MaskedEmail => vec![IndexSchema::new(
                 Property::AccountId,
                 IndexSchemaType::Search,
                 IndexSchemaValueType::Id,
             )],
-            // SPDX-SnippetEnd
             ObjectType::MemoryLookupKey => vec![IndexSchema::new(
                 Property::Namespace,
                 IndexSchemaType::Search,
@@ -6192,12 +6144,7 @@ impl ObjectType {
             ObjectType::Jmap => Permission::SysJmapGet,
             ObjectType::Log => Permission::SysLogGet,
             ObjectType::MailingList => Permission::SysMailingListGet,
-            // SPDX-SnippetBegin
-            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-            // SPDX-License-Identifier: LicenseRef-SEL
-            #[cfg(feature = "enterprise")]
             ObjectType::MaskedEmail => Permission::SysMaskedEmailGet,
-            // SPDX-SnippetEnd
             ObjectType::MemoryLookupKey => Permission::SysMemoryLookupKeyGet,
             ObjectType::MemoryLookupKeyValue => Permission::SysMemoryLookupKeyValueGet,
             ObjectType::Metadata => Permission::SysMetadataGet,
@@ -6340,12 +6287,7 @@ impl ObjectType {
             ObjectType::IndexQueueStatus => Permission::SysIndexQueueStatusQuery,
             ObjectType::Log => Permission::SysLogQuery,
             ObjectType::MailingList => Permission::SysMailingListQuery,
-            // SPDX-SnippetBegin
-            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-            // SPDX-License-Identifier: LicenseRef-SEL
-            #[cfg(feature = "enterprise")]
             ObjectType::MaskedEmail => Permission::SysMaskedEmailQuery,
-            // SPDX-SnippetEnd
             ObjectType::MemoryLookupKey => Permission::SysMemoryLookupKeyQuery,
             ObjectType::MemoryLookupKeyValue => Permission::SysMemoryLookupKeyValueQuery,
             // SPDX-SnippetBegin
@@ -6474,12 +6416,7 @@ impl ObjectType {
             ObjectType::Jmap => Permission::SysJmapUpdate,
             ObjectType::Log => unreachable!(),
             ObjectType::MailingList => Permission::SysMailingListCreate,
-            // SPDX-SnippetBegin
-            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-            // SPDX-License-Identifier: LicenseRef-SEL
-            #[cfg(feature = "enterprise")]
             ObjectType::MaskedEmail => Permission::SysMaskedEmailCreate,
-            // SPDX-SnippetEnd
             ObjectType::MemoryLookupKey => Permission::SysMemoryLookupKeyCreate,
             ObjectType::MemoryLookupKeyValue => Permission::SysMemoryLookupKeyValueCreate,
             ObjectType::Metadata => Permission::SysMetadataUpdate,
@@ -6655,12 +6592,7 @@ impl ObjectType {
             ObjectType::Jmap => Permission::SysJmapUpdate,
             ObjectType::Log => unreachable!(),
             ObjectType::MailingList => Permission::SysMailingListUpdate,
-            // SPDX-SnippetBegin
-            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-            // SPDX-License-Identifier: LicenseRef-SEL
-            #[cfg(feature = "enterprise")]
             ObjectType::MaskedEmail => Permission::SysMaskedEmailUpdate,
-            // SPDX-SnippetEnd
             ObjectType::MemoryLookupKey => Permission::SysMemoryLookupKeyUpdate,
             ObjectType::MemoryLookupKeyValue => Permission::SysMemoryLookupKeyValueUpdate,
             ObjectType::Metadata => Permission::SysMetadataUpdate,
@@ -6836,12 +6768,7 @@ impl ObjectType {
             ObjectType::Jmap => Permission::SysJmapUpdate,
             ObjectType::Log => unreachable!(),
             ObjectType::MailingList => Permission::SysMailingListDestroy,
-            // SPDX-SnippetBegin
-            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-            // SPDX-License-Identifier: LicenseRef-SEL
-            #[cfg(feature = "enterprise")]
             ObjectType::MaskedEmail => Permission::SysMaskedEmailDestroy,
-            // SPDX-SnippetEnd
             ObjectType::MemoryLookupKey => Permission::SysMemoryLookupKeyDestroy,
             ObjectType::MemoryLookupKeyValue => Permission::SysMemoryLookupKeyValueDestroy,
             ObjectType::Metadata => Permission::SysMetadataUpdate,
@@ -7170,9 +7097,8 @@ impl ObjectInner {
                 ArchivedItem::ContactCard(obj) => Some(obj.account_id),
                 ArchivedItem::SieveScript(obj) => Some(obj.account_id),
             },
-            #[cfg(feature = "enterprise")]
-            ObjectInner::MaskedEmail(obj) => Some(obj.account_id),
             // SPDX-SnippetEnd
+            ObjectInner::MaskedEmail(obj) => Some(obj.account_id),
             ObjectInner::OAuthGrant(obj) => Some(obj.account_id),
             ObjectInner::PublicKey(obj) => Some(obj.account_id),
             ObjectInner::SpamTrainingSample(obj) => obj.account_id,
@@ -7209,9 +7135,8 @@ impl ObjectInner {
                 ArchivedItem::ContactCard(obj) => obj.account_id = id,
                 ArchivedItem::SieveScript(obj) => obj.account_id = id,
             },
-            #[cfg(feature = "enterprise")]
-            ObjectInner::MaskedEmail(obj) => obj.account_id = id,
             // SPDX-SnippetEnd
+            ObjectInner::MaskedEmail(obj) => obj.account_id = id,
             ObjectInner::OAuthGrant(obj) => obj.account_id = id,
             ObjectInner::PublicKey(obj) => obj.account_id = id,
             ObjectInner::SpamTrainingSample(obj) => obj.account_id = Some(id),
@@ -7307,12 +7232,7 @@ impl ObjectInner {
             ObjectInner::Jmap(obj) => obj.to_pickled_vec(),
             ObjectInner::Log(_) => unimplemented!("Log is not stored"),
             ObjectInner::MailingList(obj) => obj.to_pickled_vec(),
-            // SPDX-SnippetBegin
-            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-            // SPDX-License-Identifier: LicenseRef-SEL
-            #[cfg(feature = "enterprise")]
             ObjectInner::MaskedEmail(obj) => obj.to_pickled_vec(),
-            // SPDX-SnippetEnd
             ObjectInner::MemoryLookupKey(obj) => obj.to_pickled_vec(),
             ObjectInner::MemoryLookupKeyValue(obj) => obj.to_pickled_vec(),
             ObjectInner::Metadata(obj) => obj.to_pickled_vec(),
@@ -7577,14 +7497,9 @@ impl ObjectInner {
             ObjectType::MailingList => {
                 Pickle::unpickle(stream).map(|obj| ObjectInner::MailingList(Box::new(obj)))
             }
-            // SPDX-SnippetBegin
-            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-            // SPDX-License-Identifier: LicenseRef-SEL
-            #[cfg(feature = "enterprise")]
             ObjectType::MaskedEmail => {
                 Pickle::unpickle(stream).map(|obj| ObjectInner::MaskedEmail(Box::new(obj)))
             }
-            // SPDX-SnippetEnd
             ObjectType::MemoryLookupKey => {
                 Pickle::unpickle(stream).map(|obj| ObjectInner::MemoryLookupKey(Box::new(obj)))
             }
@@ -7966,13 +7881,8 @@ impl ObjectInner {
             }
             ObjectType::MailingList => MailingList::deserialize(deserializer)
                 .map(|obj| ObjectInner::MailingList(Box::new(obj))),
-            // SPDX-SnippetBegin
-            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-            // SPDX-License-Identifier: LicenseRef-SEL
-            #[cfg(feature = "enterprise")]
             ObjectType::MaskedEmail => MaskedEmail::deserialize(deserializer)
                 .map(|obj| ObjectInner::MaskedEmail(Box::new(obj))),
-            // SPDX-SnippetEnd
             ObjectType::MemoryLookupKey => MemoryLookupKey::deserialize(deserializer)
                 .map(|obj| ObjectInner::MemoryLookupKey(Box::new(obj))),
             ObjectType::MemoryLookupKeyValue => MemoryLookupKeyValue::deserialize(deserializer)
@@ -8285,12 +8195,7 @@ impl Object {
             ObjectInner::Jmap(_) => Jmap::FLAGS,
             ObjectInner::Log(_) => Log::FLAGS,
             ObjectInner::MailingList(_) => MailingList::FLAGS,
-            // SPDX-SnippetBegin
-            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-            // SPDX-License-Identifier: LicenseRef-SEL
-            #[cfg(feature = "enterprise")]
             ObjectInner::MaskedEmail(_) => MaskedEmail::FLAGS,
-            // SPDX-SnippetEnd
             ObjectInner::MemoryLookupKey(_) => MemoryLookupKey::FLAGS,
             ObjectInner::MemoryLookupKeyValue(_) => MemoryLookupKeyValue::FLAGS,
             ObjectInner::Metadata(_) => Metadata::FLAGS,
@@ -8466,12 +8371,7 @@ impl Object {
             ObjectInner::Jmap(_) => ObjectType::Jmap,
             ObjectInner::Log(_) => ObjectType::Log,
             ObjectInner::MailingList(_) => ObjectType::MailingList,
-            // SPDX-SnippetBegin
-            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-            // SPDX-License-Identifier: LicenseRef-SEL
-            #[cfg(feature = "enterprise")]
             ObjectInner::MaskedEmail(_) => ObjectType::MaskedEmail,
-            // SPDX-SnippetEnd
             ObjectInner::MemoryLookupKey(_) => ObjectType::MemoryLookupKey,
             ObjectInner::MemoryLookupKeyValue(_) => ObjectType::MemoryLookupKeyValue,
             ObjectInner::Metadata(_) => ObjectType::Metadata,
@@ -8699,12 +8599,7 @@ impl Object {
             ObjectInner::Jmap(obj) => obj.validate(errors),
             ObjectInner::Log(obj) => obj.validate(errors),
             ObjectInner::MailingList(obj) => obj.validate(errors),
-            // SPDX-SnippetBegin
-            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-            // SPDX-License-Identifier: LicenseRef-SEL
-            #[cfg(feature = "enterprise")]
             ObjectInner::MaskedEmail(obj) => obj.validate(errors),
-            // SPDX-SnippetEnd
             ObjectInner::MemoryLookupKey(obj) => obj.validate(errors),
             ObjectInner::MemoryLookupKeyValue(obj) => obj.validate(errors),
             ObjectInner::Metadata(obj) => obj.validate(errors),
@@ -8917,12 +8812,7 @@ impl Object {
             ObjectInner::Jmap(obj) => obj.index(i),
             ObjectInner::Log(obj) => obj.index(i),
             ObjectInner::MailingList(obj) => obj.index(i),
-            // SPDX-SnippetBegin
-            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-            // SPDX-License-Identifier: LicenseRef-SEL
-            #[cfg(feature = "enterprise")]
             ObjectInner::MaskedEmail(obj) => obj.index(i),
-            // SPDX-SnippetEnd
             ObjectInner::MemoryLookupKey(obj) => obj.index(i),
             ObjectInner::MemoryLookupKeyValue(obj) => obj.index(i),
             ObjectInner::Metadata(obj) => obj.index(i),
@@ -9102,12 +8992,7 @@ impl Object {
             ObjectInner::Jmap(obj) => obj.patch(pointer, value),
             ObjectInner::Log(obj) => obj.patch(pointer, value),
             ObjectInner::MailingList(obj) => obj.patch(pointer, value),
-            // SPDX-SnippetBegin
-            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-            // SPDX-License-Identifier: LicenseRef-SEL
-            #[cfg(feature = "enterprise")]
             ObjectInner::MaskedEmail(obj) => obj.patch(pointer, value),
-            // SPDX-SnippetEnd
             ObjectInner::MemoryLookupKey(obj) => obj.patch(pointer, value),
             ObjectInner::MemoryLookupKeyValue(obj) => obj.patch(pointer, value),
             ObjectInner::Metadata(obj) => obj.patch(pointer, value),
@@ -9289,12 +9174,7 @@ impl IntoValue for Object {
             ObjectInner::Jmap(obj) => (*obj).into_value_with(opts),
             ObjectInner::Log(obj) => (*obj).into_value_with(opts),
             ObjectInner::MailingList(obj) => (*obj).into_value_with(opts),
-            // SPDX-SnippetBegin
-            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-            // SPDX-License-Identifier: LicenseRef-SEL
-            #[cfg(feature = "enterprise")]
             ObjectInner::MaskedEmail(obj) => (*obj).into_value_with(opts),
-            // SPDX-SnippetEnd
             ObjectInner::MemoryLookupKey(obj) => (*obj).into_value_with(opts),
             ObjectInner::MemoryLookupKeyValue(obj) => (*obj).into_value_with(opts),
             ObjectInner::Metadata(obj) => (*obj).into_value_with(opts),
@@ -9472,12 +9352,7 @@ impl From<ObjectType> for ObjectInner {
             ObjectType::Jmap => ObjectInner::Jmap(Box::default()),
             ObjectType::Log => ObjectInner::Log(Box::default()),
             ObjectType::MailingList => ObjectInner::MailingList(Box::default()),
-            // SPDX-SnippetBegin
-            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-            // SPDX-License-Identifier: LicenseRef-SEL
-            #[cfg(feature = "enterprise")]
             ObjectType::MaskedEmail => ObjectInner::MaskedEmail(Box::default()),
-            // SPDX-SnippetEnd
             ObjectType::MemoryLookupKey => ObjectInner::MemoryLookupKey(Box::default()),
             ObjectType::MemoryLookupKeyValue => ObjectInner::MemoryLookupKeyValue(Box::default()),
             ObjectType::Metadata => ObjectInner::Metadata(Box::default()),
@@ -10414,17 +10289,12 @@ impl From<Object> for MailingList {
     }
 }
 
-// SPDX-SnippetBegin
-// SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-// SPDX-License-Identifier: LicenseRef-SEL
-#[cfg(feature = "enterprise")]
 impl From<MaskedEmail> for ObjectInner {
     fn from(value: MaskedEmail) -> Self {
         ObjectInner::MaskedEmail(Box::new(value))
     }
 }
 
-#[cfg(feature = "enterprise")]
 impl From<Object> for MaskedEmail {
     fn from(obj: Object) -> Self {
         match obj.inner {
@@ -10434,7 +10304,6 @@ impl From<Object> for MaskedEmail {
     }
 }
 
-// SPDX-SnippetEnd
 impl From<MemoryLookupKey> for ObjectInner {
     fn from(value: MemoryLookupKey) -> Self {
         ObjectInner::MemoryLookupKey(Box::new(value))

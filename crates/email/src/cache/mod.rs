@@ -596,14 +596,13 @@ async fn restore_swapped_cache(server: &Server, account_id: u32) -> Option<Arc<M
     })?;
 
     let snapshot_change_id = emails.change_id;
-    let mut mailboxes = full_mailbox_cache_build(server, account_id)
+    let mailboxes = full_mailbox_cache_build(server, account_id, snapshot_change_id)
         .await
         .caused_by(trc::location!())
         .inspect_err(|err| {
             trc::error!(err.clone());
         })
         .ok()?;
-    mailboxes.change_id = snapshot_change_id;
 
     let size = emails.size + mailboxes.size;
     let cache = MessageStoreCache {
@@ -658,11 +657,11 @@ async fn build_full_cache(
         .await
         .caused_by(trc::location!())?
         .unwrap_or_default();
+    let mailboxes = full_mailbox_cache_build(server, account_id, last_change_id).await?;
+    let last_change_id = mailboxes.change_id;
     let mut emails = full_email_cache_build(server, account_id).await?;
-    let mut mailboxes = full_mailbox_cache_build(server, account_id).await?;
     let size = emails.size + mailboxes.size;
     emails.change_id = last_change_id;
-    mailboxes.change_id = last_change_id;
 
     Ok(Arc::new(MessageStoreCache {
         update_lock,

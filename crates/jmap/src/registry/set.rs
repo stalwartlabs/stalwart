@@ -17,6 +17,7 @@ use crate::registry::{
         external_public_key::ExternalPublicKeyManagement,
         index_queue::index_queue_status_set,
         map_bootstrap_error,
+        masked_email::validate_masked_email,
         oauth_client::validate_oauth_client_object,
         principal::{
             AccountUpdate, schedule_account_destruction, validate_account, validate_account_access,
@@ -377,20 +378,9 @@ async fn registry_object_set(
             ObjectInner::Role(role) => {
                 validate_role(access_token, role, modification.as_role()).await?
             }
-            // SPDX-SnippetBegin
-            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-            // SPDX-License-Identifier: LicenseRef-SEL
-            #[cfg(feature = "enterprise")]
             ObjectInner::MaskedEmail(masked_email) => {
-                crate::registry::mapping::masked_email::validate_masked_email(
-                    &set,
-                    masked_email,
-                    is_create,
-                    unpatched_properties,
-                )
-                .await?
+                validate_masked_email(&set, masked_email, is_create, unpatched_properties).await?
             }
-            // SPDX-SnippetEnd
             ObjectInner::PublicKey(key) => {
                 server
                     .validate_public_key(set.account_id, key, modification.as_public_key())
@@ -637,18 +627,11 @@ async fn registry_object_set(
         }
     }
 
-    // SPDX-SnippetBegin
-    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-    // SPDX-License-Identifier: LicenseRef-SEL
-    #[cfg(feature = "enterprise")]
     const ACCOUNT_ORPHAN_TYPES: &[ObjectType] = &[
         ObjectType::PublicKey,
         ObjectType::MaskedEmail,
         ObjectType::OAuthGrant,
     ];
-    // SPDX-SnippetEnd
-    #[cfg(not(feature = "enterprise"))]
-    const ACCOUNT_ORPHAN_TYPES: &[ObjectType] = &[ObjectType::PublicKey, ObjectType::OAuthGrant];
 
     // Process destroy
     for id in set.destroy.drain(..) {
@@ -925,7 +908,8 @@ impl RegistrySet for Server {
             | ObjectType::OAuthClient
             | ObjectType::OAuthGrant
             | ObjectType::Role
-            | ObjectType::Domain => registry_object_set(set).await,
+            | ObjectType::Domain
+            | ObjectType::MaskedEmail => registry_object_set(set).await,
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -936,8 +920,7 @@ impl RegistrySet for Server {
             | ObjectType::MetricsStore
             | ObjectType::SpamAi
             | ObjectType::TracingStore
-            | ObjectType::Tenant
-            | ObjectType::MaskedEmail => registry_object_set(set).await,
+            | ObjectType::Tenant => registry_object_set(set).await,
             // SPDX-SnippetEnd
             ObjectType::ArfExternalReport
             | ObjectType::DmarcExternalReport

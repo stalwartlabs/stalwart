@@ -294,7 +294,12 @@ impl ICalendar {
         let series_is_date = state.is_date;
         let is_override = state.recurrence_id.is_some();
         state.is_date = (series_is_date && !is_override)
-            || (is_show_without_time && !has_time_zone && !has_time_component);
+            || (is_show_without_time
+                && !has_time_component
+                && (!has_time_zone
+                    || root_conversions.as_ref().is_some_and(|conversions| {
+                        conversions.has_date_value(&JSCalendarProperty::Start)
+                    })));
         if is_override
             && (state.is_date != series_is_date
                 || state.tz.is_none()
@@ -1381,8 +1386,8 @@ impl ICalendar {
                                         | JSCalendarProperty::LocationTypes
                                         | JSCalendarProperty::Description,
                                     ),
-                                    _,
-                                ) => true,
+                                    value,
+                                ) => !value.is_null(),
                                 (
                                     Key::Property(JSCalendarProperty::Coordinates),
                                     Value::Str(uri),

@@ -873,10 +873,8 @@ impl DnsUpdater {
                 propagation_delay: server.propagation_delay.map(|d| d.into_inner()),
                 ttl: server.ttl.into_inner(),
                 core,
-                updater: dns_update::DnsUpdater::new_netcup(
-                    server.customer_number.as_str(),
-                    server.api_key_id.as_str(),
-                    server.password.secret().await?,
+                updater: dns_update::DnsUpdater::new_netcup_rest(
+                    server.api_key.secret().await?,
                     server.timeout.into_inner().into(),
                 )
                 .map_err(|err| format!("Failed to build DNS updater: {}", err))?,

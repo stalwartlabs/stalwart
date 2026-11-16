@@ -594,7 +594,7 @@ impl SieveScriptIngest for Server {
         );
         ctx.set_user_address(mail_from);
         ctx.set_envelope(Envelope::From, envelope_from);
-        ctx.set_envelope(Envelope::To, envelope_to.address.as_str());
+        ctx.set_envelope(Envelope::To, envelope_to.envelope_to());
         if let Some(orcpt) = envelope_to.orcpt_parameter() {
             ctx.set_envelope(Envelope::Orcpt, orcpt);
         }

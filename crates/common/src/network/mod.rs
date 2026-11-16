@@ -35,6 +35,7 @@ pub mod dns;
 pub mod forwarded;
 pub mod limiter;
 pub mod listen;
+pub mod masked;
 pub mod memory;
 pub mod mta;
 pub mod security;

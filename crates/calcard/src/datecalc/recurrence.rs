@@ -102,6 +102,7 @@ impl RecurrenceRule {
             set: RecurrenceSet::new(),
             cur: Some((0, self.inner.civil_start)),
             remaining: self.inner.count,
+            lead: Lead::Unchecked,
             budget: MAX_ITER_LOOP,
             work: MAX_EXPANSION_WORK,
             unproductive: usize::MAX,
@@ -864,6 +865,13 @@ impl<'a> Expander<'a> {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+enum Lead {
+    Unchecked,
+    Held(ZonedDateTime),
+    Done,
+}
+
 #[derive(Clone, Debug)]
 pub struct RecurrenceIter<'r> {
     /// The recurrence rule that we're generating zoned datetimes for.
@@ -883,6 +891,7 @@ pub struct RecurrenceIter<'r> {
     cur: Option<(i64, DateTime)>,
     /// Instances left to emit under COUNT, if the rule sets one.
     remaining: Option<u32>,
+    lead: Lead,
     /// Attempts left before the expansion gives up; see [`MAX_ITER_LOOP`].
     budget: u32,
     work: usize,
@@ -1082,6 +1091,54 @@ impl<'r> Iterator for RecurrenceIter<'r> {
     type Item = ZonedDateTime;
 
     fn next(&mut self) -> Option<ZonedDateTime> {
+        match self.lead {
+            Lead::Done => self.next_rule(),
+            Lead::Held(next) => {
+                self.lead = Lead::Done;
+                Some(next)
+            }
+            Lead::Unchecked => {
+                self.lead = Lead::Done;
+                self.next_lead()
+            }
+        }
+    }
+}
+
+impl<'r> RecurrenceIter<'r> {
+    fn next_lead(&mut self) -> Option<ZonedDateTime> {
+        if self.remaining == Some(0) {
+            return None;
+        }
+        let start = self.rule.inner.start;
+        match self.next_rule() {
+            Some(first) if first == start || self.yields_start_after(first) => Some(first),
+            Some(first) => {
+                match self.remaining {
+                    Some(0) => {}
+                    remaining => {
+                        self.remaining = remaining.map(|count| count - 1);
+                        self.lead = Lead::Held(first);
+                    }
+                }
+                Some(start)
+            }
+            None => Some(start),
+        }
+    }
+
+    fn yields_start_after(&self, first: ZonedDateTime) -> bool {
+        let start = self.rule.inner.start;
+        let civil_start = self.rule.inner.civil_start;
+        if first.naive_local() >= civil_start {
+            return false;
+        }
+        let mut rest = self.clone();
+        rest.remaining = None;
+        rest.find(|next| *next == start || next.naive_local() >= civil_start) == Some(start)
+    }
+
+    fn next_rule(&mut self) -> Option<ZonedDateTime> {
         if self.remaining == Some(0) {
             return None;
         }

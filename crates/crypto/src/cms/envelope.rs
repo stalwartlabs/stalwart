@@ -42,8 +42,8 @@ const NSS_SIZE_LIMIT: usize = 256 << 20;
 const MAX_SHARED_INFO: usize = 128;
 const MAX_KEM_INFO: usize = 32;
 
-const SMIME_HEADERS_ENVELOPED: &[u8] = b"Content-Type: application/pkcs7-mime; smime-type=enveloped-data;\r\n\tname=\"smime.p7m\"\r\nContent-Disposition: attachment; filename=\"smime.p7m\"\r\nContent-Transfer-Encoding: base64\r\n\r\n";
-const SMIME_HEADERS_AUTH: &[u8] = b"Content-Type: application/pkcs7-mime; smime-type=authEnveloped-data;\r\n\tname=\"smime.p7m\"\r\nContent-Disposition: attachment; filename=\"smime.p7m\"\r\nContent-Transfer-Encoding: base64\r\n\r\n";
+const SMIME_HEADERS_ENVELOPED: &[u8] = b"Content-Type: application/pkcs7-mime; smime-type=enveloped-data;\r\n\tname=\"smime.p7m\"\r\nContent-Disposition: inline; filename=\"smime.p7m\"\r\nContent-Transfer-Encoding: base64\r\n\r\n";
+const SMIME_HEADERS_AUTH: &[u8] = b"Content-Type: application/pkcs7-mime; smime-type=authEnveloped-data;\r\n\tname=\"smime.p7m\"\r\nContent-Disposition: inline; filename=\"smime.p7m\"\r\nContent-Transfer-Encoding: base64\r\n\r\n";
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Content {

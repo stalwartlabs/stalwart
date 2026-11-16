@@ -152,7 +152,7 @@ impl<T: SessionStream> SessionData<T> {
             .get_cached_messages(mailbox.id.account_id)
             .await
             .caused_by(trc::location!())?;
-        self.sync_view(&mailbox, &cache, None)
+        self.sync_and_announce(&mailbox, &cache)
             .await
             .caused_by(trc::location!())?;
 

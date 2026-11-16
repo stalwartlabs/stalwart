@@ -22,39 +22,50 @@ impl Message {
             return;
         }
 
-        let return_path = (self.flags & (FROM_UNAUTHENTICATED | FROM_UNAUTHENTICATED_DMARC) == 0)
-            .then(|| self.return_path.domain_part())
-            .filter(|domain| !domain.is_empty());
-        let mut tenant_ids = Vec::new();
-        let mut last_domain = None;
-        for domain in return_path
-            .into_iter()
-            .chain(self.recipients.iter().map(|rcpt| rcpt.domain_part()))
-        {
-            if last_domain == Some(domain) {
-                continue;
+        self.tenant_ids = match self.owner_tenant(server).await {
+            Ok(tenant_id) => tenant_id.into_iter().collect(),
+            Err(err) => {
+                trc::error!(
+                    err.span_id(span_id)
+                        .caused_by(trc::location!())
+                        .details("Failed to resolve the tenant of a queued message")
+                );
+                Box::default()
             }
-            last_domain = Some(domain);
-            match server.domain(domain).await {
-                Ok(Some(domain)) => {
-                    if let Some(tenant_id) = domain.id_tenant
-                        && !tenant_ids.contains(&tenant_id)
-                    {
-                        tenant_ids.push(tenant_id);
-                    }
-                }
-                Ok(None) => {}
-                Err(err) => {
-                    trc::error!(
-                        err.span_id(span_id)
-                            .caused_by(trc::location!())
-                            .details("Failed to resolve the tenant of a queued message")
-                    );
-                }
+        };
+    }
+
+    async fn owner_tenant(&self, server: &Server) -> trc::Result<Option<u32>> {
+        if self.flags & (FROM_UNAUTHENTICATED | FROM_UNAUTHENTICATED_DMARC) == 0 {
+            let domain = self.return_path.domain_part();
+            if !domain.is_empty()
+                && let Some(tenant_id) = server
+                    .domain(domain)
+                    .await?
+                    .and_then(|domain| domain.id_tenant)
+            {
+                return Ok(Some(tenant_id));
             }
         }
-        tenant_ids.sort_unstable();
-        self.tenant_ids = tenant_ids.into_boxed_slice();
+
+        let mut owner = None;
+        let mut last_domain = None;
+        for domain in self.recipients.iter().map(|rcpt| rcpt.domain_part()) {
+            if last_domain.replace(domain) == Some(domain) {
+                continue;
+            }
+            let tenant_id = server
+                .domain(domain)
+                .await?
+                .and_then(|domain| domain.id_tenant);
+            match (owner, tenant_id) {
+                (_, None) => {}
+                (None, tenant_id) => owner = tenant_id,
+                (Some(owner_id), Some(tenant_id)) if owner_id == tenant_id => {}
+                (Some(_), Some(_)) => return Ok(None),
+            }
+        }
+        Ok(owner)
     }
 }
 

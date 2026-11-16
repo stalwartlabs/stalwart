@@ -2,6 +2,51 @@
 
 All notable changes to this project will be documented in this file. This project adheres to [Semantic Versioning](http://semver.org/).
 
+## [1.1.1] - 2026-11-16
+
+## Added
+
+## Changed
+- Masked email addresses are now part of the open source edition and no longer require an Enterprise license.
+- DNS: the Netcup provider now uses netcup's key-only REST API, which manages CloudDNS domains only; existing Netcup entries need the CloudDNS API key in the new `apiKey` field after upgrading.
+
+## Fixed
+- MTA:
+  - A queued message is now visible to and managed by only the sender's tenant (or, for mail from outside, the recipients' tenant when all of them belong to one tenant), instead of by every tenant with a recipient of the message.
+  - Masked addresses are now accepted on domains with a custom sub-addressing rule; they were refused with "Mailbox does not exist".
+  - Milter: a milter that accepts a message before end-of-body no longer gets the rest of it, which libmilter ignores, so the session no longer waits for `milter.timeout`; a milter that sets `SMFIP_NOBODY` now receives end-of-body.
+- JMAP:
+  - On a new account, `Mailbox/changes` from the state of the first `Mailbox/get` no longer lists the system mailboxes as created.
+  - `Principal/query` `text` and `name` filters now match a full address and whole words of the name and description; `name` was an exact address match and `text` never matched an address.
+  - The `ClassifySpam` and `TroubleshootDmarc` actions accept `mailFrom: null` for the null reverse-path (`MAIL FROM:<>`), and the `ClassifySpam` `mailFromParameters` value `bit8Mime` is spelled correctly and no longer swapped with `binaryMime`.
+- IMAP:
+  - Every token of a request, including empty quoted strings, now counts toward the request size limit at its in-memory size; floods of `""` before login or of `(` after it could exhaust server memory.
+  - FETCH, SEARCH, STORE, THREAD, UIDBATCHES, COPY and MOVE now send `EXISTS` for messages delivered since the last update before their responses refer to them (RFC 9051 §5.2); clients could record the new UID without the message and skip it for good.
+- Email:
+  - An incoming or appended message is no longer dropped as a duplicate when the only stored message with the same `Message-ID` in the target mailbox is a draft.
+- Sieve:
+  - `envelope "to"` now holds the address from `RCPT TO`, including its `+detail`, when sub-addressing rewrote the recipient, so `envelope :detail "to"` matches (RFC 5228 §5.4, RFC 5233). This also applies to messages a script redirects to a sub-address, which previously could loop.
+  - A redirect, vacation reply or notification that cannot be queued is now logged as `sieve.unexpected-error` with its recipients; it was dropped without a trace.
+- Storage:
+  - S3: requests that fail with a transport error, such as a timeout, are now retried up to `maxRetries`; writes were never retried and reads only once.
+- Encryption at rest:
+  - S/MIME-encrypted messages now use `Content-Disposition: inline` for the `smime.p7m` part, so iOS Mail shows the decrypted text as the message preview.
+- Calendar:
+  - An iTIP REPLY no longer overwrites the organizer's RSVP request for the replying attendee, and a reply carrying `RSVP=FALSE` no longer stops later updates such as a cancellation from reaching that attendee.
+  - A meeting invitation forwarded by a local attendee from an authenticated session is now added to the recipient's calendar as an uninvited copy (recipient added as `NEEDS-ACTION`, organizer unchanged, no reply sent) instead of being rejected; forwards from outside or unauthenticated senders are still rejected.
+  - A recurring event whose `DTSTART` does not match its `RRULE` now has `DTSTART` as its first instance, counted toward `COUNT`, instead of starting at the first date the rule generates.
+  - An event with more than one `RRULE` now uses the first one everywhere (expansion, JMAP `recurrenceRule` and invitations) and keeps the others unchanged; previously expansion used the last one and JMAP dropped the first.
+  - A JMAP event location whose `description`, `locationTypes` or `links` are `null` is now exported as a plain `LOCATION` instead of a `VLOCATION` without one, so invitations show the location again.
+  - JMAP-written events no longer get a `TZID` on a `DATE` value or a `VALUE=DATE` on a timed start: all-day events with a stray `TZID` stay all-day without it, and a date start with a timed duration is written as a date-time.
+- WebDAV:
+  - Files downloaded from `/dav/file/` are served with `X-Content-Type-Options: nosniff` and a sandboxing `Content-Security-Policy`, so an uploaded HTML file can no longer run scripts on the server's origin when another user opens it.
+  - Concurrent `PUT` requests that create the same new file, contact or event no longer all succeed: one creates it and the others get `412 Precondition Failed` with `If-None-Match: *`, or overwrite it without that header.
+- Authorization:
+  - Changing a tenant's permissions or roles now applies at once to the tenant's accounts, including logins with a cached session on every cluster node; previously it took effect only after `InvalidateCaches` or a change to the account itself.
+- Telemetry:
+  - The log viewer shows the details of entries written by a log tracer with `multiline` enabled and searches them, instead of showing an empty details column.
+  - Metrics history now starts within 5 minutes when an Enterprise license is activated or restored without a restart; previously the dashboard history stayed empty until the server restarted.
+
 ## [1.1.0] - 2026-11-09
 
 **Add the passkey permissions to the default roles.** Passkey management needs the new `sysPasskey*` permissions, which default roles created by an earlier version do not include. Add these permissions manually using the recovery administrator or restart the server once with the environment variable `STALWART_UPDATE_ROLE_PERMISSIONS=true` to add them, then remove the variable. See [Default roles on upgraded servers](https://stalw.art/docs/auth/authorization/permissions#default-roles-on-upgraded-servers) for details.

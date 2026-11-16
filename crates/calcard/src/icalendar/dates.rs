@@ -527,7 +527,9 @@ impl ICalendarComponent {
                 (ICalendarProperty::Duration, Some(ICalendarValue::Duration(dur))) => {
                     duration = Some(dur);
                 }
-                (ICalendarProperty::Rrule, Some(ICalendarValue::RecurrenceRule(rule))) => {
+                (ICalendarProperty::Rrule, Some(ICalendarValue::RecurrenceRule(rule)))
+                    if rrule.is_none() =>
+                {
                     rrule = Some(rule);
                 }
                 (ICalendarProperty::Uid, Some(ICalendarValue::Text(value))) => {

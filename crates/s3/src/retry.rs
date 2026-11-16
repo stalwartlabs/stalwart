@@ -64,16 +64,11 @@ impl RetryPolicy {
 pub(crate) struct Attempts {
     policy: RetryPolicy,
     retries: u32,
-    transport_retried: bool,
 }
 
 impl Attempts {
     pub(crate) fn new(policy: RetryPolicy) -> Self {
-        Attempts {
-            policy,
-            retries: 0,
-            transport_retried: false,
-        }
+        Attempts { policy, retries: 0 }
     }
 
     pub(crate) fn can_retry(&self) -> bool {
@@ -84,12 +79,8 @@ impl Attempts {
         RetryPolicy::is_retryable_status(status) && self.can_retry()
     }
 
-    pub(crate) fn take_transport_retry(&mut self, err: &reqwest::Error) -> bool {
-        if self.transport_retried || !RetryPolicy::is_retryable_error(err) || !self.can_retry() {
-            return false;
-        }
-        self.transport_retried = true;
-        true
+    pub(crate) fn retries_transport(&self, err: &reqwest::Error) -> bool {
+        RetryPolicy::is_retryable_error(err) && self.can_retry()
     }
 
     pub(crate) async fn backoff(&mut self) {

@@ -12,7 +12,7 @@ use crate::inbound::dkim::{DkimSign, SignedMessage};
 use crate::queue::encrypt::{OutboundEncryption, QueueEncryption};
 use crate::queue::lease::{Attempt, Backoff, FinalWrite, QueueLease};
 use crate::queue::quota::{QuotaReservation, ReleasedQuota};
-use crate::queue::{FROM_DKIM2_SIGNED, MessageWrapper};
+use crate::queue::{FROM_DKIM2_SIGNED, MessageWrapper, RCPT_REWRITTEN};
 use ahash::{AHashMap, AHashSet};
 use common::config::smtp::auth::DkimSigners;
 use common::config::smtp::queue::{ArchivedQueueExpiry, QueueName};
@@ -793,12 +793,14 @@ impl MessageWrapper {
 
     pub async fn expand_and_add_recipient(&mut self, rcpt: impl AsRef<str>, server: &Server) {
         let rcpt = rcpt.as_ref();
-        match server
-            .rcpt_resolve(&rcpt.to_lowercase(), true, self.span_id)
-            .await
-        {
+        let rcpt_lcase = rcpt.to_lowercase();
+        match server.rcpt_resolve(&rcpt_lcase, true, self.span_id).await {
             Ok(RcptResolution::Rewrite(rewritten)) => {
                 self.add_expanded_recipient(&rewritten, server).await;
+                if let Some(recipient) = self.message.recipients.last_mut() {
+                    recipient.flags |= RCPT_REWRITTEN;
+                    recipient.orcpt = Some(rcpt_lcase.into_boxed_str());
+                }
             }
             Ok(RcptResolution::Expand(addrs)) => {
                 for addr in addrs.as_ref() {

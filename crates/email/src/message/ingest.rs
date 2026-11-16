@@ -23,7 +23,7 @@ use common::{
 use compact_str::{CompactString, ToCompactString};
 use crypto::Protection;
 use groupware::{
-    calendar::itip::{ItipIngest, ItipIngestError},
+    calendar::itip::{ItipIngest, ItipIngestError, ItipOrigin},
     scheduling::{ItipError, ItipMessages},
 };
 use mail_parser::{Message, MessageParser, thread_name};
@@ -490,6 +490,11 @@ impl EmailIngest for Server {
                 {
                     let mut account_info = None;
                     let mut sender = None;
+                    let itip_origin = if sender_authentication == SenderAuthentication::Submission {
+                        ItipOrigin::Submission
+                    } else {
+                        ItipOrigin::Delivery
+                    };
                     for part in message.root().parts() {
                         if part.content_type().is_some_and(|ct| {
                             ct.ctype().eq_ignore_ascii_case("text")
@@ -522,6 +527,7 @@ impl EmailIngest for Server {
                                     match Box::pin(self.itip_ingest(
                                         account_info,
                                         sender,
+                                        itip_origin,
                                         deliver_to,
                                         &itip_message,
                                     ))

@@ -683,12 +683,7 @@ const REG_ROLE: u16 = ObjectType::Role as u16;
 const REG_OAUTH_CLIENT: u16 = ObjectType::OAuthClient as u16;
 const REG_OAUTH_GRANT: u16 = ObjectType::OAuthGrant as u16;
 const REG_MAILING_LIST: u16 = ObjectType::MailingList as u16;
-// SPDX-SnippetBegin
-// SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-// SPDX-License-Identifier: LicenseRef-SEL
-#[cfg(feature = "enterprise")]
 const REG_MASKED_EMAIL: u16 = ObjectType::MaskedEmail as u16;
-// SPDX-SnippetEnd
 const REG_PUBLIC_KEY: u16 = ObjectType::PublicKey as u16;
 const REPORT_EXTERNAL_ARF: u16 = ObjectType::ArfExternalReport as u16;
 const REPORT_EXTERNAL_DMARC: u16 = ObjectType::DmarcExternalReport as u16;
@@ -807,12 +802,12 @@ impl ValueClass {
             ValueClass::Registry(registry) => match registry {
                 RegistryClass::Item { object_id, .. } => match *object_id {
                     REG_ACCOUNT | REG_DOMAIN | REG_ROLE | REG_OAUTH_CLIENT | REG_MAILING_LIST
-                    | REG_PUBLIC_KEY | REG_OAUTH_GRANT => Subspace::Directory,
+                    | REG_PUBLIC_KEY | REG_OAUTH_GRANT | REG_MASKED_EMAIL => Subspace::Directory,
                     // SPDX-SnippetBegin
                     // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
                     // SPDX-License-Identifier: LicenseRef-SEL
                     #[cfg(feature = "enterprise")]
-                    REG_TENANT | REG_MASKED_EMAIL => Subspace::Directory,
+                    REG_TENANT => Subspace::Directory,
                     #[cfg(feature = "enterprise")]
                     REG_ARCHIVED_ITEM => Subspace::DeletedItems,
                     // SPDX-SnippetEnd

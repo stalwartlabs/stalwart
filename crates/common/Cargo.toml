@@ -1,6 +1,6 @@
 [package]
 name = "common"
-version = "1.1.0"
+version = "1.1.1"
 edition = "2024"
 build = "build.rs"
 
@@ -22,7 +22,7 @@ mail-builder = { version = "2.0" }
 mail-auth = { version = "0.15.1", features = ["generate", "arc"] }
 smtp-report = { path = "../smtp-report" }
 smtp-proto = { path = "../smtp-proto", features = ["rkyv"] }
-dns-update = { version = "0.6" }
+dns-update = { version = "0.6.2" }
 calcard = { path = "../calcard", features = ["rkyv"] }
 ahash = { version = "0.8.12", features = ["serde"] }
 parking_lot = "0.13.0"
@@ -93,7 +93,7 @@ libc = "0.2.191"
 sd-notify = "0.5"
 
 [target.'cfg(stalwart_tests)'.dependencies]
-dns-update = { version = "0.6", features = ["test_provider"] }
+dns-update = { version = "0.6.2", features = ["test_provider"] }
 
 [features]
 dev_mode = []

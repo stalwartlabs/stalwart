@@ -83,8 +83,8 @@ impl PrincipalQuery for Server {
         for cond in std::mem::take(&mut request.filter) {
             match cond {
                 Filter::Property(cond) => match cond {
-                    PrincipalFilter::Name(name) | PrincipalFilter::Email(name) => {
-                        let account_id = self.account_id_from_email(&name, false).await?;
+                    PrincipalFilter::Email(address) => {
+                        let account_id = self.account_id_from_email(&address, false).await?;
                         filters.push(SearchFilter::is_in_set(
                             visible_principal_ids(self, access_token, account_id).await?,
                         ));
@@ -113,7 +113,13 @@ impl PrincipalQuery for Server {
                                 .collect::<RoaringBitmap>(),
                         ));
                     }
-                    PrincipalFilter::Text(text) => {
+                    PrincipalFilter::Name(text) | PrincipalFilter::Text(text) => {
+                        let mut ids = if text.contains('@') {
+                            let account_id = self.account_id_from_email(&text, false).await?;
+                            visible_principal_ids(self, access_token, account_id).await?
+                        } else {
+                            RoaringBitmap::new()
+                        };
                         let query = RegistryQuery::new(ObjectType::Account);
                         // SPDX-SnippetBegin
                         // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
@@ -121,12 +127,12 @@ impl PrincipalQuery for Server {
                         #[cfg(feature = "enterprise")]
                         let query = query.with_tenant(access_token.tenant_id());
                         // SPDX-SnippetEnd
-                        filters.push(SearchFilter::is_in_set(
-                            self.registry()
-                                .query::<RoaringBitmap>(query.text(Property::Text, text))
-                                .await
-                                .caused_by(trc::location!())?,
-                        ));
+                        ids |= self
+                            .registry()
+                            .query::<RoaringBitmap>(query.text(Property::Text, text))
+                            .await
+                            .caused_by(trc::location!())?;
+                        filters.push(SearchFilter::is_in_set(ids));
                     }
                     PrincipalFilter::Type(principal_type) => {
                         let typ = match principal_type {

@@ -14,7 +14,7 @@ use crate::{
     },
     config::smtp::auth::DkimSigners,
     expr::{Bump, if_block::BootstrapExprExt},
-    network::mta::AddressResolver,
+    network::{masked::MaskedAddress, mta::AddressResolver},
     storage::{
         ObjectQuota,
         encryption::{AccountEncryption, EncryptionKeys},
@@ -38,7 +38,7 @@ use registry::{
         prelude::{ObjectType, Property},
         structs::{
             Account, DkimSignature, Domain, EncryptionAtRest, EncryptionSettings, MailingList,
-            PublicKey, Role, SubAddressing,
+            MaskedEmail, PublicKey, Role, SubAddressing,
         },
     },
     types::id::ObjectId,
@@ -52,13 +52,6 @@ use store::{
 use trc::{AddContext, CacheEvent};
 use types::id::Id;
 use utils::DomainPart;
-
-// SPDX-SnippetBegin
-// SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-// SPDX-License-Identifier: LicenseRef-SEL
-#[cfg(feature = "enterprise")]
-use registry::schema::structs::MaskedEmail;
-// SPDX-SnippetEnd
 
 impl Server {
     pub async fn domain(&self, domain: &str) -> trc::Result<Option<Arc<DomainCache>>> {
@@ -592,15 +585,7 @@ impl Server {
                             local_part = Cow::Borrowed(new_local_part);
                         }
                     }
-                    // SPDX-SnippetBegin
-                    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-                    // SPDX-License-Identifier: LicenseRef-SEL
-
-                    #[cfg(feature = "enterprise")]
-                    if self.is_enterprise_edition()
-                        && let Cow::Borrowed(addr) = &local_part
-                        && let Some(masked_id) =
-                            crate::enterprise::masked::MaskedAddress::parse(addr)
+                    if let Some(masked_id) = MaskedAddress::parse(local_part.as_ref())
                         && let Some(masked_entry) = self
                             .registry()
                             .object::<MaskedEmail>(Id::new(masked_id))
@@ -613,7 +598,6 @@ impl Server {
                     {
                         return Ok(Some(masked_entry.account_id.document_id()));
                     }
-                    // SPDX-SnippetEnd
                 }
 
                 let mut result = self

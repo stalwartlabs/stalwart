@@ -91,6 +91,7 @@ const TAG_MAX_LEN: usize = 128;
 const COMMAND_MAX_LEN: usize = 15;
 const LITERAL_MAX_DIGITS: usize = 15;
 const TOKENS_INIT_LEN: usize = 32;
+const TOKEN_COST: usize = size_of::<Token>();
 
 struct ArgumentBuffer {
     buf: Vec<u8>,
@@ -219,24 +220,28 @@ impl<T: CommandParser> Receiver<T> {
     }
 
     #[inline(always)]
-    fn push_request_token(&mut self, token: Token) {
+    fn push_request_token(&mut self, token: Token, len: usize) -> Result<(), Error> {
+        if self.skipping {
+            return Ok(());
+        }
+        self.current_request_size += len + TOKEN_COST;
+        if self.current_request_size > self.max_request_size {
+            return Err(self.request_size_error());
+        }
         if self.request.tokens.is_empty() {
             self.request.tokens.reserve(TOKENS_INIT_LEN);
         }
         self.request.tokens.push(token);
+        Ok(())
     }
 
     fn push_argument(&mut self, in_quote: bool) -> Result<(), Error> {
         if !self.buf.is_empty() {
-            self.current_request_size += self.buf.len();
-            if self.current_request_size > self.max_request_size {
-                return Err(self.request_size_error());
-            }
             let token = Token::Argument(ArgumentBytes::from_slice(self.buf.as_ref()));
-            self.push_request_token(token);
+            self.push_request_token(token, self.buf.len())?;
             self.buf.clear();
         } else if in_quote {
-            self.push_request_token(Token::Nil);
+            self.push_request_token(Token::Nil, 0)?;
         }
         Ok(())
     }
@@ -246,12 +251,9 @@ impl<T: CommandParser> Receiver<T> {
             if self.request.command.tokenize_nil() && self.is_nil() {
                 return self.push_nil_string();
             }
-            self.current_request_size += self.buf.len();
-            if self.current_request_size > self.max_request_size {
-                return Err(self.request_size_error());
-            }
+            let len = self.buf.len();
             let token = Token::Argument(ArgumentBytes::from_vec(self.buf.take_moved()));
-            self.push_request_token(token);
+            self.push_request_token(token, len)?;
         }
         Ok(())
     }
@@ -262,23 +264,14 @@ impl<T: CommandParser> Receiver<T> {
 
     #[cold]
     fn push_nil_string(&mut self) -> Result<(), Error> {
-        self.current_request_size += self.buf.len();
-        if self.current_request_size > self.max_request_size {
-            return Err(self.request_size_error());
-        }
         let token = Token::NilString(ArgumentBytes::from_slice(self.buf.as_ref()));
-        self.push_request_token(token);
+        self.push_request_token(token, self.buf.len())?;
         self.buf.clear();
         Ok(())
     }
 
     fn push_token(&mut self, token: Token) -> Result<(), Error> {
-        self.current_request_size += 1;
-        if self.current_request_size > self.max_request_size {
-            return Err(self.request_size_error());
-        }
-        self.push_request_token(token);
-        Ok(())
+        self.push_request_token(token, 0)
     }
 
     pub fn parse(&mut self, bytes: &mut std::slice::Iter<'_, u8>) -> Result<Request<T>, Error> {

@@ -24,7 +24,8 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use trc::MilterEvent;
 use utils::DomainPart;
 
-enum Rejection {
+enum Interrupt {
+    Accept,
     Action(Action),
     Error(Error),
 }
@@ -56,6 +57,14 @@ impl<T: SessionStream> Session<T> {
 
             let time = Instant::now();
             match self.connect_and_run(milter, message).await {
+                Err(Interrupt::Accept) => {
+                    trc::event!(
+                        Milter(MilterEvent::ActionAccept),
+                        SpanId = self.data.session_id,
+                        Name = milter.id.to_compact_string(),
+                        Elapsed = time.elapsed(),
+                    );
+                }
                 Ok(new_modifications) => {
                     trc::event!(
                         Milter(MilterEvent::ActionAccept),
@@ -79,7 +88,7 @@ impl<T: SessionStream> Session<T> {
                         modifications = new_modifications;
                     }
                 }
-                Err(Rejection::Action(action)) => {
+                Err(Interrupt::Action(action)) => {
                     trc::event!(
                         Milter(match &action {
                             Action::Discard => MilterEvent::ActionDiscard,
@@ -120,7 +129,7 @@ impl<T: SessionStream> Session<T> {
                         Action::Accept | Action::Continue => unreachable!(),
                     });
                 }
-                Err(Rejection::Error(err)) => {
+                Err(Interrupt::Error(err)) => {
                     let (code, details) = match err {
                         Error::Io(details) => (
                             MilterEvent::IoError,
@@ -163,7 +172,7 @@ impl<T: SessionStream> Session<T> {
         &self,
         milter: &Milter,
         message: Option<&AuthenticatedMessage<'_>>,
-    ) -> Result<Vec<Modification>, Rejection> {
+    ) -> Result<Vec<Modification>, Interrupt> {
         // Build client
         let client = MilterClient::connect(milter, self.data.session_id).await?;
         if !milter.tls {
@@ -190,7 +199,19 @@ impl<T: SessionStream> Session<T> {
         &self,
         mut client: MilterClient<S>,
         message: Option<&AuthenticatedMessage<'_>>,
-    ) -> Result<Vec<Modification>, Rejection> {
+    ) -> Result<Vec<Modification>, Interrupt> {
+        let result = self.run_stages(&mut client, message).await;
+        if !matches!(result, Err(Interrupt::Error(_))) {
+            let _ = client.quit().await;
+        }
+        result
+    }
+
+    async fn run_stages<S: AsyncRead + AsyncWrite + Unpin>(
+        &self,
+        client: &mut MilterClient<S>,
+        message: Option<&AuthenticatedMessage<'_>>,
+    ) -> Result<Vec<Modification>, Interrupt> {
         // Option negotiation
         client.init().await?;
 
@@ -274,17 +295,11 @@ impl<T: SessionStream> Session<T> {
 
             // Message body
             let (action, modifications) = client.body(message.raw_body()).await?;
-            action.assert_continue()?;
-
-            // Quit
-            let _ = client.quit().await;
-
-            // Return modifications
-            Ok(modifications)
+            match action {
+                Action::Accept | Action::Continue => Ok(modifications),
+                action => Err(Interrupt::Action(action)),
+            }
         } else {
-            // Quit
-            let _ = client.quit().await;
-
             Ok(Vec::new())
         }
     }
@@ -514,17 +529,18 @@ fn milter_header_value(value: &[u8]) -> Vec<u8> {
 }
 
 impl Action {
-    fn assert_continue(self) -> Result<(), Rejection> {
+    fn assert_continue(self) -> Result<(), Interrupt> {
         match self {
-            Action::Continue | Action::Accept => Ok(()),
-            action => Err(Rejection::Action(action)),
+            Action::Continue => Ok(()),
+            Action::Accept => Err(Interrupt::Accept),
+            action => Err(Interrupt::Action(action)),
         }
     }
 }
 
-impl From<Error> for Rejection {
+impl From<Error> for Interrupt {
     fn from(err: Error) -> Self {
-        Rejection::Error(err)
+        Interrupt::Error(err)
     }
 }
 

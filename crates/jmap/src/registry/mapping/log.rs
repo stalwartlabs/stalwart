@@ -13,7 +13,7 @@ use crate::{
 };
 use jiff::Timestamp;
 use jmap_proto::types::state::State;
-use memchr::memrchr;
+use memchr::{memmem, memrchr};
 use registry::{
     jmap::IntoValue,
     schema::{enums::TracingLevel, prelude::Property, structs::Log},
@@ -23,6 +23,7 @@ use std::{
     borrow::Cow,
     fs::{self, File},
     io::{self, BufRead, BufReader, Read, Seek, SeekFrom},
+    mem,
     path::Path,
 };
 use store::ahash::AHashMap;
@@ -158,6 +159,7 @@ fn read_log_offsets(
     logs.sort_by_key(|b| std::cmp::Reverse(b.file_name()));
 
     let mut entries = Vec::with_capacity(limit);
+    let finder = filter.map(memmem::Finder::new);
     let mut file_number = 0u64;
     let mut found_anchor = anchor == 0;
     let file_anchor = anchor >> 48;
@@ -174,19 +176,26 @@ fn read_log_offsets(
 
         let file = File::open(log.path())?;
         let file_size = file.metadata()?.len();
-        let mut rev_lines = RevLines::new(file);
-        rev_lines.0.init_reader()?;
+        let mut rev_lines = RawRevLines::new(file);
+        rev_lines.init_reader()?;
 
         let mut offset = file_size;
+        let mut continuation_matches = false;
 
         for line in rev_lines {
             let line = line?;
             offset = offset.saturating_sub(line.len() as u64 + 1); // +1 for the newline character
 
+            let line_matches = finder
+                .as_ref()
+                .is_some_and(|finder| finder.find(&line).is_some());
+
             if !is_log_header(&line) {
+                continuation_matches |= line_matches;
                 continue;
             }
 
+            let matches = finder.is_none() || mem::take(&mut continuation_matches) || line_matches;
             let id = (file_number << 48) | offset;
 
             if !found_anchor {
@@ -194,7 +203,7 @@ fn read_log_offsets(
                 continue;
             }
 
-            if filter.is_none_or(|filter| line.contains(filter)) {
+            if matches {
                 entries.push(Id::from(id));
                 if entries.len() == limit {
                     break 'outer;
@@ -242,6 +251,7 @@ fn read_log_entries(
 
     let mut file_number = 0u64;
     let mut line = String::with_capacity(256);
+    let mut continuation = Vec::with_capacity(256);
 
     'outer: for log in logs.into_iter() {
         if !log.file_type()?.is_file() {
@@ -257,7 +267,20 @@ fn read_log_entries(
                 line.clear();
                 reader.read_line(&mut line)?;
 
-                if let Some(log) = log_from_line(&line) {
+                if let Some(mut log) = log_from_line(&line) {
+                    while reader.fill_buf()?.first() == Some(&b'\t') {
+                        continuation.clear();
+                        reader.read_until(b'\n', &mut continuation)?;
+                        let key = String::from_utf8_lossy(&continuation);
+                        let key = strip_ansi(&key);
+                        let key = key.trim();
+                        if !key.is_empty() {
+                            if !log.details.is_empty() {
+                                log.details.push_str(", ");
+                            }
+                            log.details.push_str(key);
+                        }
+                    }
                     entries.push((Id::from((file_number << 48) | *offset), log));
 
                     if entries.len() == total_ids {
@@ -273,16 +296,23 @@ fn read_log_entries(
     Ok(entries)
 }
 
-fn is_log_header(line: &str) -> bool {
-    let line = strip_ansi(line);
-    let bytes = line.as_bytes();
-    if bytes.is_empty() || !bytes[0].is_ascii_digit() {
+const ESC_BYTE: u8 = 0x1b;
+
+fn is_log_header(line: &[u8]) -> bool {
+    if !line
+        .first()
+        .is_some_and(|byte| byte.is_ascii_digit() || *byte == ESC_BYTE)
+    {
         return false;
     }
-    let Some((timestamp, _)) = line.split_once(' ') else {
+    let Ok(line) = std::str::from_utf8(line) else {
         return false;
     };
-    timestamp.parse::<Timestamp>().is_ok()
+    let line = strip_ansi(line);
+    line.split_once(' ').is_some_and(|(timestamp, _)| {
+        timestamp.starts_with(|c: char| c.is_ascii_digit())
+            && timestamp.parse::<Timestamp>().is_ok()
+    })
 }
 
 fn log_from_line(line: &str) -> Option<Log> {
@@ -480,38 +510,6 @@ impl<R: Read + Seek> Iterator for RawRevLines<R> {
 
     fn next(&mut self) -> Option<io::Result<Vec<u8>>> {
         self.next_line().transpose()
-    }
-}
-
-pub struct RevLines<R>(RawRevLines<R>);
-
-impl<R: Read + Seek> RevLines<R> {
-    /// Create a new `RawRevLines` struct from a Reader.
-    /// Internal buffering for iteration will default to 4096 bytes at a time.
-    pub fn new(reader: R) -> RevLines<R> {
-        RevLines(RawRevLines::new(reader))
-    }
-
-    /// Create a new `RawRevLines` struct from a Reader`.
-    /// Internal buffering for iteration will use `cap` bytes at a time.
-    pub fn with_capacity(cap: usize, reader: R) -> RevLines<R> {
-        RevLines(RawRevLines::with_capacity(cap, reader))
-    }
-}
-
-impl<R: Read + Seek> Iterator for RevLines<R> {
-    type Item = Result<String, std::io::Error>;
-
-    fn next(&mut self) -> Option<Result<String, std::io::Error>> {
-        let line = match self.0.next_line().transpose()? {
-            Ok(line) => line,
-            Err(error) => return Some(Err(error)),
-        };
-
-        Some(
-            String::from_utf8(line)
-                .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid UTF-8")),
-        )
     }
 }
 

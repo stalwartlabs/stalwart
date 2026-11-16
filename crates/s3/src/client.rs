@@ -197,7 +197,7 @@ impl Bucket {
                             _ => body,
                         }));
                     }
-                    Err(err) if attempts.take_transport_retry(&err) => attempts.backoff().await,
+                    Err(err) if attempts.retries_transport(&err) => attempts.backoff().await,
                     Err(err) => return Err(Error::Transport(err)),
                 },
                 StatusCode::NOT_FOUND => return Ok(None),
@@ -347,7 +347,7 @@ impl Bucket {
             match self.send(request).await {
                 Ok(response) if attempts.retries_status(response.status()) => {}
                 Ok(response) => return Ok(response),
-                Err(err) if request.is_read() && attempts.take_transport_retry(&err) => {}
+                Err(err) if attempts.retries_transport(&err) => {}
                 Err(err) => return Err(Error::Transport(err)),
             }
             attempts.backoff().await;
@@ -409,12 +409,6 @@ impl Bucket {
                 .body(body.clone());
         }
         builder.send().await
-    }
-}
-
-impl Request<'_> {
-    fn is_read(&self) -> bool {
-        self.method == Method::GET || self.method == Method::HEAD
     }
 }
 

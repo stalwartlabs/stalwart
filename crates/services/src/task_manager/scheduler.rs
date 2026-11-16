@@ -162,9 +162,19 @@ pub fn spawn_task_scheduler(inner: Arc<Inner>) {
                     Instant::now() + enterprise.license.renew_in(),
                     Event::RenewLicense,
                 );
+            }
 
+            #[cfg(feature = "enterprise")]
+            {
                 queue.schedule(
-                    Instant::now() + enterprise.metrics_interval.time_to_next(),
+                    Instant::now()
+                        + server
+                            .core
+                            .enterprise
+                            .as_ref()
+                            .map_or(INTERNAL_METRICS_UNLICENSED_POLL, |enterprise| {
+                                enterprise.metrics_interval.time_to_next()
+                            }),
                     Event::InternalMetrics,
                 );
 
@@ -529,12 +539,17 @@ pub fn spawn_task_scheduler(inner: Arc<Inner>) {
                     // SPDX-License-Identifier: LicenseRef-SEL
                     #[cfg(feature = "enterprise")]
                     Event::InternalMetrics => {
-                        if let Some(enterprise) = &server.core.enterprise {
-                            queue.schedule(
-                                Instant::now() + enterprise.metrics_interval.time_to_next(),
-                                Event::InternalMetrics,
-                            );
-                        }
+                        queue.schedule(
+                            Instant::now()
+                                + server
+                                    .core
+                                    .enterprise
+                                    .as_ref()
+                                    .map_or(INTERNAL_METRICS_UNLICENSED_POLL, |enterprise| {
+                                        enterprise.metrics_interval.time_to_next()
+                                    }),
+                            Event::InternalMetrics,
+                        );
 
                         if server.core.storage.metrics.is_active() {
                             use common::telemetry::metrics::store::MetricsStore;
@@ -673,6 +688,8 @@ pub fn spawn_task_scheduler(inner: Arc<Inner>) {
 const LICENSE_RETRY_MIN: Duration = Duration::from_secs(300);
 #[cfg(feature = "enterprise")]
 const LICENSE_RETRY_MAX: Duration = Duration::from_secs(3600);
+#[cfg(feature = "enterprise")]
+const INTERNAL_METRICS_UNLICENSED_POLL: Duration = Duration::from_secs(300);
 
 #[cfg(feature = "enterprise")]
 async fn has_license_api_key(server: &common::Server) -> bool {

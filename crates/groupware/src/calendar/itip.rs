@@ -21,8 +21,8 @@ use crate::{
         InstanceId, ItipError, ItipMessage, ItipSnapshots,
         format::{DateStyle, TextFormatter, hyperlink},
         inbound::{
-            MergeAction, MergeResult, itip_import_message, itip_merge_changes, itip_method,
-            itip_process_message,
+            MergeAction, MergeResult, itip_add_uninvited_attendee, itip_import_message,
+            itip_merge_changes, itip_method, itip_process_message,
         },
         itip::{itip_add_tz, itip_build_envelope},
         recipient::RecipientPolicy,
@@ -72,6 +72,12 @@ pub enum ItipIngestError {
 pub struct ItipRsvpUrl(String);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ItipOrigin {
+    Submission,
+    Delivery,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ItipSendStatus {
     Send,
     NotRequested,
@@ -86,6 +92,7 @@ pub trait ItipIngest: Sync + Send {
         &self,
         account_info: &AccountInfo,
         sender: &str,
+        origin: ItipOrigin,
         recipient: &str,
         itip_message: &str,
     ) -> impl Future<Output = Result<Option<ItipMessage<ICalendar>>, ItipIngestError>> + Send;
@@ -109,9 +116,28 @@ pub trait ItipIngest: Sync + Send {
         &self,
         account_info: &AccountInfo,
         sender: &str,
+        origin: ItipOrigin,
         recipient: &str,
         itip_message: &str,
     ) -> impl Future<Output = Result<Option<ItipMessage<ICalendar>>, ItipIngestError>> + Send;
+
+    fn itip_ingest_forward(
+        &self,
+        account_info: &AccountInfo,
+        sender: &str,
+        recipient: &str,
+        itip: &ICalendar,
+        itip_message: &str,
+    ) -> impl Future<Output = Result<Option<ItipMessage<ICalendar>>, ItipIngestError>> + Send;
+
+    fn itip_create_event(
+        &self,
+        account_info: &AccountInfo,
+        ical: ICalendar,
+        itip: ICalendar,
+        changed_by: ChangedBy,
+        itip_message: &str,
+    ) -> impl Future<Output = Result<(), ItipIngestError>> + Send;
 
     #[allow(clippy::too_many_arguments)]
     fn commit_itip_merge(
@@ -153,13 +179,14 @@ impl ItipIngest for Server {
         &self,
         account_info: &AccountInfo,
         sender: &str,
+        origin: ItipOrigin,
         recipient: &str,
         itip_message: &str,
     ) -> Result<Option<ItipMessage<ICalendar>>, ItipIngestError> {
         let mut attempt = 1;
         loop {
             match self
-                .itip_ingest_once(account_info, sender, recipient, itip_message)
+                .itip_ingest_once(account_info, sender, origin, recipient, itip_message)
                 .await
             {
                 Err(ItipIngestError::Internal(err))
@@ -406,6 +433,7 @@ impl ItipIngest for Server {
         &self,
         account_info: &AccountInfo,
         sender: &str,
+        origin: ItipOrigin,
         recipient: &str,
         itip_message: &str,
     ) -> Result<Option<ItipMessage<ICalendar>>, ItipIngestError> {
@@ -458,7 +486,20 @@ impl ItipIngest for Server {
             }
         }
 
-        let itip_snapshots = itip_snapshot(&itip, account_info.addresses(), false)?;
+        let itip_snapshots = match itip_snapshot(&itip, account_info.addresses(), false) {
+            Ok(itip_snapshots) => itip_snapshots,
+            Err(ItipError::NotOrganizerNorAttendee) if origin == ItipOrigin::Submission => {
+                return Box::pin(self.itip_ingest_forward(
+                    account_info,
+                    sender,
+                    recipient,
+                    &itip,
+                    itip_message,
+                ))
+                .await;
+            }
+            Err(err) => return Err(ItipIngestError::Message(err)),
+        };
         match itip_method(&itip)? {
             ICalendarMethod::Reply | ICalendarMethod::Refresh | ICalendarMethod::Counter => {
                 if !itip_snapshots.sender_is_organizer_or_attendee(sender) {
@@ -580,121 +621,185 @@ impl ItipIngest for Server {
             let mut ical = itip.clone();
             itip_import_message(&mut ical)?;
 
-            let account = self.account(account_id).await?;
-            // SPDX-SnippetBegin
-            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-            // SPDX-License-Identifier: LicenseRef-SEL
-            // Validate quota
-            #[cfg(feature = "enterprise")]
-            if self
-                .has_available_tenant_quota(&account, itip_message.len() as u64)
-                .await
-                .is_err()
-            {
-                return Err(ItipIngestError::Message(ItipError::QuotaExceeded));
-            }
-            // SPDX-SnippetEnd
-
-            // Obtain parent calendar
-            let Some(parent_id) = self
-                .get_or_create_default_calendar(account_info.account(), account_info.account())
-                .await
-                .caused_by(trc::location!())?
-            else {
-                return Err(ItipIngestError::Message(ItipError::NoDefaultCalendar));
-            };
-
-            // Build event
-            let now = now() as i64;
-            let event = CalendarEvent {
-                names: vec![DavName {
-                    name: format!("{}_{}.ics", now, rand::random::<u64>()),
-                    parent_id,
-                }],
-                schedule_tag: Some(1),
-                ..Default::default()
-            };
-            let current = ical.clone();
-            let event_content = CalendarEventContent {
-                data: CalendarEventData::new(
-                    ical,
-                    Tz::Floating,
-                    self.core.groupware.max_ical_instances,
-                ),
-                ..Default::default()
-            };
-            let next_email_alarms = self
-                .next_event_alarms(
-                    account_id,
-                    &EventAlarmUsers::new(account_id, &event_content)?
-                        .with_event_flags(event.flags),
-                    &event_content.data,
-                    &[parent_id],
-                    now,
-                    &mut DefaultAlertsResolver::default(),
-                )
-                .await
-                .caused_by(trc::location!())?;
-
-            let notification = CalendarEventNotification {
-                event_id: None,
-                changed_by,
-                calendar_ids: vec![parent_id],
-                flags: NotificationAudience::of_event(event.flags)
-                    .with_privacy(current.privacy().is_public())
-                    .flags(),
-                ..Default::default()
-            };
-            let notification_content = CalendarEventNotificationContent::Itip {
-                message: itip,
-                previous: None,
-                current: Some(current),
-            };
-
-            // Prepare write batch
-            let mut batch = BatchBuilder::new();
-            batch.with_account_id(account_id);
-            self.limit_disk_quota(&mut batch, &account);
-            self.limit_object_quota(&mut batch, &account, StorageQuota::MaxCalendarEvents);
-            let document_id = batch.reserve_document_id(account_id, Collection::CalendarEvent);
-            event
-                .insert(
-                    event_content,
-                    account_info.changed_by(),
-                    account_id,
-                    document_id,
-                    None,
-                    next_email_alarms,
-                    &mut batch,
-                )
-                .caused_by(trc::location!())?;
-            if NotificationQuota::default()
-                .reserve(
-                    self,
-                    account_id,
-                    notification_content.stored_size(),
-                    &mut batch,
-                )
-                .await
-                .caused_by(trc::location!())?
-            {
-                let itip_document_id =
-                    batch.reserve_document_id(account_id, Collection::CalendarEventNotification);
-                notification
-                    .insert(
-                        notification_content,
-                        account_info.changed_by(),
-                        account_id,
-                        itip_document_id,
-                        Some(document_id),
-                        &mut batch,
-                    )
-                    .caused_by(trc::location!())?;
-            }
-            self.commit_batch(batch).await.caused_by(trc::location!())?;
+            self.itip_create_event(account_info, ical, itip, changed_by, itip_message)
+                .await?;
 
             Ok(None)
         }
+    }
+
+    async fn itip_ingest_forward(
+        &self,
+        account_info: &AccountInfo,
+        sender: &str,
+        recipient: &str,
+        itip: &ICalendar,
+        itip_message: &str,
+    ) -> Result<Option<ItipMessage<ICalendar>>, ItipIngestError> {
+        if itip_method(itip)? != &ICalendarMethod::Request {
+            return Err(ItipIngestError::Message(ItipError::NotOrganizerNorAttendee));
+        }
+
+        let sender_addresses = [sender.to_string()];
+        let sender_snapshots = itip_snapshot(itip, &sender_addresses, false)?;
+        if sender_snapshots.organizer.email.email == sender {
+            return Err(ItipIngestError::Message(ItipError::NotOrganizerNorAttendee));
+        }
+        let Some(sender_id) = self.account_id_from_email(sender, true).await? else {
+            return Err(ItipIngestError::Message(ItipError::NotOrganizerNorAttendee));
+        };
+
+        if self
+            .document_exists(
+                account_info.account_id(),
+                Collection::CalendarEvent,
+                CalendarEventField::Uid,
+                sender_snapshots.uid.as_bytes(),
+            )
+            .await
+            .caused_by(trc::location!())?
+        {
+            return Err(ItipIngestError::Message(ItipError::SenderIsNotOrganizer));
+        }
+
+        let mut ical = itip.clone();
+        itip_import_message(&mut ical)?;
+        itip_add_uninvited_attendee(&mut ical, recipient);
+        self.itip_create_event(
+            account_info,
+            ical,
+            itip.clone(),
+            ChangedBy::PrincipalId(sender_id),
+            itip_message,
+        )
+        .await?;
+
+        Ok(None)
+    }
+
+    #[cfg_attr(not(feature = "enterprise"), allow(unused_variables))]
+    async fn itip_create_event(
+        &self,
+        account_info: &AccountInfo,
+        ical: ICalendar,
+        itip: ICalendar,
+        changed_by: ChangedBy,
+        itip_message: &str,
+    ) -> Result<(), ItipIngestError> {
+        let account_id = account_info.account_id();
+        let account = self.account(account_id).await?;
+        // SPDX-SnippetBegin
+        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+        // SPDX-License-Identifier: LicenseRef-SEL
+        // Validate quota
+        #[cfg(feature = "enterprise")]
+        if self
+            .has_available_tenant_quota(&account, itip_message.len() as u64)
+            .await
+            .is_err()
+        {
+            return Err(ItipIngestError::Message(ItipError::QuotaExceeded));
+        }
+        // SPDX-SnippetEnd
+
+        // Obtain parent calendar
+        let Some(parent_id) = self
+            .get_or_create_default_calendar(account_info.account(), account_info.account())
+            .await
+            .caused_by(trc::location!())?
+        else {
+            return Err(ItipIngestError::Message(ItipError::NoDefaultCalendar));
+        };
+
+        // Build event
+        let now = now() as i64;
+        let event = CalendarEvent {
+            names: vec![DavName {
+                name: format!("{}_{}.ics", now, rand::random::<u64>()),
+                parent_id,
+            }],
+            schedule_tag: Some(1),
+            ..Default::default()
+        };
+        let current = ical.clone();
+        let event_content = CalendarEventContent {
+            data: CalendarEventData::new(
+                ical,
+                Tz::Floating,
+                self.core.groupware.max_ical_instances,
+            ),
+            ..Default::default()
+        };
+        let next_email_alarms = self
+            .next_event_alarms(
+                account_id,
+                &EventAlarmUsers::new(account_id, &event_content)?.with_event_flags(event.flags),
+                &event_content.data,
+                &[parent_id],
+                now,
+                &mut DefaultAlertsResolver::default(),
+            )
+            .await
+            .caused_by(trc::location!())?;
+
+        let notification = CalendarEventNotification {
+            event_id: None,
+            changed_by,
+            calendar_ids: vec![parent_id],
+            flags: NotificationAudience::of_event(event.flags)
+                .with_privacy(current.privacy().is_public())
+                .flags(),
+            ..Default::default()
+        };
+        let notification_content = CalendarEventNotificationContent::Itip {
+            message: itip,
+            previous: None,
+            current: Some(current),
+        };
+
+        // Prepare write batch
+        let mut batch = BatchBuilder::new();
+        batch.with_account_id(account_id);
+        self.limit_disk_quota(&mut batch, &account);
+        self.limit_object_quota(&mut batch, &account, StorageQuota::MaxCalendarEvents);
+        let document_id = batch.reserve_document_id(account_id, Collection::CalendarEvent);
+        event
+            .insert(
+                event_content,
+                account_info.changed_by(),
+                account_id,
+                document_id,
+                None,
+                next_email_alarms,
+                &mut batch,
+            )
+            .caused_by(trc::location!())?;
+        if NotificationQuota::default()
+            .reserve(
+                self,
+                account_id,
+                notification_content.stored_size(),
+                &mut batch,
+            )
+            .await
+            .caused_by(trc::location!())?
+        {
+            let itip_document_id =
+                batch.reserve_document_id(account_id, Collection::CalendarEventNotification);
+            notification
+                .insert(
+                    notification_content,
+                    account_info.changed_by(),
+                    account_id,
+                    itip_document_id,
+                    Some(document_id),
+                    &mut batch,
+                )
+                .caused_by(trc::location!())?;
+        }
+        self.commit_batch(batch).await.caused_by(trc::location!())?;
+
+        Ok(())
     }
 
     async fn commit_itip_merge(
@@ -1247,7 +1352,9 @@ fn build_rsvp_invitation(
             ICalendarProperty::Summary => invitation.summary = Some(value),
             ICalendarProperty::Description => invitation.description = Some(value),
             ICalendarProperty::Location => invitation.location = Some(value),
-            ICalendarProperty::Rrule => invitation.recurrence = Some(value),
+            ICalendarProperty::Rrule if invitation.recurrence.is_none() => {
+                invitation.recurrence = Some(value)
+            }
             ICalendarProperty::Dtstart if invitation.when.is_none() => {
                 invitation.when = Some(value)
             }

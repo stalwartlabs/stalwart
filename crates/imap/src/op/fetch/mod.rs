@@ -185,7 +185,7 @@ impl<T: SessionStream> SessionData<T> {
                 .imap_ctx(&arguments.tag, trc::location!())?,
         };
         let mut modseq = self
-            .sync_view(&mailbox, &cache, None)
+            .sync_and_announce(&mailbox, &cache)
             .await
             .imap_ctx(&arguments.tag, trc::location!())?;
 

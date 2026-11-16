@@ -8,6 +8,7 @@ use crate::{
     DavError, DavMethod,
     common::{
         ExtractETag,
+        create::CreateLockHandler,
         lock::{LockRequestHandler, ResourceState},
         uri::DavUriResource,
     },
@@ -327,8 +328,17 @@ impl FileUpdateRequestHandler for Server {
                         .with_changed_by(access_token.changed_by()),
                 )
                 .caused_by(trc::location!())?;
+            let lock = self
+                .lock_create(
+                    access_token,
+                    account_id,
+                    SyncCollection::FileNode,
+                    orig_resource_name,
+                    headers,
+                )
+                .await?;
             let etag = self
-                .commit_batch(batch)
+                .commit_create(lock, batch)
                 .await
                 .caused_by(trc::location!())?
                 .etag();

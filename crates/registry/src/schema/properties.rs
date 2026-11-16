@@ -80,12 +80,7 @@ pub enum ObjectInner {
     Jmap(Box<Jmap>),
     Log(Box<Log>),
     MailingList(Box<MailingList>),
-    // SPDX-SnippetBegin
-    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-    // SPDX-License-Identifier: LicenseRef-SEL
-    #[cfg(feature = "enterprise")]
     MaskedEmail(Box<MaskedEmail>),
-    // SPDX-SnippetEnd
     MemoryLookupKey(Box<MemoryLookupKey>),
     MemoryLookupKeyValue(Box<MemoryLookupKeyValue>),
     Metadata(Box<Metadata>),
@@ -261,12 +256,7 @@ pub enum ObjectType {
     Jmap = 49,
     Log = 50,
     MailingList = 51,
-    // SPDX-SnippetBegin
-    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-    // SPDX-License-Identifier: LicenseRef-SEL
-    #[cfg(feature = "enterprise")]
     MaskedEmail = 52,
-    // SPDX-SnippetEnd
     MemoryLookupKey = 53,
     MemoryLookupKeyValue = 54,
     Metadata = 55,
@@ -595,12 +585,7 @@ pub enum Property {
     Count = 301,
     Create = 444,
     CreatedAt = 60,
-    // SPDX-SnippetBegin
-    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-    // SPDX-License-Identifier: LicenseRef-SEL
-    #[cfg(feature = "enterprise")]
     CreatedBy = 575,
-    // SPDX-SnippetEnd
     CredentialId = 730,
     Credentials = 385,
     CurrentSecret = 4,
@@ -720,15 +705,13 @@ pub enum Property {
     // SPDX-License-Identifier: LicenseRef-SEL
     #[cfg(feature = "enterprise")]
     EmailAlert = 49,
-    #[cfg(feature = "enterprise")]
-    EmailDomain = 577,
     // SPDX-SnippetEnd
+    EmailDomain = 577,
     EmailLimit = 893,
+    EmailPrefix = 576,
     // SPDX-SnippetBegin
     // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
     // SPDX-License-Identifier: LicenseRef-SEL
-    #[cfg(feature = "enterprise")]
-    EmailPrefix = 576,
     #[cfg(feature = "enterprise")]
     EmailTemplate = 212,
     // SPDX-SnippetEnd
@@ -854,12 +837,7 @@ pub enum Property {
     FlushChanges = 144,
     FlushInterval = 145,
     FolderId = 410,
-    // SPDX-SnippetBegin
-    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-    // SPDX-License-Identifier: LicenseRef-SEL
-    #[cfg(feature = "enterprise")]
     ForDomain = 574,
-    // SPDX-SnippetEnd
     Format = 493,
     ForwardedHops = 480,
     From = 76,
@@ -1158,12 +1136,7 @@ pub enum Property {
     MaxMailboxNameLength = 428,
     MaxMailboxes = 436,
     MaxMailboxesPerEmail = 439,
-    // SPDX-SnippetBegin
-    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-    // SPDX-License-Identifier: LicenseRef-SEL
-    #[cfg(feature = "enterprise")]
     MaxMaskedAddresses = 437,
-    // SPDX-SnippetEnd
     MaxMatchVars = 829,
     MaxMediaSize = 31,
     MaxMessageSize = 426,

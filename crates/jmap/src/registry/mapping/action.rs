@@ -285,7 +285,11 @@ async fn classify_spam(server: &Server, mut request: SpamClassify) -> Option<Spa
 
     let remote_ip = request.remote_ip.into_inner();
     let ehlo_domain = request.ehlo_domain.to_lowercase();
-    let mail_from = request.mail_from.to_lowercase();
+    let mail_from = request
+        .mail_from
+        .as_deref()
+        .map(str::to_lowercase)
+        .unwrap_or_default();
     let mail_from_domain = mail_from.rsplit_once('@').map(|(_, domain)| domain);
     let local_host = &server.core.network.server_name;
 
@@ -409,11 +413,11 @@ async fn classify_spam(server: &Server, mut request: SpamClassify) -> Option<Spa
         asn: asn_geo.asn.as_ref().map(|a| a.id),
         country: asn_geo.country.as_deref(),
         is_tls: request.is_tls,
-        env_from: &request.mail_from,
+        env_from: &mail_from,
         env_from_flags: match request.mail_from_parameters {
             Some(SpamClassifyParameters::Bit7) => MAIL_BODY_7BIT,
-            Some(SpamClassifyParameters::Bit8Mime8BitMIMEMessageContent) => MAIL_BODY_BINARYMIME,
-            Some(SpamClassifyParameters::BinaryMime) => MAIL_BODY_8BITMIME,
+            Some(SpamClassifyParameters::Bit8Mime) => MAIL_BODY_8BITMIME,
+            Some(SpamClassifyParameters::BinaryMime) => MAIL_BODY_BINARYMIME,
             Some(SpamClassifyParameters::SmtpUtf8) => MAIL_SMTPUTF8,
             None => 0,
         },
@@ -491,7 +495,11 @@ async fn dmarc_troubleshoot(
 ) -> Option<DmarcTroubleshoot> {
     let remote_ip = request.remote_ip.into_inner();
     let ehlo_domain = request.ehlo_domain.to_lowercase();
-    let mail_from = request.mail_from.to_lowercase();
+    let mail_from = request
+        .mail_from
+        .as_deref()
+        .map(str::to_lowercase)
+        .unwrap_or_default();
     let mail_from_domain = mail_from.rsplit_once('@').map(|(_, domain)| domain);
 
     let local_host = &server.core.network.server_name;
@@ -547,10 +555,13 @@ async fn dmarc_troubleshoot(
             .await
     };
 
-    let body = request
-        .message
-        .take()
-        .unwrap_or_else(|| format!("From: {mail_from}\r\nSubject: test\r\n\r\ntest"));
+    let body = match request.message.take() {
+        Some(body) => body,
+        None if mail_from.is_empty() => {
+            format!("From: postmaster@{ehlo_domain}\r\nSubject: test\r\n\r\ntest")
+        }
+        None => format!("From: {mail_from}\r\nSubject: test\r\n\r\ntest"),
+    };
     let auth_message = AuthenticatedMessage::parse_with_opts(body.as_bytes(), None, true)?;
 
     let dkim_output = server

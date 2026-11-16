@@ -150,7 +150,8 @@ impl FileGetRequestHandler for Server {
             .with_content_type(content_type.unwrap_or(FILE_DEFAULT_MEDIA_TYPE))
             .with_etag(etag)
             .with_last_modified(last_modified)
-            .with_accept_ranges();
+            .with_accept_ranges()
+            .with_sandbox_policy();
 
         if is_head {
             return Ok(response.with_content_length(size));

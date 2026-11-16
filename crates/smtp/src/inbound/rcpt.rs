@@ -6,6 +6,7 @@
 
 use crate::{
     core::{Session, SessionAddress},
+    queue::RCPT_REWRITTEN,
     scripts::ScriptResult,
 };
 use common::{
@@ -194,7 +195,7 @@ impl<T: SessionStream> Session<T> {
                 let mut new_addr = SessionAddress::new(address);
 
                 if !self.data.rcpt_to.contains(&new_addr) {
-                    new_addr.flags = orig_addr.flags;
+                    new_addr.flags = orig_addr.flags | RCPT_REWRITTEN;
                     new_addr.dsn_info = orig_addr.address_lcase.into();
                     self.data.rcpt_to.push(new_addr);
                 } else {

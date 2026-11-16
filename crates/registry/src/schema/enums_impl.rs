@@ -9737,6 +9737,11 @@ impl EnumImpl for Permission {
             b"sysMailingListUpdate" => Permission::SysMailingListUpdate,
             b"sysMailingListDestroy" => Permission::SysMailingListDestroy,
             b"sysMailingListQuery" => Permission::SysMailingListQuery,
+            b"sysMaskedEmailGet" => Permission::SysMaskedEmailGet,
+            b"sysMaskedEmailCreate" => Permission::SysMaskedEmailCreate,
+            b"sysMaskedEmailUpdate" => Permission::SysMaskedEmailUpdate,
+            b"sysMaskedEmailDestroy" => Permission::SysMaskedEmailDestroy,
+            b"sysMaskedEmailQuery" => Permission::SysMaskedEmailQuery,
             b"sysMemoryLookupKeyGet" => Permission::SysMemoryLookupKeyGet,
             b"sysMemoryLookupKeyCreate" => Permission::SysMemoryLookupKeyCreate,
             b"sysMemoryLookupKeyUpdate" => Permission::SysMemoryLookupKeyUpdate,
@@ -10442,20 +10447,11 @@ impl EnumImpl for Permission {
             Permission::SysMailingListUpdate => "sysMailingListUpdate",
             Permission::SysMailingListDestroy => "sysMailingListDestroy",
             Permission::SysMailingListQuery => "sysMailingListQuery",
-            // SPDX-SnippetBegin
-            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-            // SPDX-License-Identifier: LicenseRef-SEL
-            #[cfg(feature = "enterprise")]
             Permission::SysMaskedEmailGet => "sysMaskedEmailGet",
-            #[cfg(feature = "enterprise")]
             Permission::SysMaskedEmailCreate => "sysMaskedEmailCreate",
-            #[cfg(feature = "enterprise")]
             Permission::SysMaskedEmailUpdate => "sysMaskedEmailUpdate",
-            #[cfg(feature = "enterprise")]
             Permission::SysMaskedEmailDestroy => "sysMaskedEmailDestroy",
-            #[cfg(feature = "enterprise")]
             Permission::SysMaskedEmailQuery => "sysMaskedEmailQuery",
-            // SPDX-SnippetEnd
             Permission::SysMemoryLookupKeyGet => "sysMemoryLookupKeyGet",
             Permission::SysMemoryLookupKeyCreate => "sysMemoryLookupKeyCreate",
             Permission::SysMemoryLookupKeyUpdate => "sysMemoryLookupKeyUpdate",
@@ -11220,20 +11216,11 @@ impl EnumImpl for Permission {
             394 => Some(Permission::SysMailingListUpdate),
             395 => Some(Permission::SysMailingListDestroy),
             396 => Some(Permission::SysMailingListQuery),
-            // SPDX-SnippetBegin
-            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-            // SPDX-License-Identifier: LicenseRef-SEL
-            #[cfg(feature = "enterprise")]
             397 => Some(Permission::SysMaskedEmailGet),
-            #[cfg(feature = "enterprise")]
             398 => Some(Permission::SysMaskedEmailCreate),
-            #[cfg(feature = "enterprise")]
             399 => Some(Permission::SysMaskedEmailUpdate),
-            #[cfg(feature = "enterprise")]
             400 => Some(Permission::SysMaskedEmailDestroy),
-            #[cfg(feature = "enterprise")]
             401 => Some(Permission::SysMaskedEmailQuery),
-            // SPDX-SnippetEnd
             402 => Some(Permission::SysMemoryLookupKeyGet),
             403 => Some(Permission::SysMemoryLookupKeyCreate),
             404 => Some(Permission::SysMemoryLookupKeyUpdate),
@@ -11991,20 +11978,11 @@ impl Permission {
         Permission::SysMailingListUpdate,
         Permission::SysMailingListDestroy,
         Permission::SysMailingListQuery,
-        // SPDX-SnippetBegin
-        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-        // SPDX-License-Identifier: LicenseRef-SEL
-        #[cfg(feature = "enterprise")]
         Permission::SysMaskedEmailGet,
-        #[cfg(feature = "enterprise")]
         Permission::SysMaskedEmailCreate,
-        #[cfg(feature = "enterprise")]
         Permission::SysMaskedEmailUpdate,
-        #[cfg(feature = "enterprise")]
         Permission::SysMaskedEmailDestroy,
-        #[cfg(feature = "enterprise")]
         Permission::SysMaskedEmailQuery,
-        // SPDX-SnippetEnd
         Permission::SysMemoryLookupKeyGet,
         Permission::SysMemoryLookupKeyCreate,
         Permission::SysMemoryLookupKeyUpdate,
@@ -14572,7 +14550,7 @@ impl EnumImpl for SpamClassifyParameters {
             value.as_bytes(),
             SpamClassifyParameters,
             b"bit7" => SpamClassifyParameters::Bit7,
-            b"bit8Mime - 8-bit MIME message content" => SpamClassifyParameters::Bit8Mime8BitMIMEMessageContent,
+            b"bit8Mime" => SpamClassifyParameters::Bit8Mime,
             b"binaryMime" => SpamClassifyParameters::BinaryMime,
             b"smtpUtf8" => SpamClassifyParameters::SmtpUtf8,
         }
@@ -14582,9 +14560,7 @@ impl EnumImpl for SpamClassifyParameters {
     fn as_str(&self) -> &'static str {
         match self {
             SpamClassifyParameters::Bit7 => "bit7",
-            SpamClassifyParameters::Bit8Mime8BitMIMEMessageContent => {
-                "bit8Mime - 8-bit MIME message content"
-            }
+            SpamClassifyParameters::Bit8Mime => "bit8Mime",
             SpamClassifyParameters::BinaryMime => "binaryMime",
             SpamClassifyParameters::SmtpUtf8 => "smtpUtf8",
         }
@@ -14597,7 +14573,7 @@ impl EnumImpl for SpamClassifyParameters {
     fn from_id(id: u16) -> Option<Self> {
         match id {
             0 => Some(SpamClassifyParameters::Bit7),
-            1 => Some(SpamClassifyParameters::Bit8Mime8BitMIMEMessageContent),
+            1 => Some(SpamClassifyParameters::Bit8Mime),
             2 => Some(SpamClassifyParameters::BinaryMime),
             3 => Some(SpamClassifyParameters::SmtpUtf8),
             _ => None,
@@ -15188,10 +15164,6 @@ impl<'de> serde::Deserialize<'de> for SqlAuthStoreType {
 }
 
 impl EnumImpl for StorageQuota {
-    // SPDX-SnippetBegin
-    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-    // SPDX-License-Identifier: LicenseRef-SEL
-    #[cfg(feature = "enterprise")]
     fn parse(value: &str) -> Option<Self> {
         hashify::map! {
             value.as_bytes(),
@@ -15220,35 +15192,6 @@ impl EnumImpl for StorageQuota {
         .copied()
     }
 
-    // SPDX-SnippetEnd
-    #[cfg(not(feature = "enterprise"))]
-    fn parse(value: &str) -> Option<Self> {
-        hashify::map! {
-            value.as_bytes(),
-            StorageQuota,
-            b"maxEmails" => StorageQuota::MaxEmails,
-            b"maxMailboxes" => StorageQuota::MaxMailboxes,
-            b"maxEmailSubmissions" => StorageQuota::MaxEmailSubmissions,
-            b"maxEmailIdentities" => StorageQuota::MaxEmailIdentities,
-            b"maxParticipantIdentities" => StorageQuota::MaxParticipantIdentities,
-            b"maxSieveScripts" => StorageQuota::MaxSieveScripts,
-            b"maxPushSubscriptions" => StorageQuota::MaxPushSubscriptions,
-            b"maxCalendars" => StorageQuota::MaxCalendars,
-            b"maxCalendarEvents" => StorageQuota::MaxCalendarEvents,
-            b"maxCalendarEventNotifications" => StorageQuota::MaxCalendarEventNotifications,
-            b"maxAddressBooks" => StorageQuota::MaxAddressBooks,
-            b"maxContactCards" => StorageQuota::MaxContactCards,
-            b"maxFiles" => StorageQuota::MaxFiles,
-            b"maxFolders" => StorageQuota::MaxFolders,
-            b"maxAppPasswords" => StorageQuota::MaxAppPasswords,
-            b"maxApiKeys" => StorageQuota::MaxApiKeys,
-            b"maxPublicKeys" => StorageQuota::MaxPublicKeys,
-            b"maxDiskQuota" => StorageQuota::MaxDiskQuota,
-            b"maxPasskeys" => StorageQuota::MaxPasskeys,
-        }
-        .copied()
-    }
-
     fn as_str(&self) -> &'static str {
         match self {
             StorageQuota::MaxEmails => "maxEmails",
@@ -15265,12 +15208,7 @@ impl EnumImpl for StorageQuota {
             StorageQuota::MaxContactCards => "maxContactCards",
             StorageQuota::MaxFiles => "maxFiles",
             StorageQuota::MaxFolders => "maxFolders",
-            // SPDX-SnippetBegin
-            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-            // SPDX-License-Identifier: LicenseRef-SEL
-            #[cfg(feature = "enterprise")]
             StorageQuota::MaxMaskedAddresses => "maxMaskedAddresses",
-            // SPDX-SnippetEnd
             StorageQuota::MaxAppPasswords => "maxAppPasswords",
             StorageQuota::MaxApiKeys => "maxApiKeys",
             StorageQuota::MaxPublicKeys => "maxPublicKeys",
@@ -15299,12 +15237,7 @@ impl EnumImpl for StorageQuota {
             11 => Some(StorageQuota::MaxContactCards),
             12 => Some(StorageQuota::MaxFiles),
             13 => Some(StorageQuota::MaxFolders),
-            // SPDX-SnippetBegin
-            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-            // SPDX-License-Identifier: LicenseRef-SEL
-            #[cfg(feature = "enterprise")]
             14 => Some(StorageQuota::MaxMaskedAddresses),
-            // SPDX-SnippetEnd
             15 => Some(StorageQuota::MaxAppPasswords),
             16 => Some(StorageQuota::MaxApiKeys),
             17 => Some(StorageQuota::MaxPublicKeys),

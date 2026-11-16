@@ -19,13 +19,13 @@ use crate::{
     },
     expr::{Bump, Variable, functions::ResolveVariable},
     manager::SPAM_CLASSIFIER_KEY,
-    network::RcptResolution,
+    network::{RcptResolution, masked::MaskedAddress},
 };
 use ahash::AHashSet;
 use compact_str::{CompactString, ToCompactString};
 use directory::Recipient;
 use mail_auth::IpLookupStrategy;
-use registry::schema::enums::ExpressionVariable;
+use registry::schema::{enums::ExpressionVariable, structs::MaskedEmail};
 use sieve::Sieve;
 use std::{
     borrow::Cow,
@@ -34,21 +34,11 @@ use std::{
 };
 use store::{
     Deserialize, IterateParams, ValueKey,
-    write::{Archive, ArchiveBytes, QueueClass, ValueClass},
+    write::{Archive, ArchiveBytes, QueueClass, ValueClass, now},
 };
 use trc::{AddContext, SpamEvent};
-use utils::DomainPart;
-
-// SPDX-SnippetBegin
-// SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-// SPDX-License-Identifier: LicenseRef-SEL
-#[cfg(feature = "enterprise")]
-use registry::schema::structs::MaskedEmail;
-#[cfg(feature = "enterprise")]
-use store::write::now;
-#[cfg(feature = "enterprise")]
 use types::id::Id;
-// SPDX-SnippetEnd
+use utils::DomainPart;
 
 impl Server {
     pub async fn rcpt_resolve(
@@ -88,14 +78,7 @@ impl Server {
             }
         }
 
-        // SPDX-SnippetBegin
-        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-        // SPDX-License-Identifier: LicenseRef-SEL
-
-        #[cfg(feature = "enterprise")]
-        if self.is_enterprise_edition()
-            && let Cow::Borrowed(addr) = &local_part
-            && let Some(masked_id) = crate::enterprise::masked::MaskedAddress::parse(addr)
+        if let Some(masked_id) = MaskedAddress::parse(local_part.as_ref())
             && let Some(masked_entry) = self
                 .registry()
                 .object::<MaskedEmail>(Id::new(masked_id))
@@ -121,7 +104,6 @@ impl Server {
                 Ok(RcptResolution::UnknownRecipient)
             };
         }
-        // SPDX-SnippetEnd
 
         // Obtain external directory, if configured
         let directory = self

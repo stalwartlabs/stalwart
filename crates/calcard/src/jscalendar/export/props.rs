@@ -387,6 +387,25 @@ impl<'x, I: JSCalendarId, B: JSCalendarId> ConvertedComponent<'x, I, B> {
         .then_some(converted)
     }
 
+    pub(super) fn has_date_value(&self, property: &JSCalendarProperty<I>) -> bool {
+        self.converted_props.iter().any(|(keys, value)| {
+            matches!(keys.as_slice(), [Key::Property(converted)] if converted == property)
+                && value
+                    .as_object_and_get(&Key::Property(JSCalendarProperty::Parameters))
+                    .and_then(Value::as_object)
+                    .is_some_and(|params| {
+                        params.iter().any(|(name, value)| {
+                            matches!(
+                                ICalendarParameterName::try_parse(name.to_string().as_bytes()),
+                                Some(ICalendarParameterName::Value)
+                            ) && value
+                                .as_str()
+                                .is_some_and(|value| value.eq_ignore_ascii_case("DATE"))
+                        })
+                    })
+        })
+    }
+
     pub(super) fn build(
         entries: &mut Map<'x, JSCalendarProperty<I>, JSCalendarValue<I, B>>,
     ) -> Option<Self> {

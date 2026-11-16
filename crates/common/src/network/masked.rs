@@ -1,11 +1,7 @@
 /*
  * SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
  *
- * SPDX-License-Identifier: LicenseRef-SEL
- *
- * This file is subject to the Stalwart Enterprise License Agreement (SEL) and
- * is NOT open source software.
- *
+ * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
 use store::write::now;
@@ -59,12 +55,13 @@ impl MaskedAddress {
 fn base36_encode(mut n: u128) -> String {
     const CHARS: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyz";
 
-    let mut buf = Vec::with_capacity(25);
+    let mut buf = [0u8; 25];
+    let mut pos = buf.len();
     while n > 0 {
-        buf.push(CHARS[(n % 36) as usize]);
+        pos -= 1;
+        buf[pos] = CHARS[(n % 36) as usize];
         n /= 36;
     }
 
-    buf.reverse();
-    String::from_utf8(buf).unwrap()
+    buf[pos..].iter().map(|&b| char::from(b)).collect()
 }

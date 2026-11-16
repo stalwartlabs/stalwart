@@ -139,7 +139,7 @@ impl<T: SessionStream> SessionData<T> {
             .fetch(&self.server, src_mailbox.id.account_id)
             .await
             .imap_ctx(&arguments.tag, trc::location!())?;
-        self.sync_view(&src_mailbox, &cache, None)
+        self.sync_and_announce(&src_mailbox, &cache)
             .await
             .imap_ctx(&arguments.tag, trc::location!())?;
 

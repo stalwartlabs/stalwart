@@ -17,7 +17,9 @@ use store::{
 };
 use tinyvec::TinyVec;
 use trc::AddContext;
-use types::{collection::Collection, field::Field, special_use::SpecialUse};
+use types::{collection::Collection, field::Field, keyword::DRAFT, special_use::SpecialUse};
+
+const DRAFT_BIT: u32 = 1 << DRAFT;
 
 pub(super) async fn has_duplicate_in(
     server: &Server,
@@ -29,10 +31,11 @@ pub(super) async fn has_duplicate_in(
     if let Some(cache) = server.fresh_messages(account_id) {
         return Ok(duplicate_ids.iter().any(|document_id| {
             cache.email_by_id(document_id).is_some_and(|message| {
-                message
-                    .mailboxes()
-                    .iter()
-                    .any(|mailbox| is_target(mailbox.mailbox_id))
+                message.keywords() & DRAFT_BIT == 0
+                    && message
+                        .mailboxes()
+                        .iter()
+                        .any(|mailbox| is_target(mailbox.mailbox_id))
             })
         }));
     }
@@ -41,10 +44,11 @@ pub(super) async fn has_duplicate_in(
     let mut found = false;
     server
         .message_datas(account_id, &documents, |_, data| {
-            found |= data
-                .mailboxes
-                .iter()
-                .any(|mailbox| is_target(mailbox.mailbox_id));
+            found |= data.keywords & DRAFT_BIT == 0
+                && data
+                    .mailboxes
+                    .iter()
+                    .any(|mailbox| is_target(mailbox.mailbox_id));
             Ok(true)
         })
         .await

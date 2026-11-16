@@ -13,7 +13,6 @@ pub mod alerts;
 pub mod config;
 pub mod license;
 pub mod logo;
-pub mod masked;
 
 pub use crate::config::mailstore::spamfilter::AI_TAG_PREFIX;
 

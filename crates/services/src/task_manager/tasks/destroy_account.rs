@@ -93,19 +93,11 @@ async fn destroy_account(server: &Server, task: &TaskDestroyAccount) -> trc::Res
         .caused_by(trc::location!())?;
 
     // Destroy public keys, masked emails and OAuth grants
-    // SPDX-SnippetBegin
-    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-    // SPDX-License-Identifier: LicenseRef-SEL
-    #[cfg(feature = "enterprise")]
-    let objects = [
+    for object in [
         ObjectType::PublicKey,
         ObjectType::MaskedEmail,
         ObjectType::OAuthGrant,
-    ];
-    // SPDX-SnippetEnd
-    #[cfg(not(feature = "enterprise"))]
-    let objects = [ObjectType::PublicKey, ObjectType::OAuthGrant];
-    for object in objects {
+    ] {
         let mut batch = BatchBuilder::new();
         let ids = server
             .registry()

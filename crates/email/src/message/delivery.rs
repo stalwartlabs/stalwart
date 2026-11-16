@@ -47,11 +47,16 @@ impl SenderAuthentication {
 #[derive(Debug)]
 pub struct IngestRecipient {
     pub address: String,
+    pub rcpt_to: Option<String>,
     pub orcpt: Option<String>,
     pub spam_percentage: Option<u8>,
 }
 
 impl IngestRecipient {
+    pub fn envelope_to(&self) -> &str {
+        self.rcpt_to.as_deref().unwrap_or(&self.address)
+    }
+
     pub fn orcpt_parameter(&self) -> Option<String> {
         self.orcpt
             .as_deref()

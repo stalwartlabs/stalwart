@@ -1463,7 +1463,7 @@ pub struct DmarcTroubleshoot {
     #[serde(rename = "ehloDomain")]
     pub ehlo_domain: String,
     #[serde(rename = "mailFrom")]
-    pub mail_from: String,
+    pub mail_from: Option<String>,
     #[serde(rename = "rcptTo")]
     pub rcpt_to: Map<String>,
     pub message: Option<String>,
@@ -2514,11 +2514,8 @@ pub struct DnsServerNamecheap {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct DnsServerNetcup {
-    #[serde(rename = "customerNumber")]
-    pub customer_number: String,
-    #[serde(rename = "apiKeyId")]
-    pub api_key_id: String,
-    pub password: SecretKey,
+    #[serde(rename = "apiKey")]
+    pub api_key: SecretKey,
     pub description: String,
     // SPDX-SnippetBegin
     // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
@@ -3063,13 +3060,8 @@ pub struct Email {
     pub max_identities: Option<u64>,
     #[serde(rename = "maxMailboxes")]
     pub max_mailboxes: Option<u64>,
-    // SPDX-SnippetBegin
-    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-    // SPDX-License-Identifier: LicenseRef-SEL
-    #[cfg(feature = "enterprise")]
     #[serde(rename = "maxMaskedAddresses")]
     pub max_masked_addresses: Option<u64>,
-    // SPDX-SnippetEnd
     #[serde(rename = "maxPublicKeys")]
     pub max_public_keys: Option<u64>,
     #[serde(rename = "maxMailboxesPerEmail")]
@@ -3867,10 +3859,6 @@ pub struct MailingList {
     pub recipients: Map<String>,
 }
 
-// SPDX-SnippetBegin
-// SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-// SPDX-License-Identifier: LicenseRef-SEL
-#[cfg(feature = "enterprise")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct MaskedEmail {
@@ -3890,7 +3878,6 @@ pub struct MaskedEmail {
     pub url: Option<String>,
 }
 
-// SPDX-SnippetEnd
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct MeilisearchStore {
@@ -5689,7 +5676,7 @@ pub struct SpamClassify {
     #[serde(rename = "isTls")]
     pub is_tls: bool,
     #[serde(rename = "mailFrom")]
-    pub mail_from: String,
+    pub mail_from: Option<String>,
     #[serde(rename = "mailFromParameters")]
     pub mail_from_parameters: Option<SpamClassifyParameters>,
     #[serde(rename = "rcptTo")]

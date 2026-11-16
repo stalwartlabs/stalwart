@@ -65,7 +65,7 @@ impl<T: SessionStream> Session<T> {
             .get_cached_messages(mailbox.id.account_id)
             .await
             .imap_ctx(&arguments.tag, trc::location!())?;
-        data.sync_view(&mailbox, &cache, None)
+        data.sync_and_announce(&mailbox, &cache)
             .await
             .imap_ctx(&arguments.tag, trc::location!())?;
 

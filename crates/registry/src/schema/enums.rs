@@ -2265,20 +2265,11 @@ pub enum Permission {
     SysMailingListUpdate = 394,
     SysMailingListDestroy = 395,
     SysMailingListQuery = 396,
-    // SPDX-SnippetBegin
-    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-    // SPDX-License-Identifier: LicenseRef-SEL
-    #[cfg(feature = "enterprise")]
     SysMaskedEmailGet = 397,
-    #[cfg(feature = "enterprise")]
     SysMaskedEmailCreate = 398,
-    #[cfg(feature = "enterprise")]
     SysMaskedEmailUpdate = 399,
-    #[cfg(feature = "enterprise")]
     SysMaskedEmailDestroy = 400,
-    #[cfg(feature = "enterprise")]
     SysMaskedEmailQuery = 401,
-    // SPDX-SnippetEnd
     SysMemoryLookupKeyGet = 402,
     SysMemoryLookupKeyCreate = 403,
     SysMemoryLookupKeyUpdate = 404,
@@ -3020,7 +3011,7 @@ pub enum SpamClassifierModelType {
 pub enum SpamClassifyParameters {
     #[default]
     Bit7 = 0,
-    Bit8Mime8BitMIMEMessageContent = 1,
+    Bit8Mime = 1,
     BinaryMime = 2,
     SmtpUtf8 = 3,
 }
@@ -3146,12 +3137,7 @@ pub enum StorageQuota {
     MaxContactCards = 11,
     MaxFiles = 12,
     MaxFolders = 13,
-    // SPDX-SnippetBegin
-    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-    // SPDX-License-Identifier: LicenseRef-SEL
-    #[cfg(feature = "enterprise")]
     MaxMaskedAddresses = 14,
-    // SPDX-SnippetEnd
     MaxAppPasswords = 15,
     MaxApiKeys = 16,
     MaxPublicKeys = 17,

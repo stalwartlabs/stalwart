@@ -210,7 +210,8 @@ impl RegistryGet for Server {
             | ObjectType::Role
             | ObjectType::PublicKey
             | ObjectType::DkimSignature
-            | ObjectType::Domain => registry_object_get(get).await,
+            | ObjectType::Domain
+            | ObjectType::MaskedEmail => registry_object_get(get).await,
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -221,8 +222,7 @@ impl RegistryGet for Server {
             | ObjectType::MetricsStore
             | ObjectType::SpamAi
             | ObjectType::TracingStore
-            | ObjectType::Tenant
-            | ObjectType::MaskedEmail => registry_object_get(get).await,
+            | ObjectType::Tenant => registry_object_get(get).await,
             // SPDX-SnippetEnd
             ObjectType::QueuedMessage => {
                 queued_message_get(get).await.map(|get| get.into_response())

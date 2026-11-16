@@ -172,14 +172,9 @@ impl EmailConfig {
                 max_objects.set(item, max as u32);
             }
         }
-        // SPDX-SnippetBegin
-        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-        // SPDX-License-Identifier: LicenseRef-SEL
-        #[cfg(feature = "enterprise")]
         if let Some(max) = email.max_masked_addresses {
             max_objects.set(StorageQuota::MaxMaskedAddresses, max as u32);
         }
-        // SPDX-SnippetEnd
 
         // Parse default folders
         let mut default_folders = Vec::new();

@@ -118,11 +118,10 @@ async fn build_account_mailboxes(
         .await
         .caused_by(trc::location!())?
         .unwrap_or_default();
-    let mut mailboxes = full_mailbox_cache_build(server, account_id).await?;
-    mailboxes.change_id = change_id;
+    let mailboxes = full_mailbox_cache_build(server, account_id, change_id).await?;
     Ok(AccountMailboxes {
+        change_id: mailboxes.change_id,
         mailboxes: Arc::new(mailboxes),
-        change_id,
     })
 }
 
@@ -288,13 +287,13 @@ fn rebuild_mailbox_cache(
 pub(crate) async fn full_mailbox_cache_build(
     server: &Server,
     account_id: u32,
+    change_id: u64,
 ) -> trc::Result<MailboxesCache> {
-    // Build cache
     let mut cache = MailboxesCacheBuilder {
         items: Default::default(),
         index: Default::default(),
         size: 0,
-        change_id: 0,
+        change_id,
     };
 
     server
@@ -316,6 +315,14 @@ pub(crate) async fn full_mailbox_cache_build(
             .create_system_folders(account_id)
             .await
             .caused_by(trc::location!())?;
+        cache.change_id = server
+            .core
+            .storage
+            .data
+            .get_last_change_id(account_id, SyncCollection::Email.into())
+            .await
+            .caused_by(trc::location!())?
+            .unwrap_or_default();
         server
             .archives(
                 account_id,

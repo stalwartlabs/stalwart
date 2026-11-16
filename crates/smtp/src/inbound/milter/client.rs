@@ -141,7 +141,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> MilterClient<T> {
             }
         }
 
-        Ok(Action::Accept)
+        Ok(Action::Continue)
     }
 
     pub async fn helo(
@@ -162,7 +162,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> MilterClient<T> {
                 return self.read().await?.into_action();
             }
         }
-        Ok(Action::Accept)
+        Ok(Action::Continue)
     }
 
     pub async fn mail_from<A, V>(
@@ -189,7 +189,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> MilterClient<T> {
                 return self.read().await?.into_action();
             }
         }
-        Ok(Action::Accept)
+        Ok(Action::Continue)
     }
 
     pub async fn rcpt_to<A, V>(
@@ -216,7 +216,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> MilterClient<T> {
                 return self.read().await?.into_action();
             }
         }
-        Ok(Action::Accept)
+        Ok(Action::Continue)
     }
 
     pub async fn headers<I, H, V>(&mut self, headers: I) -> super::Result<Action>
@@ -234,7 +234,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> MilterClient<T> {
                 .await?;
                 if !self.has_option(SMFIP_NR_HDR) {
                     match self.read().await? {
-                        Response::Action(Action::Accept | Action::Continue) => (),
+                        Response::Action(Action::Continue) => (),
                         Response::Action(action) => return Ok(action),
                         response => return Err(Error::Unexpected(response)),
                     }
@@ -248,7 +248,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> MilterClient<T> {
                 return self.read().await?.into_action();
             }
         }
-        Ok(Action::Accept)
+        Ok(Action::Continue)
     }
 
     pub async fn data(&mut self) -> super::Result<Action> {
@@ -258,48 +258,42 @@ impl<T: AsyncRead + AsyncWrite + Unpin> MilterClient<T> {
                 return self.read().await?.into_action();
             }
         }
-        Ok(Action::Accept)
+        Ok(Action::Continue)
     }
 
     pub async fn body(&mut self, body: &[u8]) -> super::Result<(Action, Vec<Modification>)> {
         if !self.has_option(SMFIP_NOBODY) {
-            // Write body chunks
             for value in body.chunks(MILTER_CHUNK_SIZE) {
                 self.write(Command::Body { value }).await?;
                 if !self.has_option(SMFIP_NR_BODY) {
                     match self.read().await? {
-                        Response::Action(Action::Accept | Action::Continue)
-                        | Response::Progress => (),
+                        Response::Action(Action::Continue) | Response::Progress => (),
                         Response::Skip => break,
-                        Response::Action(reject) => {
-                            return Ok((reject, Vec::new()));
+                        Response::Action(action) => {
+                            return Ok((action, Vec::new()));
                         }
                         response => return Err(Error::Unexpected(response)),
                     }
                 }
             }
+        }
 
-            // Write EndOfBody
-            self.write(Command::EndOfBody).await?;
+        self.write(Command::EndOfBody).await?;
 
-            // Collect responses
-            let mut modifications = Vec::new();
-            loop {
-                match self.read().await? {
-                    Response::Action(action) => {
-                        return Ok((action, modifications));
-                    }
-                    Response::Modification(modification) => {
-                        modifications.push(modification);
-                    }
-                    Response::Progress => (),
-                    unexpected => {
-                        return Err(Error::Unexpected(unexpected));
-                    }
+        let mut modifications = Vec::new();
+        loop {
+            match self.read().await? {
+                Response::Action(action) => {
+                    return Ok((action, modifications));
+                }
+                Response::Modification(modification) => {
+                    modifications.push(modification);
+                }
+                Response::Progress => (),
+                unexpected => {
+                    return Err(Error::Unexpected(unexpected));
                 }
             }
-        } else {
-            Ok((Action::Accept, vec![]))
         }
     }
 

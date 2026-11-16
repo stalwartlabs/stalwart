@@ -496,19 +496,12 @@ permission_scopes!(
         SysPublicKeyUpdate,
         SysPublicKeyDestroy,
         SysPublicKeyQuery,
-    ],
-    // SPDX-SnippetBegin
-    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-    // SPDX-License-Identifier: LicenseRef-SEL
-    #[cfg(feature = "enterprise")]
-    OAuthScopes::SETTINGS => [
         SysMaskedEmailGet,
         SysMaskedEmailCreate,
         SysMaskedEmailUpdate,
         SysMaskedEmailDestroy,
         SysMaskedEmailQuery,
     ],
-    // SPDX-SnippetEnd
 );
 
 const fn insert_scoped(

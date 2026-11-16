@@ -131,6 +131,13 @@ impl MailboxView {
         self.uid_max
     }
 
+    pub fn take_appended(&mut self) -> Option<usize> {
+        (self.appended > 0).then(|| {
+            self.appended = 0;
+            self.rows.len()
+        })
+    }
+
     pub fn has_pending_changes(&self) -> bool {
         !self.tombstones.is_empty() || self.appended > 0 || !self.sorted
     }
@@ -853,6 +860,21 @@ impl<T: SessionStream> SessionData<T> {
                 &deltas,
                 matches!(outcome, SyncOutcome::Rebuilt),
             );
+        }
+        Ok(change_id)
+    }
+
+    pub async fn sync_and_announce(
+        &self,
+        mailbox: &SelectedMailbox,
+        cache: &MessageStoreCache,
+    ) -> trc::Result<u64> {
+        let change_id = self.sync_view(mailbox, cache, None).await?;
+        let appended = mailbox.view.lock().take_appended();
+        if let Some(total_messages) = appended {
+            let mut buf = Vec::with_capacity(24);
+            Exists { total_messages }.serialize(&mut buf);
+            self.write_bytes(buf).await?;
         }
         Ok(change_id)
     }

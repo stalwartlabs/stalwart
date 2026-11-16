@@ -82,6 +82,12 @@ impl Inner {
 pub struct CacheInvalidationBuilder {
     changes: AHashSet<CacheInvalidation>,
     revoke_oauth_grants: Vec<u32>,
+    // SPDX-SnippetBegin
+    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+    // SPDX-License-Identifier: LicenseRef-SEL
+    #[cfg(feature = "enterprise")]
+    tenant_members: Vec<u32>,
+    // SPDX-SnippetEnd
 }
 
 impl CacheInvalidationBuilder {
@@ -254,11 +260,13 @@ impl CacheInvalidationBuilder {
             // SPDX-License-Identifier: LicenseRef-SEL
             #[cfg(feature = "enterprise")]
             (ObjectInner::Tenant(current), ObjectInner::Tenant(new)) => {
-                if (current.permissions != new.permissions)
-                    || (current.roles != new.roles)
-                    || (current.quotas != new.quotas)
-                {
+                let permissions_changed =
+                    (current.permissions != new.permissions) || (current.roles != new.roles);
+                if permissions_changed || (current.quotas != new.quotas) {
                     self.invalidate(CacheInvalidation::Tenant(id));
+                }
+                if permissions_changed && !self.tenant_members.contains(&id) {
+                    self.tenant_members.push(id);
                 }
 
                 if current.logo != new.logo {
@@ -461,6 +469,16 @@ impl Server {
             }
         }
 
+        // SPDX-SnippetBegin
+        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+        // SPDX-License-Identifier: LicenseRef-SEL
+        #[cfg(feature = "enterprise")]
+        for tenant_id in std::mem::take(&mut changes.tenant_members) {
+            self.invalidate_tenant_members(tenant_id, &mut changes.changes)
+                .await?;
+        }
+        // SPDX-SnippetEnd
+
         let mut changes = changes.changes;
         if changes.is_empty() {
             return Ok(());
@@ -498,19 +516,10 @@ impl Server {
                             // SPDX-License-Identifier: LicenseRef-SEL
                             #[cfg(feature = "enterprise")]
                             ObjectType::Tenant => {
-                                // Invalidate all accounts of the tenant
                                 let tenant_id = linked_object.id().document_id();
                                 changes.insert(CacheInvalidation::Tenant(tenant_id));
-                                for account_id in self
-                                    .registry()
-                                    .query::<RoaringBitmap>(
-                                        RegistryQuery::new(ObjectType::Account)
-                                            .with_tenant(tenant_id.into()),
-                                    )
-                                    .await?
-                                {
-                                    changes.insert(CacheInvalidation::AccessToken(account_id));
-                                }
+                                self.invalidate_tenant_members(tenant_id, &mut changes)
+                                    .await?;
                             }
                             // SPDX-SnippetEnd
                             ObjectType::Role => {
@@ -533,6 +542,30 @@ impl Server {
             .await;
         Ok(())
     }
+
+    // SPDX-SnippetBegin
+    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+    // SPDX-License-Identifier: LicenseRef-SEL
+    #[cfg(feature = "enterprise")]
+    async fn invalidate_tenant_members(
+        &self,
+        tenant_id: u32,
+        changes: &mut AHashSet<CacheInvalidation>,
+    ) -> trc::Result<()> {
+        use trc::AddContext;
+
+        let account_ids = self
+            .registry()
+            .query::<RoaringBitmap>(
+                RegistryQuery::new(ObjectType::Account).with_tenant(tenant_id.into()),
+            )
+            .await
+            .caused_by(trc::location!())?;
+        changes.reserve(usize::try_from(account_ids.len()).unwrap_or_default());
+        changes.extend(account_ids.into_iter().map(CacheInvalidation::AccessToken));
+        Ok(())
+    }
+    // SPDX-SnippetEnd
 
     pub fn invalidate_all_local_caches(&self) {
         self.invalidate_all_local_negative_caches();

@@ -46,6 +46,7 @@ use types::{
 use uri::{OwnedUri, SyncToken, Urn};
 
 pub mod acl;
+pub mod create;
 pub mod dead;
 pub mod lock;
 pub mod propfind;

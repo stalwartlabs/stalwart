@@ -312,6 +312,93 @@ impl Store {
     }
 }
 
+#[derive(Debug)]
+pub struct CappedChanges {
+    pub changes: Changes,
+    pub has_more: bool,
+}
+
+impl Store {
+    pub async fn changes_capped(
+        &self,
+        account_id: u32,
+        collection_: LogCollection,
+        query: Query,
+        limit: usize,
+    ) -> trc::Result<CappedChanges> {
+        let is_share_log = matches!(
+            collection_,
+            LogCollection::Sync(SyncCollection::ShareNotification)
+        );
+        let is_prefixed = collection_.is_prefixed();
+
+        let (is_inclusive, from_change_id, to_change_id) = match query {
+            Query::All => (true, 0, u64::MAX),
+            Query::Since(change_id) => (false, change_id, u64::MAX),
+            Query::SinceInclusive(change_id) => (true, change_id, u64::MAX),
+            Query::RangeInclusive(from_change_id, to_change_id) => {
+                (true, from_change_id, to_change_id)
+            }
+            Query::Range(from_change_id, to_change_id) => (false, from_change_id, to_change_id),
+        };
+        let from_key = collection_.log_key(account_id, from_change_id);
+        let to_key = collection_.log_key(account_id, to_change_id);
+
+        let mut changelog = Changes::default();
+        let mut entries = 0usize;
+        let mut has_more = false;
+
+        self.iterate(
+            IterateParams::new(from_key, to_key).ascending(),
+            |key, value| {
+                let change_id = key.deserialize_be_u64(key.len() - U64_LEN)?;
+                if is_inclusive || change_id != from_change_id {
+                    if value.is_empty() {
+                        changelog.is_truncated = true;
+                        return Ok(true);
+                    }
+                    if entries > 0 && (entries >= limit || changelog.changes.len() >= limit) {
+                        has_more = true;
+                        return Ok(false);
+                    }
+                    entries += 1;
+                    if changelog.live == 0 {
+                        changelog.from_change_id = change_id;
+                    }
+                    changelog.to_change_id = change_id;
+                    if !is_share_log {
+                        let (has_container_changes, has_item_changes) =
+                            changelog.deserialize(value, is_prefixed).ok_or_else(|| {
+                                trc::Error::corrupted_key(key, value.into(), trc::location!())
+                            })?;
+                        if has_container_changes {
+                            changelog.container_change_id = Some(change_id);
+                        }
+                        if has_item_changes {
+                            changelog.item_change_id = Some(change_id);
+                        }
+                    } else {
+                        changelog.push_share_notification(change_id);
+                    }
+                } else {
+                    changelog.from_change_id = change_id;
+                    changelog.to_change_id = change_id;
+                }
+                Ok(true)
+            },
+        )
+        .await
+        .caused_by(trc::location!())?;
+
+        changelog.finalize();
+
+        Ok(CappedChanges {
+            changes: changelog,
+            has_more,
+        })
+    }
+}
+
 impl From<VanishedCollection> for LogCollection {
     fn from(value: VanishedCollection) -> Self {
         LogCollection::Vanished(value)

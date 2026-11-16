@@ -8,6 +8,7 @@ use super::{assert_is_unique_uid, is_same_uid};
 use crate::{
     DavError, DavErrorCondition, DavMethod,
     common::{
+        create::CreateLockHandler,
         lock::{LockRequestHandler, ResourceState},
         uri::DavUriResource,
     },
@@ -348,7 +349,18 @@ impl CardUpdateRequestHandler for Server {
                     &mut batch,
                 )
                 .caused_by(trc::location!())?;
-            self.commit_batch(batch).await.caused_by(trc::location!())?;
+            let lock = self
+                .lock_create(
+                    access_token,
+                    account_id,
+                    SyncCollection::AddressBook,
+                    resource_name,
+                    headers,
+                )
+                .await?;
+            self.commit_create(lock, batch)
+                .await
+                .caused_by(trc::location!())?;
 
             Ok(HttpResponse::new(StatusCode::CREATED).with_etag(etag))
         } else {

@@ -296,10 +296,7 @@ impl ICalendarEntry {
         }
 
         debug_assert!(self.values.is_empty());
-        if !self.has_parameter(&ICalendarParameterName::Value) {
-            self.params
-                .push(ICalendarParameter::value(ICalendarValueType::Date));
-        }
+        self.retain_date_params();
         self.values
             .push(PartialDateTime::from_date_timestamp(dt.naive_timestamp()).into());
         self
@@ -311,10 +308,7 @@ impl ICalendarEntry {
         }
 
         debug_assert!(self.values.is_empty());
-        if !self.has_parameter(&ICalendarParameterName::Value) {
-            self.params
-                .push(ICalendarParameter::value(ICalendarValueType::Date));
-        }
+        self.retain_date_params();
         for dt in dts {
             self.values
                 .push(PartialDateTime::from_date_timestamp(dt.naive_timestamp()).into());
@@ -325,7 +319,7 @@ impl ICalendarEntry {
     pub(super) fn with_date_time(mut self, dt: ZonedDateTime) -> Self {
         debug_assert!(self.values.is_empty());
 
-        self.remove_period_value_type();
+        self.remove_non_date_time_value_type();
 
         // Best effort to restore the original timezone
         let tz_id = self.tz_id();
@@ -359,7 +353,7 @@ impl ICalendarEntry {
     pub(super) fn with_date_times(mut self, dts: Vec<ZonedDateTime>) -> Self {
         debug_assert!(self.values.is_empty());
 
-        self.remove_period_value_type();
+        self.remove_non_date_time_value_type();
         let tz_id = self.tz_id();
         let has_tz_id = tz_id.is_some();
         let entry_tz = tz_id
@@ -373,16 +367,39 @@ impl ICalendarEntry {
         self
     }
 
-    fn remove_period_value_type(&mut self) {
+    fn remove_non_date_time_value_type(&mut self) {
         self.params.retain(|param| {
             !matches!(
                 (&param.name, &param.value),
                 (
                     ICalendarParameterName::Value,
-                    ICalendarParameterValue::Value(ICalendarValueType::Period)
+                    ICalendarParameterValue::Value(
+                        ICalendarValueType::Period | ICalendarValueType::Date
+                    )
                 )
             )
         });
+    }
+
+    fn retain_date_params(&mut self) {
+        let mut has_date_type = false;
+        self.params
+            .retain(|param| match (&param.name, &param.value) {
+                (ICalendarParameterName::Tzid, _) => false,
+                (
+                    ICalendarParameterName::Value,
+                    ICalendarParameterValue::Value(ICalendarValueType::Date),
+                ) => {
+                    has_date_type = true;
+                    true
+                }
+                (ICalendarParameterName::Value, _) => false,
+                _ => true,
+            });
+        if !has_date_type {
+            self.params
+                .push(ICalendarParameter::value(ICalendarValueType::Date));
+        }
     }
 
     fn insert_date(

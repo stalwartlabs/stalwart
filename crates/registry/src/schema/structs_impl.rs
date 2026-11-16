@@ -16397,9 +16397,10 @@ impl DmarcTroubleshoot {
         if value.is_empty() {
             errors.push(ValidationError::required(Property::EhloDomain));
         }
-        let value = &self.mail_from;
-        if value.is_empty() {
-            errors.push(ValidationError::required(Property::MailFrom));
+        if let Some(value) = &self.mail_from {
+            if value.is_empty() {
+                errors.push(ValidationError::required(Property::MailFrom));
+            }
         }
         let value = &self.rcpt_to;
         for value in value.iter() {
@@ -28731,15 +28732,7 @@ impl RegistryJsonPropertyPatch for DnsServerNamecheap {
 impl DnsServerNetcup {
     fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
         let neb = errors.len();
-        let value = &self.customer_number;
-        if value.is_empty() {
-            errors.push(ValidationError::required(Property::CustomerNumber));
-        }
-        let value = &self.api_key_id;
-        if value.is_empty() {
-            errors.push(ValidationError::required(Property::ApiKeyId));
-        }
-        let value = &self.password;
+        let value = &self.api_key;
         value.validate(errors);
         let value = &self.description;
         if value.is_empty() {
@@ -28776,8 +28769,8 @@ impl DnsServerNetcup {
     // SPDX-License-Identifier: LicenseRef-SEL
     #[cfg(feature = "enterprise")]
     fn validate_inline_secrets(&self, errors: &mut Vec<ValidationError>) {
-        if let Some(source) = self.password.external_source() {
-            errors.push(ValidationError::invalid(Property::Password, source));
+        if let Some(source) = self.api_key.external_source() {
+            errors.push(ValidationError::invalid(Property::ApiKey, source));
         }
     }
 
@@ -28798,10 +28791,10 @@ impl Pickle for DnsServerNetcup {
         if self.propagation_delay.is_some() {
             bitmap |= 1 << 1;
         }
-        let block = crate::pickle::begin_block(out, 10, 2, bitmap);
-        self.customer_number.pickle(out);
-        self.api_key_id.pickle(out);
-        self.password.pickle(out);
+        let block = crate::pickle::begin_block(out, 11, 2, bitmap);
+        <String as Default>::default().pickle(out);
+        <String as Default>::default().pickle(out);
+        <SecretKey as Default>::default().pickle(out);
         self.description.pickle(out);
         // SPDX-SnippetBegin
         // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
@@ -28818,26 +28811,21 @@ impl Pickle for DnsServerNetcup {
         if let Some(value) = &self.propagation_delay {
             value.pickle(out);
         }
+        self.api_key.pickle(out);
         crate::pickle::end_block(out, block);
     }
 
     fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
         let block = stream.open_block()?;
-        let field0: String = if block.has(0) {
-            Pickle::unpickle(stream)?
-        } else {
-            Default::default()
-        };
-        let field1: String = if block.has(1) {
-            Pickle::unpickle(stream)?
-        } else {
-            Default::default()
-        };
-        let field2: SecretKey = if block.has(2) {
-            Pickle::unpickle(stream)?
-        } else {
-            Default::default()
-        };
+        if block.has(0) {
+            let _: String = Pickle::unpickle(stream)?;
+        }
+        if block.has(1) {
+            let _: String = Pickle::unpickle(stream)?;
+        }
+        if block.has(2) {
+            let _: SecretKey = Pickle::unpickle(stream)?;
+        }
         let field3: String = if block.has(3) {
             Pickle::unpickle(stream)?
         } else {
@@ -28886,11 +28874,13 @@ impl Pickle for DnsServerNetcup {
         } else {
             Default::default()
         };
+        let field10: SecretKey = if block.has(10) {
+            Pickle::unpickle(stream)?
+        } else {
+            Default::default()
+        };
         stream.close_block(block);
         Some(Self {
-            customer_number: field0,
-            api_key_id: field1,
-            password: field2,
             description: field3,
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
@@ -28903,6 +28893,7 @@ impl Pickle for DnsServerNetcup {
             poll_interval: field7,
             propagation_timeout: field8,
             propagation_delay: field9,
+            api_key: field10,
         })
     }
 }
@@ -28910,9 +28901,7 @@ impl Pickle for DnsServerNetcup {
 impl Default for DnsServerNetcup {
     fn default() -> Self {
         Self {
-            customer_number: Default::default(),
-            api_key_id: Default::default(),
-            password: Default::default(),
+            api_key: Default::default(),
             description: Default::default(),
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
@@ -28935,13 +28924,8 @@ impl IntoValue for DnsServerNetcup {
     }
 
     fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
-        let mut map = jmap_tools::Map::with_capacity(12);
-        map.insert_unchecked(
-            Property::CustomerNumber,
-            self.customer_number.into_value_with(opts),
-        );
-        map.insert_unchecked(Property::ApiKeyId, self.api_key_id.into_value_with(opts));
-        map.insert_unchecked(Property::Password, self.password.into_value_with(opts));
+        let mut map = jmap_tools::Map::with_capacity(10);
+        map.insert_unchecked(Property::ApiKey, self.api_key.into_value_with(opts));
         map.insert_unchecked(
             Property::Description,
             self.description.into_value_with(opts),
@@ -28980,13 +28964,16 @@ impl RegistryJsonPropertyPatch for DnsServerNetcup {
         value: JmapValue<'x>,
     ) -> PatchResult<'x> {
         match pointer.next_property() {
-            Some(Property::CustomerNumber) => self
-                .customer_number
-                .patch(pointer.with_validators(&[StringValidator::Trim]), value),
-            Some(Property::ApiKeyId) => self
-                .api_key_id
-                .patch(pointer.with_validators(&[StringValidator::Trim]), value),
-            Some(Property::Password) => self.password.patch(pointer, value),
+            Some(property @ Property::CustomerNumber) => {
+                Ok(MaybeUnpatched::Unpatched { property, value })
+            }
+            Some(property @ Property::ApiKeyId) => {
+                Ok(MaybeUnpatched::Unpatched { property, value })
+            }
+            Some(property @ Property::Password) => {
+                Ok(MaybeUnpatched::Unpatched { property, value })
+            }
+            Some(Property::ApiKey) => self.api_key.patch(pointer, value),
             Some(Property::Description) => self
                 .description
                 .patch(pointer.with_validators(&[StringValidator::Trim]), value),
@@ -34654,16 +34641,11 @@ impl ObjectImpl for Email {
                 errors.push(ValidationError::min_value(Property::MaxMailboxes, 1));
             }
         }
-        // SPDX-SnippetBegin
-        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-        // SPDX-License-Identifier: LicenseRef-SEL
-        #[cfg(feature = "enterprise")]
         if let Some(value) = &self.max_masked_addresses {
             if *value < 1 {
                 errors.push(ValidationError::min_value(Property::MaxMaskedAddresses, 1));
             }
         }
-        // SPDX-SnippetEnd
         if let Some(value) = &self.max_public_keys {
             if *value < 1 {
                 errors.push(ValidationError::min_value(Property::MaxPublicKeys, 1));
@@ -34718,14 +34700,9 @@ impl Pickle for Email {
         if self.max_mailboxes.is_some() {
             bitmap |= 1 << 5;
         }
-        // SPDX-SnippetBegin
-        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-        // SPDX-License-Identifier: LicenseRef-SEL
-        #[cfg(feature = "enterprise")]
         if self.max_masked_addresses.is_some() {
             bitmap |= 1 << 6;
         }
-        // SPDX-SnippetEnd
         if self.max_public_keys.is_some() {
             bitmap |= 1 << 7;
         }
@@ -34751,14 +34728,9 @@ impl Pickle for Email {
         if let Some(value) = &self.max_mailboxes {
             value.pickle(out);
         }
-        // SPDX-SnippetBegin
-        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-        // SPDX-License-Identifier: LicenseRef-SEL
-        #[cfg(feature = "enterprise")]
         if let Some(value) = &self.max_masked_addresses {
             value.pickle(out);
         }
-        // SPDX-SnippetEnd
         if let Some(value) = &self.max_public_keys {
             value.pickle(out);
         }
@@ -34844,10 +34816,6 @@ impl Pickle for Email {
         } else {
             Some(250u64)
         };
-        // SPDX-SnippetBegin
-        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-        // SPDX-License-Identifier: LicenseRef-SEL
-        #[cfg(feature = "enterprise")]
         let field12: Option<u64> = if block.has(12) {
             if block.flag(6) {
                 Some(Pickle::unpickle(stream)?)
@@ -34857,7 +34825,6 @@ impl Pickle for Email {
         } else {
             Some(5u64)
         };
-        // SPDX-SnippetEnd
         let field13: Option<u64> = if block.has(13) {
             if block.flag(7) {
                 Some(Pickle::unpickle(stream)?)
@@ -34913,12 +34880,7 @@ impl Pickle for Email {
             max_submissions: field9,
             max_identities: field10,
             max_mailboxes: field11,
-            // SPDX-SnippetBegin
-            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-            // SPDX-License-Identifier: LicenseRef-SEL
-            #[cfg(feature = "enterprise")]
             max_masked_addresses: field12,
-            // SPDX-SnippetEnd
             max_public_keys: field13,
             max_mailboxes_per_email: field14,
             max_flags_per_email: field15,
@@ -34944,12 +34906,7 @@ impl Default for Email {
             max_submissions: Some(500u64),
             max_identities: Some(20u64),
             max_mailboxes: Some(250u64),
-            // SPDX-SnippetBegin
-            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-            // SPDX-License-Identifier: LicenseRef-SEL
-            #[cfg(feature = "enterprise")]
             max_masked_addresses: Some(5u64),
-            // SPDX-SnippetEnd
             max_public_keys: Some(5u64),
             max_mailboxes_per_email: 100u64,
             max_flags_per_email: 100u64,
@@ -35011,15 +34968,10 @@ impl IntoValue for Email {
             Property::MaxMailboxes,
             self.max_mailboxes.into_value_with(opts),
         );
-        // SPDX-SnippetBegin
-        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-        // SPDX-License-Identifier: LicenseRef-SEL
-        #[cfg(feature = "enterprise")]
         map.insert_unchecked(
             Property::MaxMaskedAddresses,
             self.max_masked_addresses.into_value_with(opts),
         );
-        // SPDX-SnippetEnd
         map.insert_unchecked(
             Property::MaxPublicKeys,
             self.max_public_keys.into_value_with(opts),
@@ -35076,12 +35028,7 @@ impl RegistryJsonPropertyPatch for Email {
             Some(Property::MaxSubmissions) => self.max_submissions.patch(pointer, value),
             Some(Property::MaxIdentities) => self.max_identities.patch(pointer, value),
             Some(Property::MaxMailboxes) => self.max_mailboxes.patch(pointer, value),
-            // SPDX-SnippetBegin
-            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-            // SPDX-License-Identifier: LicenseRef-SEL
-            #[cfg(feature = "enterprise")]
             Some(Property::MaxMaskedAddresses) => self.max_masked_addresses.patch(pointer, value),
-            // SPDX-SnippetEnd
             Some(Property::MaxPublicKeys) => self.max_public_keys.patch(pointer, value),
             Some(Property::MaxMailboxesPerEmail) => {
                 self.max_mailboxes_per_email.patch(pointer, value)
@@ -43619,10 +43566,6 @@ impl RegistryJsonPropertyPatch for MailingList {
     }
 }
 
-// SPDX-SnippetBegin
-// SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-// SPDX-License-Identifier: LicenseRef-SEL
-#[cfg(feature = "enterprise")]
 impl ObjectImpl for MaskedEmail {
     const FLAGS: u64 = OBJ_FILTER_ACCOUNT;
     const VERSION: u8 = 0;
@@ -43676,7 +43619,6 @@ impl ObjectImpl for MaskedEmail {
     }
 }
 
-#[cfg(feature = "enterprise")]
 impl Pickle for MaskedEmail {
     fn pickle(&self, out: &mut Vec<u8>) {
         let mut bitmap = 0u64;
@@ -43801,7 +43743,6 @@ impl Pickle for MaskedEmail {
     }
 }
 
-#[cfg(feature = "enterprise")]
 impl Default for MaskedEmail {
     fn default() -> Self {
         Self {
@@ -43818,7 +43759,6 @@ impl Default for MaskedEmail {
     }
 }
 
-#[cfg(feature = "enterprise")]
 impl IntoValue for MaskedEmail {
     fn into_value(self) -> JmapValue<'static> {
         self.into_value_with(ValueOptions::default())
@@ -43842,7 +43782,6 @@ impl IntoValue for MaskedEmail {
     }
 }
 
-#[cfg(feature = "enterprise")]
 impl RegistryJsonPropertyPatch for MaskedEmail {
     fn patch_property<'x>(
         &mut self,
@@ -43876,7 +43815,6 @@ impl RegistryJsonPropertyPatch for MaskedEmail {
     }
 }
 
-// SPDX-SnippetEnd
 impl MeilisearchStore {
     fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
         let neb = errors.len();
@@ -64498,9 +64436,10 @@ impl SpamClassify {
                 errors.push(ValidationError::required(Property::AuthenticatedAs));
             }
         }
-        let value = &self.mail_from;
-        if value.is_empty() {
-            errors.push(ValidationError::required(Property::MailFrom));
+        if let Some(value) = &self.mail_from {
+            if value.is_empty() {
+                errors.push(ValidationError::required(Property::MailFrom));
+            }
         }
         let value = &self.rcpt_to;
         for value in value.iter() {
