@@ -5,15 +5,12 @@
  */
 
 use super::{MAX_VALUE_SIZE, assembly::ChunkedValueCollector};
-use foundationdb::{
-    FdbError, FdbResult, KeySelector, RangeOption, Transaction,
-    future::{FdbSlice, FdbValues},
-    options::StreamingMode,
-};
-use futures::{FutureExt, StreamExt, future::Either, stream::FuturesOrdered};
+use fdb::{Bytes, KeyValue, RangeCursor, RangeOptions, RangePage, Snapshot, Transaction};
+use futures::{StreamExt, future::Either, stream::FuturesOrdered};
 use std::{
     cmp::Ordering,
     mem,
+    ops::Bound,
     sync::atomic::{AtomicUsize, Ordering as AtomicOrdering},
 };
 
@@ -37,18 +34,11 @@ pub(super) enum WindowRead<'k> {
 pub(super) enum WindowRows {
     Values,
     Keys,
-    Raw,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum Isolation {
-    Snapshot,
-    Serializable,
 }
 
 pub(super) enum WindowError {
     Fdb {
-        error: FdbError,
+        error: fdb::Error,
         resume: Resume,
         progressed: bool,
     },
@@ -61,15 +51,22 @@ pub(super) struct Resume {
     begin: Option<Vec<u8>>,
 }
 
+#[allow(clippy::large_enum_variant)]
 enum Issued<'k> {
-    Exists(&'k [u8], FdbResult<FdbSlice>),
-    Value(&'k [u8], FdbResult<Option<FdbSlice>>),
-    Rows(&'k [u8], &'k [u8], FdbResult<FdbValues>),
+    Exists(&'k [u8], fdb::Result<bool>),
+    Value(&'k [u8], fdb::Result<Option<Bytes>>),
+    Rows {
+        begin: &'k [u8],
+        end: &'k [u8],
+        read: fdb::Result<(RangeCursor<'k>, Option<RangePage>)>,
+    },
 }
 
-struct Head {
+const _: () = assert!(size_of::<Issued<'static>>() <= 328);
+
+struct Head<'db> {
+    snapshot: Snapshot<'db>,
     rows: WindowRows,
-    snapshot: bool,
     largest: usize,
     progressed: bool,
     last_key: Vec<u8>,
@@ -77,10 +74,9 @@ struct Head {
 }
 
 pub(super) async fn read_window<'k>(
-    trx: &Transaction,
+    snapshot: Snapshot<'_>,
     load: &WindowLoad,
     rows: WindowRows,
-    isolation: Isolation,
     reads: impl IntoIterator<Item = (usize, WindowRead<'k>)>,
     mut cb: impl FnMut(usize, &[u8], &[u8]) -> trc::Result<bool> + Send,
 ) -> Result<(), WindowError> {
@@ -88,10 +84,9 @@ pub(super) async fn read_window<'k>(
     let mut reads = reads.into_iter();
     let mut window = FuturesOrdered::new();
     let mut width = MIN_WINDOW;
-    let snapshot = isolation == Isolation::Snapshot;
     let mut head = Head {
-        rows,
         snapshot,
+        rows,
         largest: 0,
         progressed: false,
         last_key: Vec::new(),
@@ -102,15 +97,47 @@ pub(super) async fn read_window<'k>(
         while window.len() < width
             && let Some((index, read)) = reads.next()
         {
-            window.push_back(issue(trx, rows, snapshot, index, read));
+            window.push_back(issue(snapshot, rows, index, read));
         }
         let Some((index, issued)) = window.next().await else {
             return Ok(());
         };
-        if !head.complete(trx, index, issued, &mut cb).await? {
+        if !head.complete(index, issued, &mut cb).await? {
             return Ok(());
         }
         width = (BATCH_BYTES / head.largest.max(1)).clamp(1, load.width());
+    }
+}
+
+pub(super) async fn read_keys<'k>(
+    trx: &mut Transaction<'_>,
+    load: &WindowLoad,
+    keys: impl IntoIterator<Item = (usize, &'k [u8])>,
+    mut cb: impl FnMut(usize, &[u8]),
+) -> fdb::Result<()> {
+    let _slot = load.enter();
+    let mut keys = keys.into_iter();
+    let mut window = FuturesOrdered::new();
+    let mut width = MIN_WINDOW;
+    let mut largest = 0;
+
+    loop {
+        while window.len() < width
+            && let Some((index, key)) = keys.next()
+        {
+            #[cfg(stalwart_tests)]
+            super::probe::point_read(key);
+            let read = trx.get(key);
+            window.push_back(async move { (index, read.await) });
+        }
+        let Some((index, value)) = window.next().await else {
+            return Ok(());
+        };
+        if let Some(value) = value? {
+            largest = largest.max(value.len());
+            cb(index, &value);
+        }
+        width = (BATCH_BYTES / largest.max(1)).clamp(1, load.width());
     }
 }
 
@@ -154,40 +181,38 @@ impl Resume {
     }
 }
 
-fn issue<'k>(
-    trx: &Transaction,
+fn issue<'db, 'k>(
+    snapshot: Snapshot<'db>,
     rows: WindowRows,
-    snapshot: bool,
     index: usize,
     read: WindowRead<'k>,
-) -> impl Future<Output = (usize, Issued<'k>)> + Send + use<'k> {
+) -> impl Future<Output = (usize, Issued<'k>)> + Send + use<'db, 'k> {
     match read {
-        WindowRead::Key(key) if rows == WindowRows::Keys => Either::Left(Either::Left(
-            trx.get_key(&KeySelector::first_greater_or_equal(key), snapshot)
-                .map(move |found| (index, Issued::Exists(key, found))),
-        )),
-        WindowRead::Key(key) => Either::Left(Either::Right(
-            trx.get(key, snapshot)
-                .map(move |value| (index, Issued::Value(key, value))),
-        )),
-        WindowRead::Range { begin, end } => Either::Right(
-            trx.get_range(
-                &range_option(
-                    KeySelector::first_greater_or_equal(begin),
-                    KeySelector::first_greater_than(end),
-                ),
-                1,
-                snapshot,
-            )
-            .map(move |values| (index, Issued::Rows(begin, end, values))),
-        ),
+        WindowRead::Key(key) if rows == WindowRows::Keys => {
+            Either::Left(Either::Left(async move {
+                (index, Issued::Exists(key, snapshot.exists(key).await))
+            }))
+        }
+        WindowRead::Key(key) => Either::Left(Either::Right(async move {
+            (index, Issued::Value(key, snapshot.get(key).await))
+        })),
+        WindowRead::Range { begin, end } => Either::Right(async move {
+            let read = match RangeCursor::new(
+                Bound::Included(begin),
+                Bound::Included(end),
+                RangeOptions::default(),
+            ) {
+                Ok(mut cursor) => cursor.next(snapshot).await.map(|page| (cursor, page)),
+                Err(error) => Err(error),
+            };
+            (index, Issued::Rows { begin, end, read })
+        }),
     }
 }
 
-impl Head {
+impl Head<'_> {
     async fn complete<F>(
         &mut self,
-        trx: &Transaction,
         index: usize,
         issued: Issued<'_>,
         cb: &mut F,
@@ -197,8 +222,7 @@ impl Head {
     {
         match issued {
             Issued::Exists(key, found) => {
-                let found = found.map_err(|error| self.fail(error, index, None))?;
-                if *found == *key {
+                if found.map_err(|error| self.fail(error, index, None))? {
                     self.deliver(cb, index, key, &[])
                 } else {
                     self.progressed = true;
@@ -207,7 +231,7 @@ impl Head {
             }
             Issued::Value(key, value) => {
                 match value.map_err(|error| self.fail(error, index, None))? {
-                    Some(value) if value.len() < MAX_VALUE_SIZE || self.rows == WindowRows::Raw => {
+                    Some(value) if value.len() < MAX_VALUE_SIZE => {
                         self.deliver(cb, index, key, &value)
                     }
                     Some(value) => {
@@ -218,12 +242,11 @@ impl Head {
                         drop(value);
                         let tail = chunk.tail_end();
                         if let Err(error) = read_chunks(
-                            trx,
+                            self.snapshot,
                             &chunk.key,
                             &chunk.key,
                             &tail,
                             &mut chunk.bytes,
-                            self.snapshot,
                         )
                         .await
                         {
@@ -237,43 +260,36 @@ impl Head {
                     }
                 }
             }
-            Issued::Rows(begin, end, values) => {
+            Issued::Rows { begin, end, read } => {
                 self.last_key.clear();
-                let values = values.map_err(|error| self.fail(error, index, Some(begin)))?;
-                self.range(trx, index, begin, end, values, cb).await
+                let (cursor, page) = read.map_err(|error| self.fail(error, index, Some(begin)))?;
+                self.range(index, begin, end, cursor, page, cb).await
             }
         }
     }
 
     async fn range<F>(
         &mut self,
-        trx: &Transaction,
         index: usize,
         begin: &[u8],
         end: &[u8],
-        mut values: FdbValues,
+        mut cursor: RangeCursor<'_>,
+        mut page: Option<RangePage>,
         cb: &mut F,
     ) -> Result<bool, WindowError>
     where
         F: FnMut(usize, &[u8], &[u8]) -> trc::Result<bool> + Send,
     {
-        loop {
-            if !self.rows_of(index, &values, cb)? {
+        while let Some(rows) = page.take() {
+            if !self.rows_of(index, &rows, cb)? {
                 return Ok(false);
             }
-            if !values.more() || values.is_empty() {
+            if cursor.is_done() || rows.is_empty() {
                 break;
             }
-            drop(values);
-            let next = trx.get_range(
-                &range_option(
-                    KeySelector::first_greater_than(self.last_key.as_slice()),
-                    KeySelector::first_greater_than(end),
-                ),
-                1,
-                self.snapshot,
-            );
-            values = next
+            drop(rows);
+            page = cursor
+                .next(self.snapshot)
                 .await
                 .map_err(|error| self.fail(error, index, Some(begin)))?;
         }
@@ -284,7 +300,7 @@ impl Head {
             let tail = chunk.tail_end();
             if end < tail.as_slice()
                 && let Err(error) =
-                    read_chunks(trx, &chunk.key, end, &tail, &mut chunk.bytes, self.snapshot).await
+                    read_chunks(self.snapshot, &chunk.key, end, &tail, &mut chunk.bytes).await
             {
                 return Err(self.fail(error, index, Some(begin)));
             }
@@ -301,17 +317,16 @@ impl Head {
     fn rows_of<F>(
         &mut self,
         index: usize,
-        values: &FdbValues,
+        page: &RangePage,
         cb: &mut F,
     ) -> Result<bool, WindowError>
     where
         F: FnMut(usize, &[u8], &[u8]) -> trc::Result<bool> + Send,
     {
         #[cfg(stalwart_tests)]
-        super::probe::range_batch(values);
+        super::probe::range_batch(page);
         let mut bytes = 0;
-        for row in values.iter() {
-            let (key, value) = (row.key(), row.value());
+        for KeyValue { key, value } in page {
             bytes += value.len();
             if let Some(chunk) = &mut self.pending
                 && is_chunk_of(key, &chunk.key)
@@ -326,29 +341,29 @@ impl Head {
             {
                 return Ok(false);
             }
-            let delivered = match self.rows {
-                WindowRows::Raw => self.deliver(cb, index, key, value)?,
-                _ if value.len() >= MAX_VALUE_SIZE => {
-                    self.pending = Some(ChunkedValueCollector {
-                        key: key.to_vec(),
-                        bytes: if self.rows == WindowRows::Values {
-                            value.to_vec()
-                        } else {
-                            Vec::new()
-                        },
-                    });
-                    true
+            let delivered = if value.len() >= MAX_VALUE_SIZE {
+                self.pending = Some(ChunkedValueCollector {
+                    key: key.to_vec(),
+                    bytes: if self.rows == WindowRows::Values {
+                        value.to_vec()
+                    } else {
+                        Vec::new()
+                    },
+                });
+                true
+            } else {
+                match self.rows {
+                    WindowRows::Values => self.deliver(cb, index, key, value)?,
+                    WindowRows::Keys => self.deliver(cb, index, key, &[])?,
                 }
-                WindowRows::Values => self.deliver(cb, index, key, value)?,
-                WindowRows::Keys => self.deliver(cb, index, key, &[])?,
             };
             if !delivered {
                 return Ok(false);
             }
         }
-        if let Some(last) = values.last() {
+        if let Some(last) = page.last() {
             self.last_key.clear();
-            self.last_key.extend_from_slice(last.key());
+            self.last_key.extend_from_slice(last.key);
         }
         self.largest = self.largest.max(bytes);
         Ok(true)
@@ -369,7 +384,7 @@ impl Head {
         cb(index, key, value).map_err(WindowError::Store)
     }
 
-    fn fail(&mut self, error: FdbError, index: usize, begin: Option<&[u8]>) -> WindowError {
+    fn fail(&mut self, error: fdb::Error, index: usize, begin: Option<&[u8]>) -> WindowError {
         let begin = begin.map(|begin| match self.pending.take() {
             Some(chunk) => chunk.key,
             None if self.last_key.is_empty() => begin.to_vec(),
@@ -388,41 +403,27 @@ impl Head {
 }
 
 async fn read_chunks(
-    trx: &Transaction,
+    snapshot: Snapshot<'_>,
     base: &[u8],
     after: &[u8],
     tail: &[u8],
     bytes: &mut Vec<u8>,
-    snapshot: bool,
-) -> FdbResult<()> {
-    let mut chunks = range_option(
-        KeySelector::first_greater_than(after),
-        KeySelector::first_greater_or_equal(tail),
-    );
-    loop {
-        let values = trx.get_range(&chunks, 1, snapshot).await?;
+) -> fdb::Result<()> {
+    let mut chunks = RangeCursor::new(
+        Bound::Excluded(after),
+        Bound::Excluded(tail),
+        RangeOptions::default(),
+    )?;
+    while let Some(page) = chunks.next(snapshot).await? {
         #[cfg(stalwart_tests)]
-        super::probe::range_batch(&values);
-        for row in values.iter() {
-            if is_chunk_of(row.key(), base) {
-                bytes.extend_from_slice(row.value());
+        super::probe::range_batch(&page);
+        for KeyValue { key, value } in &page {
+            if is_chunk_of(key, base) {
+                bytes.extend_from_slice(value);
             }
         }
-        match chunks.next_range(&values) {
-            Some(next) => chunks = next,
-            None => return Ok(()),
-        }
     }
-}
-
-fn range_option<'a>(begin: KeySelector<'a>, end: KeySelector<'a>) -> RangeOption<'a> {
-    RangeOption {
-        begin,
-        end,
-        mode: StreamingMode::WantAll,
-        reverse: false,
-        ..Default::default()
-    }
+    Ok(())
 }
 
 fn is_chunk_of(key: &[u8], base: &[u8]) -> bool {

@@ -93,13 +93,20 @@ impl<'x> Context<'x> {
         let mut iter = script.recs(range)?;
         while let Some(rec) = iter.next() {
             let pattern = match rec.tag {
+                tag::TEXT => Pattern::Dynamic,
                 tag::GLOB => Pattern::Glob(rec.c),
                 tag::REGEX => Pattern::Regex(rec.c),
-                _ => Pattern::Dynamic,
+                _ => {
+                    let value = ValueRef::decode(script, rec, &mut iter)?;
+                    result.push(Key {
+                        value: self.eval_value_ref(script, value)?,
+                        pattern: Pattern::Dynamic,
+                    });
+                    continue;
+                }
             };
-            let value = ValueRef::decode(script, rec, &mut iter)?;
             result.push(Key {
-                value: self.eval_value_ref(script, value)?,
+                value: Variable::borrowed(script.str(rec.str())?),
                 pattern,
             });
         }

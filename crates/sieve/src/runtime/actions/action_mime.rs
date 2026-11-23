@@ -169,7 +169,7 @@ impl<'x> Context<'x> {
             None => self
                 .root_text(&HeaderName::Subject)
                 .unwrap_or_default()
-                .to_string(),
+                .remove_crlf(self.runtime.max_header_size),
         };
 
         #[cfg(all(test, stalwart_tests))]
@@ -179,6 +179,20 @@ impl<'x> Context<'x> {
 
         let enclosed = self.build_message();
         let mut message = String::with_capacity(512);
+        for received in self
+            .message
+            .root()
+            .headers()
+            .all(HeaderName::Received)
+            .take(self.runtime.max_received_headers)
+        {
+            let value = received.raw_value();
+            message.push_str("Received:");
+            message.push_str(&String::from_utf8_lossy(value));
+            if !value.ends_with(b"\n") {
+                message.push_str("\r\n");
+            }
+        }
         let _ = write!(
             message,
             "Content-Type: multipart/mixed; boundary=\"{boundary}\"\r\nSubject: {subject}\r\n"

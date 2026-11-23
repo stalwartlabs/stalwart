@@ -25,23 +25,41 @@ use rustls::{
     crypto::aws_lc_rs::{ALL_CIPHER_SUITES, cipher_suite::*, default_provider},
 };
 use std::{
-    net::{IpAddr, Ipv4Addr, SocketAddr as StdSocketAddr},
-    str::FromStr,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr as StdSocketAddr},
     sync::Arc,
 };
 use store::registry::{RegistryObject, bootstrap::Bootstrap};
 use tokio::net::TcpSocket;
 use tokio_rustls::TlsAcceptor;
 use types::id::Id;
-use utils::snowflake::SnowflakeIdGenerator;
+use utils::{failed, snowflake::SnowflakeIdGenerator};
 
 const DEFAULT_RECOVERY_MODE_PORT: u16 = 8080;
 
-pub fn recovery_mode_port() -> u16 {
-    std::env::var("STALWART_RECOVERY_MODE_PORT")
+pub fn recovery_mode_addr() -> StdSocketAddr {
+    let ip = match std::env::var("STALWART_RECOVERY_MODE_BIND")
         .ok()
-        .and_then(|port| port.parse().ok())
-        .unwrap_or(DEFAULT_RECOVERY_MODE_PORT)
+        .filter(|value| !value.trim().is_empty())
+    {
+        Some(ip) => ip.trim().parse().unwrap_or_else(|_| {
+            failed(&format!(
+                "Invalid STALWART_RECOVERY_MODE_BIND value {ip:?}: expected an IP address."
+            ))
+        }),
+        None => IpAddr::V6(Ipv6Addr::UNSPECIFIED),
+    };
+    let port = match std::env::var("STALWART_RECOVERY_MODE_PORT")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+    {
+        Some(port) => port.trim().parse().unwrap_or_else(|_| {
+            failed(&format!(
+                "Invalid STALWART_RECOVERY_MODE_PORT value {port:?}: expected a port number."
+            ))
+        }),
+        None => DEFAULT_RECOVERY_MODE_PORT,
+    };
+    StdSocketAddr::new(ip, port)
 }
 
 impl Listeners {
@@ -75,10 +93,7 @@ impl Listeners {
                 RegistryObject {
                     id: ObjectId::new(ObjectType::NetworkListener, Id::singleton()),
                     object: NetworkListener {
-                        bind: Map::new(vec![
-                            SocketAddr::from_str(&format!("[::]:{}", recovery_mode_port()))
-                                .unwrap(),
-                        ]),
+                        bind: Map::new(vec![SocketAddr(recovery_mode_addr())]),
                         name: "http-recovery".to_string(),
                         protocol: NetworkListenerProtocol::Http,
                         implicit_tls: false,

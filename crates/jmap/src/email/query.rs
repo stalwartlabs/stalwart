@@ -5,7 +5,6 @@
  */
 
 mod filter;
-mod text;
 mod window;
 
 #[cfg(all(test, stalwart_tests))]
@@ -30,11 +29,14 @@ use email::{
         email::{MessageAccess, MessageCacheAccess, thread_keywords},
         mailbox::MailboxCacheAccess,
     },
-    message::sortkeys::{
-        CacheSorter, EmailSortKeys, MessageCacheField, MessageComparator, MessageSortField,
+    message::{
+        query::{QueryFilter, RowFilter},
+        sortkeys::{
+            CacheSorter, EmailSortKeys, MessageCacheField, MessageComparator, MessageSortField,
+        },
     },
 };
-use filter::{QueryFilter, RowFilter};
+use filter::parse_filter;
 use jmap_proto::{
     method::query::{Comparator, Filter, QueryRequest, QueryResponse},
     object::email::{Email, EmailComparator, EmailQueryFilter},
@@ -133,7 +135,7 @@ impl EmailQuery for Server {
                     .collect::<RoaringBitmap>()
             })
             .await?;
-        let filter = QueryFilter::parse(
+        let filter = parse_filter(
             std::mem::take(&mut request.filter),
             &cache,
             access,

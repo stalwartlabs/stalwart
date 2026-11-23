@@ -105,7 +105,8 @@ impl<T: SessionStream> Session<T> {
                 .await
             {
                 Ok((response, limited_uid)) => {
-                    let response = response.serialize(&tag);
+                    let mut response = response.serialize(&tag);
+                    mailbox.announce_appended(&mut response);
                     let status = StatusResponse::completed(if !is_sort {
                         Command::Search(is_uid)
                     } else {
@@ -152,7 +153,7 @@ impl<T: SessionStream> SessionData<T> {
             .get_cached_messages(mailbox.id.account_id)
             .await
             .caused_by(trc::location!())?;
-        self.sync_and_announce(&mailbox, &cache)
+        self.sync_view(&mailbox, &cache, None)
             .await
             .caused_by(trc::location!())?;
 

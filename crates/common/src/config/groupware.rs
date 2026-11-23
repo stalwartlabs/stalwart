@@ -34,6 +34,7 @@ pub struct GroupwareConfig {
     pub max_calendars_per_event: usize,
     pub max_expanded_query_duration: u64,
     pub max_availability_duration: u64,
+    pub share_free_busy: bool,
     pub availability_rate: Option<Rate>,
     pub max_attachments_size: usize,
     pub default_calendar_name: Option<String>,
@@ -135,6 +136,7 @@ impl GroupwareConfig {
                 .into_inner()
                 .as_secs(),
             max_availability_duration: calendar.max_availability_duration.into_inner().as_secs(),
+            share_free_busy: calendar.share_free_busy,
             availability_rate: calendar.availability_rate_limit,
             max_attachments_size: calendar.max_attachments_size as usize,
             max_vcard_size: book.max_v_card_size as usize,

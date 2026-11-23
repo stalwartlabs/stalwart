@@ -15,8 +15,14 @@ use crate::{
     },
     runtime::{RuntimeError, handler::Handler},
 };
+use calcard::common::timezone::Tz;
 use mail_parser::{DateTime, HeaderForm, HeaderValue};
 use smallvec::SmallVec;
+
+pub(crate) const ZONE_OFFSET: u8 = 0;
+pub(crate) const ZONE_ORIGINAL: u8 = 1;
+pub(crate) const ZONE_LOCAL: u8 = 2;
+pub(crate) const ZONE_NAMED: u8 = 3;
 
 impl<'x> Context<'x> {
     pub(crate) fn test_date<H: Handler<'x>>(
@@ -195,12 +201,8 @@ impl<'x> Context<'x> {
         Ok(TestResult::Bool(result ^ test.is_not))
     }
 
-    fn current_date_time(&self, zone: Option<i64>) -> DateTime {
-        let dt = DateTime::from_timestamp(self.current_time);
-        match zone {
-            Some(zone) => dt.to_timezone(zone),
-            None => dt,
-        }
+    fn current_date_time(&self, zone: ops::Zone) -> DateTime {
+        zone.eval(DateTime::from_timestamp(self.current_time))
     }
 
     pub(crate) fn find_dates(&self, header: HeaderRef<'x>) -> Option<DateTime> {
@@ -247,9 +249,19 @@ impl DatePart {
 impl ops::Zone {
     pub(crate) fn eval(&self, dt: DateTime) -> DateTime {
         match self.kind {
-            0 => dt.to_timezone(self.time),
-            1 => dt,
+            ZONE_OFFSET => dt.to_timezone(self.time),
+            ZONE_ORIGINAL => dt,
+            ZONE_NAMED => {
+                let offset = self
+                    .named_zone()
+                    .map_or(0, |tz| tz.offset_at_unix(dt.to_timestamp()));
+                dt.to_timezone(i64::from(offset))
+            }
             _ => DateTime::from_timestamp(dt.to_timestamp()),
         }
+    }
+
+    pub(crate) fn named_zone(&self) -> Option<Tz> {
+        u16::try_from(self.time).ok().and_then(Tz::from_iana_id)
     }
 }

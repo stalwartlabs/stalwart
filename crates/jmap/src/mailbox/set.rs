@@ -19,7 +19,10 @@ use common::{
     Server,
     auth::AccessToken,
     sharing::EffectiveAcl,
-    storage::index::{ObjectIndexBuilder, PresenceFlags, RewritePresence},
+    storage::{
+        create_lock::CreateLock,
+        index::{ObjectIndexBuilder, PresenceFlags, RewritePresence},
+    },
 };
 use email::{
     cache::{
@@ -30,6 +33,7 @@ use email::{
     mailbox::{
         Mailbox,
         destroy::{MailboxDestroy, MailboxDestroyError},
+        manage::MailboxFnc,
         merge_subscription,
         role::RoleChange,
     },
@@ -146,6 +150,14 @@ pub trait MailboxSet: Sync + Send {
         using: CapabilityIds,
     ) -> impl Future<Output = trc::Result<SetResponse<mailbox::Mailbox>>> + Send;
 
+    fn apply_mailbox_set(
+        &self,
+        request: SetRequest<'_, mailbox::Mailbox>,
+        access_token: &AccessToken,
+        using: CapabilityIds,
+        lock: Option<&CreateLock>,
+    ) -> impl Future<Output = trc::Result<SetResponse<mailbox::Mailbox>>> + Send;
+
     #[allow(clippy::type_complexity)]
     fn mailbox_set_item(
         &self,
@@ -170,19 +182,64 @@ impl ResolveCreatedReference<MailboxProperty, MailboxValue> for CreateResolver<'
 }
 
 impl MailboxSet for Server {
-    #[allow(clippy::blocks_in_conditions)]
     async fn mailbox_set(
+        &self,
+        request: SetRequest<'_, mailbox::Mailbox>,
+        access_token: &AccessToken,
+        using: CapabilityIds,
+    ) -> trc::Result<SetResponse<mailbox::Mailbox>> {
+        let changes_names = request
+            .create
+            .as_ref()
+            .is_some_and(|create| !create.is_empty())
+            || request
+                .update
+                .iter()
+                .flat_map(|update| update.iter())
+                .any(|(_, object)| {
+                    object.as_object().is_some_and(|object| {
+                        object.keys().any(|key| {
+                            matches!(
+                                key,
+                                Key::Property(MailboxProperty::Name | MailboxProperty::ParentId)
+                            )
+                        })
+                    })
+                });
+        if !changes_names {
+            return self
+                .apply_mailbox_set(request, access_token, using, None)
+                .await;
+        }
+
+        let lock = self
+            .lock_mailbox_names(request.account_id.document_id())
+            .await?;
+        let result = self
+            .apply_mailbox_set(request, access_token, using, Some(&lock))
+            .await;
+        self.unlock_mailbox_names(lock).await;
+        result
+    }
+
+    #[allow(clippy::blocks_in_conditions)]
+    async fn apply_mailbox_set(
         &self,
         mut request: SetRequest<'_, mailbox::Mailbox>,
         access_token: &AccessToken,
         using: CapabilityIds,
+        lock: Option<&CreateLock>,
     ) -> trc::Result<SetResponse<mailbox::Mailbox>> {
         // Prepare response
         let account_id = request.account_id.document_id();
         let on_destroy_remove_emails = request.arguments.on_destroy_remove_emails.unwrap_or(false);
         let object_metadata = ObjectMetadata::new(self, access_token, using, MetadataType::Mailbox);
         let sampled = object_metadata.viewer_change_id(self, account_id).await?;
-        let cache = self.get_cached_messages(account_id).await?;
+        let cache = if lock.is_some() {
+            self.get_current_messages(account_id).await?
+        } else {
+            self.get_cached_messages(account_id).await?
+        };
         let shared_state = cache.get_state(true);
         let mut response = SetResponse::from_request(&request, self.core.jmap.set_max_objects)?
             .with_state(sampled.assert_state(shared_state.clone(), &request.if_in_state)?);

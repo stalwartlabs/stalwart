@@ -46,14 +46,15 @@ impl PostgresStore {
                 PostgreSqlRecyclingMethod::Clean => RecyclingMethod::Clean,
             },
         });
-        cfg.pool = PoolConfig::new(
+        let response_timeout = config.response_timeout.map(|t| t.into_inner());
+        let mut pool = PoolConfig::new(
             config
                 .pool_max_connections
                 .map_or_else(backend::default_pool_max_connections, |max| max as usize),
-        )
-        .into();
+        );
+        pool.timeouts.wait = response_timeout;
+        cfg.pool = pool.into();
 
-        let response_timeout = config.response_timeout.map(|t| t.into_inner());
         let primary_pool = create_pool(
             &cfg,
             config.use_tls,

@@ -14,7 +14,7 @@ use ahash::AHashSet;
 use registry::{
     schema::{
         prelude::{Object, ObjectInner, ObjectType, Property},
-        structs::{Account, Credential, EmailAlias},
+        structs::{Account, Credential, DnsManagement, EmailAlias},
     },
     types::{id::ObjectId, list::List},
 };
@@ -193,6 +193,49 @@ impl CacheInvalidationBuilder {
                 }
             }
 
+            (ObjectInner::Account(current), ObjectInner::Account(new))
+                if let (Account::Resource(current), Account::Resource(new)) =
+                    (current.as_ref(), new.as_ref()) =>
+            {
+                let was_renamed =
+                    (current.name != new.name) || (current.domain_id != new.domain_id);
+                // SPDX-SnippetBegin
+                // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+                // SPDX-License-Identifier: LicenseRef-SEL
+                #[cfg(feature = "enterprise")]
+                let tenant_changed = current.member_tenant_id != new.member_tenant_id;
+                // SPDX-SnippetEnd
+                #[cfg(not(feature = "enterprise"))]
+                let tenant_changed = false;
+                let aliases_changed = current.aliases != new.aliases;
+
+                if was_renamed
+                    || aliases_changed
+                    || tenant_changed
+                    || current.kind != new.kind
+                    || current.quotas != new.quotas
+                    || current.locale != new.locale
+                    || current.description != new.description
+                {
+                    self.invalidate(CacheInvalidation::Account(id));
+                }
+
+                if was_renamed || aliases_changed {
+                    self.invalidate_negative_email(&new_object.inner);
+                }
+
+                if tenant_changed
+                    || current.roles != new.roles
+                    || current.permissions != new.permissions
+                {
+                    self.invalidate(CacheInvalidation::AccessToken(id));
+                }
+
+                if was_renamed {
+                    self.invalidate(CacheInvalidation::GroupwareResources(id));
+                }
+            }
+
             (ObjectInner::Domain(current), ObjectInner::Domain(new)) => {
                 // SPDX-SnippetBegin
                 // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
@@ -210,6 +253,10 @@ impl CacheInvalidationBuilder {
                     || (current.catch_all_address != new.catch_all_address)
                     || (current.sub_addressing != new.sub_addressing)
                     || (current.allow_relaying != new.allow_relaying)
+                    || (current.dns_management.allows_subdomain_signing()
+                        != new.dns_management.allows_subdomain_signing())
+                    || (matches!(current.dns_management, DnsManagement::Automatic(_))
+                        != matches!(new.dns_management, DnsManagement::Automatic(_)))
                     || (current.enable != new.enable)
                 {
                     self.invalidate(CacheInvalidation::Domain(id));
@@ -383,6 +430,7 @@ impl CacheInvalidationBuilder {
             ObjectInner::Account(account) => match account.as_ref() {
                 Account::User(account) => (&account.name, account.domain_id, &account.aliases),
                 Account::Group(account) => (&account.name, account.domain_id, &account.aliases),
+                Account::Resource(account) => (&account.name, account.domain_id, &account.aliases),
             },
             ObjectInner::MailingList(list) => (&list.name, list.domain_id, &list.aliases),
             _ => return,
@@ -431,7 +479,7 @@ impl Server {
     ) {
         changes.invalidate(CacheInvalidation::AccessToken(grantee_id));
         let result = match self.try_account(grantee_id).await {
-            Ok(Some(grantee)) if !grantee.is_user_account() => self
+            Ok(Some(grantee)) if grantee.is_group_account() => self
                 .registry()
                 .query::<RoaringBitmap>(
                     RegistryQuery::new(ObjectType::Account)

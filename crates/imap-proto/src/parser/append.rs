@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::parse_datetime;
+use super::{MAX_FLAGS, parse_datetime};
 use crate::{
     Command,
     protocol::{
@@ -101,6 +101,9 @@ impl Request<Command> {
                                     let flag = Flag::parse_imap(value)
                                         .map_err(|v| bad(self.tag.clone(), v))?;
                                     if !message.flags.contains(&flag) {
+                                        if message.flags.len() == MAX_FLAGS {
+                                            return Err(bad(self.tag.clone(), "Too many flags."));
+                                        }
                                         message.flags.push(flag);
                                     }
                                 }

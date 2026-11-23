@@ -185,7 +185,7 @@ impl<T: SessionStream> SessionData<T> {
                 .imap_ctx(&arguments.tag, trc::location!())?,
         };
         let mut modseq = self
-            .sync_and_announce(&mailbox, &cache)
+            .sync_view(&mailbox, &cache, None)
             .await
             .imap_ctx(&arguments.tag, trc::location!())?;
 
@@ -333,6 +333,7 @@ impl<T: SessionStream> SessionData<T> {
         let mut output = Vec::with_capacity((ids.len() * 64).min(OUTPUT_FLUSH_THRESHOLD));
         let mut windows = ids.chunks(MAX_BATCH_DOCUMENTS).peekable();
         let mut budget_error = None;
+        let mut unknown_cte = Vec::new();
         'windows: while let Some(window) = windows.next() {
             metadata_batch.reset();
             if needs.structure {
@@ -461,7 +462,6 @@ impl<T: SessionStream> SessionData<T> {
                         .unwrap_or_default();
 
                     let mut sources = DecodedSources::default();
-                    let mut message_start = output.len();
                     let mut has_items = false;
                     FetchItem::write_open(
                         &mut output,
@@ -616,16 +616,7 @@ impl<T: SessionStream> SessionData<T> {
                                         .serialize(&mut output);
                                     }
                                     Binary::Missing => (),
-                                    Binary::UnknownCte => {
-                                        self.write_unknown_cte(
-                                            &mut output,
-                                            message_start,
-                                            sections,
-                                            if is_uid { uid } else { seqnum },
-                                        )
-                                        .await?;
-                                        message_start = 0;
-                                    }
+                                    Binary::UnknownCte => unknown_cte.push(sections.as_slice()),
                                 }
                             }
                             Attribute::BinarySize { sections } => {
@@ -642,18 +633,12 @@ impl<T: SessionStream> SessionData<T> {
                                         .serialize(&mut output);
                                     }
                                     Binary::Missing => (),
-                                    Binary::UnknownCte => {
-                                        self.write_unknown_cte(
-                                            &mut output,
-                                            message_start,
-                                            sections,
-                                            if is_uid { uid } else { seqnum },
-                                        )
-                                        .await?;
-                                        message_start = 0;
-                                    }
+                                    Binary::UnknownCte => unknown_cte.push(sections.as_slice()),
                                 }
                             }
+                        }
+                        if output.len() >= OUTPUT_FLUSH_THRESHOLD {
+                            self.flush_output(&mut output, false).await?;
                         }
                     }
 
@@ -670,7 +655,12 @@ impl<T: SessionStream> SessionData<T> {
                     }
 
                     FetchItem::write_close(&mut output);
-                    self.flush_output(&mut output, false).await?;
+                    self.flush_output(&mut output, !unknown_cte.is_empty())
+                        .await?;
+                    for sections in unknown_cte.drain(..) {
+                        self.write_unknown_cte(sections, if is_uid { uid } else { seqnum })
+                            .await?;
+                    }
 
                     // Add to set flags
                     if set_seen_flag {
@@ -740,14 +730,15 @@ impl<T: SessionStream> SessionData<T> {
             Elapsed = op_start.elapsed()
         );
 
-        // Condstore was enabled with this command
+        let mut buf = Vec::new();
+        mailbox.announce_appended(&mut buf);
         if enabled_condstore {
-            self.write_bytes(
-                StatusResponse::ok("Highest Modseq")
-                    .with_code(ResponseCode::highest_modseq(modseq))
-                    .into_bytes(),
-            )
-            .await?;
+            buf = StatusResponse::ok("Highest Modseq")
+                .with_code(ResponseCode::highest_modseq(modseq))
+                .serialize(buf);
+        }
+        if !buf.is_empty() {
+            self.write_bytes(buf).await?;
         }
 
         let response = StatusResponse::completed(Command::Fetch(is_uid)).with_tag(arguments.tag);
@@ -806,15 +797,7 @@ impl FetchNeeds {
 }
 
 impl<T: SessionStream> SessionData<T> {
-    async fn write_unknown_cte(
-        &self,
-        output: &mut Vec<u8>,
-        message_start: usize,
-        sections: &[u32],
-        id: u32,
-    ) -> trc::Result<()> {
-        let pending = output.split_off(message_start);
-        self.flush_output(output, true).await?;
+    async fn write_unknown_cte(&self, sections: &[u32], id: u32) -> trc::Result<()> {
         let mut part = String::with_capacity(sections.len() * 3);
         for (pos, section) in sections.iter().enumerate() {
             if pos > 0 {
@@ -828,9 +811,7 @@ impl<T: SessionStream> SessionData<T> {
                 "Failed to decode part {part} of message {id}."
             ))
             .code(ResponseCode::UnknownCte);
-        self.write_error(err).await?;
-        output.extend_from_slice(&pending);
-        Ok(())
+        self.write_error(err).await
     }
 }
 

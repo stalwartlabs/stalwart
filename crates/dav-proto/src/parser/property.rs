@@ -8,8 +8,9 @@ use super::{RawElement, Token, XmlValueParser, tokenizer::Tokenizer, value::Inhe
 use crate::schema::{
     Attribute, AttributeValue, Element, NamedElement, Namespace,
     property::{
-        CalDavProperty, CalDavPropertyName, CalendarData, CardDavProperty, CardDavPropertyName,
-        Comp, DavProperty, DavValue, PrincipalProperty, ResourceType, WebDavProperty,
+        AvailabilityNamespace, CalDavProperty, CalDavPropertyName, CalendarData, CardDavProperty,
+        CardDavPropertyName, Comp, DavProperty, DavValue, PrincipalProperty, ResourceType,
+        WebDavProperty,
     },
     request::{DavPropertyValue, VCardPropertyWithGroup},
     response::List,
@@ -312,7 +313,10 @@ impl<'x> Tokenizer<'x> {
                                     None => DavValue::Null,
                                 }
                             }
-                            DavProperty::CalDav(CalDavProperty::CalendarTimezone) => {
+                            DavProperty::CalDav(
+                                CalDavProperty::CalendarTimezone
+                                | CalDavProperty::CalendarAvailability(_),
+                            ) => {
                                 match self
                                     .collect_string_value()?
                                     .map(|v| ICalendar::parse(&v).map_err(|_| v))
@@ -599,6 +603,9 @@ impl DavProperty {
             (Namespace::CalDav, Element::ScheduleTag) => {
                 Some(DavProperty::CalDav(CalDavProperty::ScheduleTag))
             }
+            (Namespace::CalDav, Element::CalendarAvailability) => Some(DavProperty::CalDav(
+                CalDavProperty::CalendarAvailability(AvailabilityNamespace::CalDav),
+            )),
             (Namespace::CalDav, Element::ScheduleCalendarTransp) => {
                 Some(DavProperty::CalDav(CalDavProperty::ScheduleCalendarTransp))
             }
@@ -628,6 +635,11 @@ impl DavProperty {
             }
             (Namespace::CalendarServer, Element::Getctag) => {
                 Some(DavProperty::WebDav(WebDavProperty::GetCTag))
+            }
+            (Namespace::CalendarServer, Element::CalendarAvailability) => {
+                Some(DavProperty::CalDav(CalDavProperty::CalendarAvailability(
+                    AvailabilityNamespace::CalendarServer,
+                )))
             }
             _ => None,
         }

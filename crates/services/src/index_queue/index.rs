@@ -11,8 +11,8 @@ use crate::index_queue::document::{
 use crate::index_queue::file::build_file_document;
 use crate::index_queue::{
     BULK_LINGER, BulkRequest, Deletion, ITEM_OVERSCAN, LOCK_EXPIRY, LOCK_MARGIN,
-    MAX_DELETE_CLAUSES, MAX_FLUSH_TEXT_BYTES, Partition, PartitionFailure, PartitionOutcome,
-    PendingItem, QueuedItem, Sink,
+    MAX_DELETE_CLAUSES, MAX_FLUSH_TEXT_BYTES, PARTITION_SLICE, Partition, PartitionFailure,
+    PartitionOutcome, PendingItem, QueuedItem, Sink,
 };
 use common::{BuildServer, Inner, Server, storage::batch::MAX_BATCH_BYTES};
 use email::message::{messagedata::EmailMessageData, metadata::MetadataRow, thread::ThreadSubject};
@@ -33,6 +33,15 @@ use tokio::sync::{mpsc, oneshot};
 use trc::{AddContext, SearchIndexEvent};
 use types::collection::Collection;
 
+#[cfg(stalwart_tests)]
+pub static INDEX_FLUSH_BARRIER: std::sync::Mutex<
+    Option<(SearchIndex, u32, Arc<tokio::sync::Barrier>)>,
+> = std::sync::Mutex::new(None);
+
+#[cfg(stalwart_tests)]
+pub static PARTITION_SLICE_MS: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(PARTITION_SLICE.as_millis() as u64);
+
 #[derive(Clone, Copy)]
 enum Consumed {
     All,
@@ -48,7 +57,6 @@ pub(crate) trait SearchIndexTask: Sync + Send {
         partition: Partition,
         sink: &Sink,
         batch_size: usize,
-        is_clustered: bool,
     ) -> impl Future<Output = PartitionOutcome> + Send;
 }
 
@@ -58,13 +66,10 @@ impl SearchIndexTask for Server {
         partition: Partition,
         sink: &Sink,
         batch_size: usize,
-        is_clustered: bool,
     ) -> PartitionOutcome {
-        // Tthe distributed lock is only needed when other nodes may be indexing as well
-        if is_clustered
-            && !self
-                .try_lock_search_index(partition.index, partition.partition, LOCK_EXPIRY)
-                .await
+        if !self
+            .try_lock_search_index(partition.index, partition.partition, LOCK_EXPIRY)
+            .await
         {
             trc::event!(
                 SearchIndex(SearchIndexEvent::PartitionLocked),
@@ -76,15 +81,8 @@ impl SearchIndexTask for Server {
         }
 
         let mut has_cleared_index = false;
-        let mut outcome = drain_partition(
-            self,
-            partition,
-            sink,
-            batch_size,
-            is_clustered,
-            &mut has_cleared_index,
-        )
-        .await;
+        let mut outcome =
+            drain_partition(self, partition, sink, batch_size, &mut has_cleared_index).await;
 
         // Restore the queue index
         if has_cleared_index
@@ -94,10 +92,8 @@ impl SearchIndexTask for Server {
             outcome = PartitionOutcome::Failed(err);
         }
 
-        if is_clustered {
-            self.unlock_search_index(partition.index, partition.partition)
-                .await;
-        }
+        self.unlock_search_index(partition.index, partition.partition)
+            .await;
 
         outcome
     }
@@ -108,26 +104,30 @@ async fn drain_partition(
     partition: Partition,
     sink: &Sink,
     batch_size: usize,
-    is_clustered: bool,
     has_cleared_index: &mut bool,
 ) -> PartitionOutcome {
-    let mut lease = Instant::now() + Duration::from_secs(LOCK_EXPIRY);
+    let started = Instant::now();
+    #[cfg(not(stalwart_tests))]
+    let slice = PARTITION_SLICE;
+    #[cfg(stalwart_tests)]
+    let slice = Duration::from_millis(PARTITION_SLICE_MS.load(Ordering::Relaxed));
+    let mut lease = started + Duration::from_secs(LOCK_EXPIRY);
     let mut from_document = None;
 
     loop {
-        if is_clustered {
-            let now = Instant::now();
-
-            if lease.saturating_duration_since(now) <= LOCK_MARGIN {
-                if !server
-                    .renew_search_index_lock(partition.index, partition.partition, LOCK_EXPIRY)
-                    .await
-                {
-                    return PartitionOutcome::Incomplete;
-                }
-
-                lease = now + Duration::from_secs(LOCK_EXPIRY);
+        let now = Instant::now();
+        if now.saturating_duration_since(started) >= slice {
+            return PartitionOutcome::Yielded;
+        }
+        if lease.saturating_duration_since(now) <= LOCK_MARGIN {
+            if !server
+                .renew_search_index_lock(partition.index, partition.partition, LOCK_EXPIRY)
+                .await
+            {
+                return PartitionOutcome::Incomplete;
             }
+
+            lease = now + Duration::from_secs(LOCK_EXPIRY);
         }
 
         let (items, is_exhausted) = match read_queue(
@@ -269,6 +269,20 @@ async fn process_items(
     };
     let consumed = consumed.items(items);
     let (processed, remaining) = items.split_at_checked(consumed).unwrap_or((items, &[]));
+
+    #[cfg(stalwart_tests)]
+    {
+        let barrier = INDEX_FLUSH_BARRIER.lock().ok().and_then(|mut slot| {
+            slot.take_if(|(index, account_id, _)| {
+                (*index, *account_id) == (partition.index, partition.partition)
+            })
+            .map(|(_, _, barrier)| barrier)
+        });
+        if let Some(barrier) = barrier {
+            barrier.wait().await;
+            barrier.wait().await;
+        }
+    }
 
     // Update the search index
     let total = documents.len();

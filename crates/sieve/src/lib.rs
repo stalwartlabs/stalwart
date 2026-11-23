@@ -117,6 +117,7 @@ pub struct Context<'x> {
     pub(crate) pending: Pending<'x>,
     pub(crate) error: Option<RuntimeError>,
     pub(crate) rejected: bool,
+    pub(crate) hop_limited: bool,
     pub(crate) included: Vec<Script<'x>>,
     pub(crate) vars_global: AHashMap<Cow<'x, str>, Variable<'x>>,
     pub(crate) vars_env: AHashMap<Cow<'static, str>, Variable<'x>>,
@@ -138,6 +139,7 @@ pub struct Context<'x> {
     pub(crate) num_instructions: usize,
     pub(crate) num_scanned_bytes: usize,
     pub(crate) num_out_messages: usize,
+    pub(crate) has_replied: bool,
 
     pub(crate) arena: &'x mut Arena,
 }

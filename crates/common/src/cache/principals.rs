@@ -7,9 +7,10 @@
 use crate::{
     Server,
     auth::{
-        ACCOUNT_IS_USER, AccountCache, AccountInfo, AccountStorage, ChangedBy, DOMAIN_FLAG_RELAY,
-        DOMAIN_FLAG_SUB_ADDRESSING, DomainCache, EmailAddress, EmailAddressRef, EmailCache,
-        MailingListCache, PermissionsGroup, RECOVERY_ADMIN_ID, RoleCache,
+        ACCOUNT_IS_EQUIPMENT, ACCOUNT_IS_ROOM, ACCOUNT_IS_USER, ACCOUNT_TYPE_MASK, AccountCache,
+        AccountInfo, AccountStorage, ChangedBy, DOMAIN_FLAG_DKIM2_STRICT, DOMAIN_FLAG_DNS_MANAGED,
+        DOMAIN_FLAG_RELAY, DOMAIN_FLAG_SUB_ADDRESSING, DomainCache, EmailAddress, EmailAddressRef,
+        EmailCache, MailingListCache, PermissionsGroup, RECOVERY_ADMIN_ID, RoleCache,
         permissions::BuildPermissions,
     },
     config::smtp::auth::DkimSigners,
@@ -34,14 +35,14 @@ use registry::schema::{
 use compact_str::{CompactString, ToCompactString};
 use registry::{
     schema::{
-        enums::{DkimRotationStage, Locale, StorageQuota},
+        enums::{DkimRotationStage, Locale, ResourceKind, StorageQuota},
         prelude::{ObjectType, Property},
         structs::{
-            Account, DkimSignature, Domain, EncryptionAtRest, EncryptionSettings, MailingList,
-            MaskedEmail, PublicKey, Role, SubAddressing,
+            Account, DkimSignature, DnsManagement, Domain, EmailAlias, EncryptionAtRest,
+            EncryptionSettings, MailingList, MaskedEmail, PublicKey, Role, SubAddressing,
         },
     },
-    types::id::ObjectId,
+    types::{id::ObjectId, list::List},
 };
 use std::{borrow::Cow, sync::Arc};
 use store::{
@@ -51,7 +52,7 @@ use store::{
 };
 use trc::{AddContext, CacheEvent};
 use types::id::Id;
-use utils::DomainPart;
+use utils::{DomainPart, map::vec_map::VecMap};
 
 impl Server {
     pub async fn domain(&self, domain: &str) -> trc::Result<Option<Arc<DomainCache>>> {
@@ -150,6 +151,12 @@ impl Server {
                 let mut flags = 0;
                 if domain.allow_relaying {
                     flags |= DOMAIN_FLAG_RELAY;
+                }
+                if !domain.dns_management.allows_subdomain_signing() {
+                    flags |= DOMAIN_FLAG_DKIM2_STRICT;
+                }
+                if matches!(domain.dns_management, DnsManagement::Automatic(_)) {
+                    flags |= DOMAIN_FLAG_DNS_MANAGED;
                 }
 
                 // SPDX-SnippetBegin
@@ -469,68 +476,46 @@ impl Server {
                         }
                     }
                     Account::Group(account) => {
-                        let domain = self
-                            .domain_by_id(account.domain_id.document_id())
-                            .await?
-                            .ok_or_else(|| {
-                                trc::AuthEvent::Error
-                                    .into_err()
-                                    .details("Domain not found for group account.")
-                                    .ctx(trc::Key::AccountId, account_id)
-                                    .ctx(trc::Key::Id, account.domain_id.document_id())
-                                    .caused_by(trc::location!())
-                            })?;
-                        let mut name =
-                            String::with_capacity(domain.names[0].len() + account.name.len() + 1);
-                        name.push_str(account.name.as_ref());
-                        name.push('@');
-                        name.push_str(domain.names[0].as_ref());
-
-                        let mut quota_objects: Option<ObjectQuota> = None;
-                        let mut quota_disk = 0;
-                        for (resource, limit) in account.quotas {
-                            if resource == StorageQuota::MaxDiskQuota {
-                                quota_disk = limit;
-                            } else {
-                                quota_objects
-                                    .get_or_insert_with(|| self.core.email.max_objects.clone())
-                                    .set(resource, limit as u32);
-                            }
-                        }
-
-                        AccountCache {
-                            id: account_id,
-                            name: name.into_boxed_str(),
-                            addresses: [EmailAddress {
-                                local_part: account.name.into(),
-                                domain_id: account.domain_id.document_id(),
-                            }]
-                            .into_iter()
-                            .chain(
-                                account
-                                    .aliases
-                                    .into_iter()
-                                    .filter(|alias| alias.enable)
-                                    .map(|alias| EmailAddress {
-                                        local_part: alias.name.into(),
-                                        domain_id: alias.domain_id.document_id(),
-                                    }),
-                            )
-                            .collect(),
-                            // SPDX-SnippetBegin
-                            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-                            // SPDX-License-Identifier: LicenseRef-SEL
-                            #[cfg(feature = "enterprise")]
-                            id_tenant: account.member_tenant_id.map(|id| id.document_id()),
-                            // SPDX-SnippetEnd
-                            id_member_of: Default::default(),
-                            quota_disk,
-                            description: account.description.map(Into::into),
-                            storage: AccountStorage::boxed(quota_objects, None),
-                            locale: account.locale,
-                            flags: 0,
-                            active_script: Default::default(),
-                        }
+                        self.build_shared_account_cache(
+                            account_id,
+                            SharedAccount {
+                                name: account.name,
+                                domain_id: account.domain_id,
+                                aliases: account.aliases,
+                                quotas: account.quotas,
+                                description: account.description,
+                                locale: account.locale,
+                                // SPDX-SnippetBegin
+                                // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+                                // SPDX-License-Identifier: LicenseRef-SEL
+                                #[cfg(feature = "enterprise")]
+                                member_tenant_id: account.member_tenant_id,
+                                // SPDX-SnippetEnd
+                                flags: 0,
+                            },
+                        )
+                        .await?
+                    }
+                    Account::Resource(account) => {
+                        self.build_shared_account_cache(
+                            account_id,
+                            SharedAccount {
+                                name: account.name,
+                                domain_id: account.domain_id,
+                                aliases: account.aliases,
+                                quotas: account.quotas,
+                                description: account.description,
+                                locale: account.locale,
+                                // SPDX-SnippetBegin
+                                // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+                                // SPDX-License-Identifier: LicenseRef-SEL
+                                #[cfg(feature = "enterprise")]
+                                member_tenant_id: account.member_tenant_id,
+                                // SPDX-SnippetEnd
+                                flags: AccountCache::resource_flags(account.kind),
+                            },
+                        )
+                        .await?
                     }
                 });
 
@@ -971,6 +956,29 @@ impl AccountCache {
     }
 
     #[inline(always)]
+    pub fn is_group_account(&self) -> bool {
+        self.flags & ACCOUNT_TYPE_MASK == 0
+    }
+
+    #[inline(always)]
+    pub fn resource_kind(&self) -> Option<ResourceKind> {
+        if self.flags & ACCOUNT_IS_ROOM != 0 {
+            Some(ResourceKind::Room)
+        } else if self.flags & ACCOUNT_IS_EQUIPMENT != 0 {
+            Some(ResourceKind::Equipment)
+        } else {
+            None
+        }
+    }
+
+    pub fn resource_flags(kind: ResourceKind) -> u64 {
+        match kind {
+            ResourceKind::Room => ACCOUNT_IS_ROOM,
+            ResourceKind::Equipment => ACCOUNT_IS_EQUIPMENT,
+        }
+    }
+
+    #[inline(always)]
     pub fn disk_quota(&self) -> u64 {
         self.quota_disk
     }
@@ -1024,5 +1032,91 @@ impl Server {
             );
         }
         Ok(encryption)
+    }
+}
+
+struct SharedAccount {
+    name: String,
+    domain_id: Id,
+    aliases: List<EmailAlias>,
+    quotas: VecMap<StorageQuota, u64>,
+    description: Option<String>,
+    locale: Locale,
+    // SPDX-SnippetBegin
+    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+    // SPDX-License-Identifier: LicenseRef-SEL
+    #[cfg(feature = "enterprise")]
+    member_tenant_id: Option<Id>,
+    // SPDX-SnippetEnd
+    flags: u64,
+}
+
+impl Server {
+    async fn build_shared_account_cache(
+        &self,
+        account_id: u32,
+        account: SharedAccount,
+    ) -> trc::Result<AccountCache> {
+        let domain = self
+            .domain_by_id(account.domain_id.document_id())
+            .await?
+            .ok_or_else(|| {
+                trc::AuthEvent::Error
+                    .into_err()
+                    .details("Domain not found for account.")
+                    .ctx(trc::Key::AccountId, account_id)
+                    .ctx(trc::Key::Id, account.domain_id.document_id())
+                    .caused_by(trc::location!())
+            })?;
+        let mut name = String::with_capacity(domain.names[0].len() + account.name.len() + 1);
+        name.push_str(account.name.as_ref());
+        name.push('@');
+        name.push_str(domain.names[0].as_ref());
+
+        let mut quota_objects: Option<ObjectQuota> = None;
+        let mut quota_disk = 0;
+        for (resource, limit) in account.quotas {
+            if resource == StorageQuota::MaxDiskQuota {
+                quota_disk = limit;
+            } else {
+                quota_objects
+                    .get_or_insert_with(|| self.core.email.max_objects.clone())
+                    .set(resource, limit as u32);
+            }
+        }
+
+        Ok(AccountCache {
+            id: account_id,
+            name: name.into_boxed_str(),
+            addresses: [EmailAddress {
+                local_part: account.name.into(),
+                domain_id: account.domain_id.document_id(),
+            }]
+            .into_iter()
+            .chain(
+                account
+                    .aliases
+                    .into_iter()
+                    .filter(|alias| alias.enable)
+                    .map(|alias| EmailAddress {
+                        local_part: alias.name.into(),
+                        domain_id: alias.domain_id.document_id(),
+                    }),
+            )
+            .collect(),
+            // SPDX-SnippetBegin
+            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+            // SPDX-License-Identifier: LicenseRef-SEL
+            #[cfg(feature = "enterprise")]
+            id_tenant: account.member_tenant_id.map(|id| id.document_id()),
+            // SPDX-SnippetEnd
+            id_member_of: Default::default(),
+            quota_disk,
+            description: account.description.map(Into::into),
+            storage: AccountStorage::boxed(quota_objects, None),
+            locale: account.locale,
+            flags: account.flags,
+            active_script: Default::default(),
+        })
     }
 }

@@ -11,7 +11,7 @@ use crate::{
 };
 use registry::{
     pickle::{Pickle, PickledStream},
-    schema::prelude::{Object, ObjectType},
+    schema::prelude::{Object, ObjectInner, ObjectType},
     types::{EnumImpl, ObjectImpl, id::ObjectId},
 };
 use trc::AddContext;
@@ -21,17 +21,11 @@ use xxhash_rust::xxh3::xxh3_64;
 impl RegistryStore {
     pub async fn get(&self, object_id: ObjectId) -> trc::Result<Option<Object>> {
         if object_id.object() != ObjectType::DataStore {
-            self.0
-                .store
-                .get_value::<Object>(ValueKey::from(ValueClass::Registry(RegistryClass::Item {
-                    object_id: object_id.object().to_id(),
-                    item_id: object_id.id().id(),
-                })))
-                .await
+            self.0.store.get_value::<Object>(item_key(object_id)).await
         } else {
             match self.0.read_data_store().await {
                 RegistryInit::Ok(data_store) => Ok(Some(Object {
-                    inner: data_store.into(),
+                    inner: ObjectInner::DataStore(data_store),
                     revision: 0,
                 })),
                 RegistryInit::Err(err) => {
@@ -42,6 +36,17 @@ impl RegistryStore {
                 }
                 RegistryInit::Bootstrap => Ok(None),
             }
+        }
+    }
+
+    pub async fn get_fresh(&self, object_id: ObjectId) -> trc::Result<Option<Object>> {
+        if object_id.object() != ObjectType::DataStore {
+            self.0
+                .store
+                .get_value_fresh::<Object>(item_key(object_id))
+                .await
+        } else {
+            self.get(object_id).await
         }
     }
 
@@ -103,4 +108,11 @@ impl RegistryStore {
             .await
             .caused_by(trc::location!())
     }
+}
+
+fn item_key(object_id: ObjectId) -> ValueKey<ValueClass> {
+    ValueKey::from(ValueClass::Registry(RegistryClass::Item {
+        object_id: object_id.object().to_id(),
+        item_id: object_id.id().id(),
+    }))
 }

@@ -9,7 +9,7 @@ use common::{MessageStoreCache, MessagesCache, NO_ID, network::SessionStream};
 
 pub use common::MailboxRow as Row;
 use imap_proto::protocol::{Sequence, expunge, select::Exists};
-use std::{borrow::Cow, sync::Arc};
+use std::{borrow::Cow, mem, sync::Arc};
 use store::{query::log::Query, roaring::RoaringBitmap};
 use trc::AddContext;
 use types::collection::SyncCollection;
@@ -48,6 +48,7 @@ pub struct MailboxView {
     mailbox_id: u32,
     rows: Arc<Vec<Row>>,
     tombstones: Vec<u32>,
+    pending: Vec<Row>,
     appended: u32,
     uid_max: u32,
     snapshot: Arc<MessagesCache>,
@@ -86,6 +87,7 @@ impl MailboxView {
             uid_max: rows.last().map_or(0, |row| row.uid),
             rows,
             tombstones: Vec::new(),
+            pending: Vec::new(),
             appended: 0,
             snapshot: cache.emails.clone(),
             sorted: true,
@@ -131,11 +133,23 @@ impl MailboxView {
         self.uid_max
     }
 
-    pub fn take_appended(&mut self) -> Option<usize> {
-        (self.appended > 0).then(|| {
+    pub fn announce_appended(&mut self, buf: &mut Vec<u8>) {
+        self.publish_pending();
+        if self.appended > 0 {
             self.appended = 0;
-            self.rows.len()
-        })
+            Exists {
+                total_messages: self.rows.len(),
+            }
+            .serialize(buf);
+        }
+    }
+
+    fn publish_pending(&mut self) {
+        if !self.pending.is_empty() {
+            let mut rows = mem::take(&mut self.pending);
+            rows.sort_unstable_by_key(|row| row.uid);
+            self.insert_rows(rows);
+        }
     }
 
     pub fn has_pending_changes(&self) -> bool {
@@ -212,12 +226,56 @@ impl MailboxView {
         saved: Option<&[Row]>,
     ) -> Vec<Resolved> {
         let mut out = Vec::new();
-        self.resolve_into(sequence, is_uid, saved, &mut out);
-        if matches!(sequence, Sequence::List { .. }) {
+        let sequence = self.merge_ranges(sequence, is_uid);
+        self.resolve_into(&sequence, is_uid, saved, &mut out);
+        if matches!(*sequence, Sequence::List { .. }) {
             out.sort_unstable_by_key(|resolved| resolved.seqnum);
             out.dedup_by_key(|resolved| resolved.seqnum);
         }
         out
+    }
+
+    fn merge_ranges<'s>(&self, sequence: &'s Sequence, is_uid: bool) -> Cow<'s, Sequence> {
+        let Sequence::List { items } = sequence else {
+            return Cow::Borrowed(sequence);
+        };
+        let max = if is_uid {
+            self.uid_max()
+        } else {
+            self.rows.len() as u32
+        };
+        let mut ranges = Vec::with_capacity(items.len());
+        let mut has_saved_search = false;
+        for item in items {
+            match item {
+                Sequence::Number { value } => ranges.push((*value, *value)),
+                Sequence::Range { start, end } => {
+                    let (start, end) = (start.unwrap_or(max), end.unwrap_or(max));
+                    ranges.push((start.min(end), start.max(end)));
+                }
+                Sequence::SavedSearch => has_saved_search = true,
+                Sequence::List { .. } => return Cow::Borrowed(sequence),
+            }
+        }
+        ranges.sort_unstable();
+
+        let mut merged = Vec::with_capacity(ranges.len() + usize::from(has_saved_search));
+        let mut ranges = ranges.into_iter();
+        if let Some((mut lo, mut hi)) = ranges.next() {
+            for (next_lo, next_hi) in ranges {
+                if next_lo <= hi.saturating_add(1) {
+                    hi = hi.max(next_hi);
+                } else {
+                    merged.push(Sequence::range(Some(lo), Some(hi)));
+                    (lo, hi) = (next_lo, next_hi);
+                }
+            }
+            merged.push(Sequence::range(Some(lo), Some(hi)));
+        }
+        if has_saved_search {
+            merged.push(Sequence::SavedSearch);
+        }
+        Cow::Owned(Sequence::List { items: merged })
     }
 
     pub fn resolve_uid(&self, uid: u32) -> Option<Resolved> {
@@ -621,7 +679,7 @@ impl MailboxView {
             }
             ItemChanges::Items(document_ids) => {
                 let bits = KeywordBits::new();
-                let mut inserted = Vec::new();
+                let mut withdrawn = Vec::new();
                 for &document_id in document_ids {
                     let before_message = self.snapshot.by_id(document_id);
                     let after_message = cache.emails.by_id(document_id);
@@ -638,13 +696,16 @@ impl MailboxView {
 
                     if let Some(uid) = before
                         && after != before
-                        && let Some(position) = self.position_of_uid(uid)
                     {
-                        self.tombstone(position);
+                        match self.position_of_uid(uid) {
+                            Some(position) => self.tombstone(position),
+                            None if !self.pending.is_empty() => withdrawn.push(uid),
+                            None => {}
+                        }
                     }
                     if let Some(uid) = after {
                         if after != before {
-                            inserted.push(Row {
+                            self.pending.push(Row {
                                 uid,
                                 id: document_id,
                             });
@@ -654,10 +715,10 @@ impl MailboxView {
                         }
                     }
                 }
-
-                if !inserted.is_empty() {
-                    inserted.sort_unstable_by_key(|row| row.uid);
-                    self.insert_rows(inserted);
+                if !withdrawn.is_empty() {
+                    withdrawn.sort_unstable();
+                    self.pending
+                        .retain(|row| withdrawn.binary_search(&row.uid).is_err());
                 }
                 SyncOutcome::Incremental
             }
@@ -683,7 +744,7 @@ impl MailboxView {
         for position in removed {
             self.tombstone(position);
         }
-        self.insert_rows(added);
+        self.pending = added;
     }
 
     fn diff_sorted(
@@ -720,6 +781,7 @@ impl MailboxView {
     }
 
     pub fn flush(&mut self, use_vanished: bool, buf: &mut Vec<u8>) {
+        self.publish_pending();
         if !self.tombstones.is_empty() {
             self.tombstones.sort_unstable();
             self.tombstones.dedup();
@@ -782,8 +844,10 @@ impl SelectedMailbox {
             None
         };
         let mut out = Vec::new();
-        let expunged = self.view.lock().missing_in(
-            sequence,
+        let view = self.view.lock();
+        let sequence = view.merge_ranges(sequence, is_uid);
+        let expunged = view.missing_in(
+            &sequence,
             is_uid,
             saved.as_deref().map(Vec::as_slice),
             &mut out,
@@ -793,6 +857,10 @@ impl SelectedMailbox {
 
     pub fn change_id(&self) -> u64 {
         self.view.lock().change_id()
+    }
+
+    pub fn announce_appended(&self, buf: &mut Vec<u8>) {
+        self.view.lock().announce_appended(buf);
     }
 }
 
@@ -860,21 +928,6 @@ impl<T: SessionStream> SessionData<T> {
                 &deltas,
                 matches!(outcome, SyncOutcome::Rebuilt),
             );
-        }
-        Ok(change_id)
-    }
-
-    pub async fn sync_and_announce(
-        &self,
-        mailbox: &SelectedMailbox,
-        cache: &MessageStoreCache,
-    ) -> trc::Result<u64> {
-        let change_id = self.sync_view(mailbox, cache, None).await?;
-        let appended = mailbox.view.lock().take_appended();
-        if let Some(total_messages) = appended {
-            let mut buf = Vec::with_capacity(24);
-            Exists { total_messages }.serialize(&mut buf);
-            self.write_bytes(buf).await?;
         }
         Ok(change_id)
     }

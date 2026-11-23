@@ -25,8 +25,8 @@ use common::{Server, storage::dav::DISPLAY_NAME_PROPERTY};
 use dav_proto::schema::{
     Collation, Namespace,
     property::{
-        CalDavProperty, CardDavProperty, Comp, DavProperty, DavValue, Privilege, Rfc1123DateTime,
-        SupportedCollation, SupportedLock, WebDavProperty,
+        AvailabilityNamespace, CalDavProperty, CardDavProperty, Comp, DavProperty, DavValue,
+        Privilege, Rfc1123DateTime, SupportedCollation, SupportedLock, WebDavProperty,
     },
     request::DavPropertyValue,
     response::{
@@ -35,17 +35,23 @@ use dav_proto::schema::{
 };
 use groupware::{
     DavCalendarResource, DavResourceName,
+    cache::GroupwareCache,
     calendar::{
         ArchivedTimezone, SupportedComponent,
         availability::{Inclusion, PrincipalRole},
         privacy::EventPrivacy,
+        working_hours::{WorkingHoursHandler, ical::always_available_vavailability},
     },
 };
 use hyper::StatusCode;
+use registry::schema::enums::Permission;
 use std::borrow::Cow;
 use store::write::metadata::MetadataBuf;
 use trc::AddContext;
-use types::{acl::Acl, collection::Collection};
+use types::{
+    acl::Acl,
+    collection::{Collection, SyncCollection},
+};
 use utils::map::bitmap::Bitmap;
 
 pub(super) trait PropFindItemBuilder: Sync + Send {
@@ -582,6 +588,7 @@ impl PropFindItemBuilder for Server {
                                 DavValue::Components(List(
                                     Bitmap::<SupportedComponent>::from(supported_components)
                                         .into_iter()
+                                        .filter(|component| component.is_storable())
                                         .map(ICalendarComponentType::from)
                                         .map(Comp)
                                         .collect(),
@@ -742,14 +749,61 @@ impl PropFindItemBuilder for Server {
                         CalDavProperty::ScheduleDefaultCalendarURL,
                         ArchivedResource::CalendarEventNotificationCollection(true),
                     ) => {
-                        if let Some(default_cal) = &self.core.groupware.default_calendar_name {
+                        let resources = self
+                            .fetch_groupware_resources(
+                                access_token.account_id(),
+                                account_id,
+                                SyncCollection::Calendar,
+                            )
+                            .await
+                            .caused_by(trc::location!())?;
+                        let default_href = self
+                            .default_calendar_id(account_id)
+                            .await?
+                            .and_then(|calendar_id| {
+                                resources.container_resource_path_by_id(calendar_id)
+                            })
+                            .map(|path| resources.format_resource(path));
+                        if let Some(default_href) = default_href {
                             fields.push(DavPropertyValue::new(
                                 property.clone(),
-                                vec![Href(format!(
-                                    "{}/{}/{default_cal}/",
-                                    DavResourceName::Cal.base_path(),
-                                    item.name.split('/').nth(3).unwrap_or_default()
-                                ))],
+                                vec![Href(default_href)],
+                            ));
+                        } else {
+                            fields_not_found.push(DavPropertyValue::empty(property.clone()));
+                        }
+                    }
+                    (
+                        CalDavProperty::CalendarAvailability(namespace),
+                        ArchivedResource::CalendarEventNotificationCollection(true),
+                    ) => {
+                        let vavailability = if access_token
+                            .has_permission(Permission::SysCalendarSettingsGet)
+                            && let Some(account) = self
+                                .try_account(account_id)
+                                .await
+                                .caused_by(trc::location!())?
+                        {
+                            match self
+                                .working_hours_vavailability(&account)
+                                .await
+                                .caused_by(trc::location!())?
+                            {
+                                Some(vavailability) => Some(vavailability),
+                                None if *namespace == AvailabilityNamespace::CalendarServer
+                                    && !account.is_group_account() =>
+                                {
+                                    Some(always_available_vavailability(account.id))
+                                }
+                                None => None,
+                            }
+                        } else {
+                            None
+                        };
+                        if let Some(vavailability) = vavailability {
+                            fields.push(DavPropertyValue::new(
+                                property.clone(),
+                                DavValue::CData(vavailability),
                             ));
                         } else {
                             fields_not_found.push(DavPropertyValue::empty(property.clone()));

@@ -4,10 +4,23 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::task_manager::{outcome::Outcome, tasks::grantee_cleanup::GranteeCleanupTask};
-use common::{Server, cache::invalidate::CacheInvalidationBuilder, ipc::CacheInvalidation};
+use crate::{
+    index_queue::LOCK_EXPIRY,
+    task_manager::{outcome::Outcome, tasks::grantee_cleanup::GranteeCleanupTask},
+};
+use common::{
+    Server, cache::invalidate::CacheInvalidationBuilder, ipc::CacheInvalidation,
+    storage::batch::MAX_BATCH_DOCUMENTS,
+};
 use email::{message::metadata::MetadataStructure, sieve::SieveScript};
-use groupware::file::FileNode;
+use groupware::{
+    calendar::{
+        CalendarEvent, CalendarEventContent, EVENT_HAS_ALARMS,
+        alarm::AlarmTarget,
+        schedule::{AlarmTasks, EventAlarmScheduler, EventAlarmUsers},
+    },
+    file::FileNode,
+};
 use registry::{
     schema::{
         enums::TaskAccountMaintenanceType,
@@ -24,12 +37,14 @@ use registry::{
 #[cfg(feature = "enterprise")]
 use registry::schema::structs::ArchivedItem;
 // SPDX-SnippetEnd
+use std::time::{Duration, Instant};
 use store::{
     Deserialize, IterateParams, SerializeInfallible, U64_LEN, ValueKey,
     registry::{
         RegistryQuery,
         write::{RegistryWrite, RegistryWriteResult},
     },
+    roaring::RoaringBitmap,
     search::SearchQuery,
     write::{
         Archive, ArchiveBytes, BatchBuilder, BlobLink, BlobOp, RegistryClass, SearchIndex,
@@ -40,11 +55,14 @@ use trc::AddContext;
 use types::{
     blob_hash::BlobHash,
     collection::Collection,
-    field::{EmailField, Field},
+    field::{CalendarEventField, EmailField, Field},
     id::Id,
 };
 
 const DESTROY_WINDOW: usize = 5_000;
+const INDEX_LOCK_WAIT: Duration = Duration::from_secs(60);
+const INDEX_LOCK_BACKOFF_MIN: Duration = Duration::from_millis(50);
+const INDEX_LOCK_BACKOFF_MAX: Duration = Duration::from_secs(2);
 
 pub(crate) trait DestroyAccountTask: Sync + Send {
     fn destroy_account(&self, task: &TaskDestroyAccount) -> impl Future<Output = Outcome> + Send;
@@ -91,6 +109,8 @@ async fn destroy_account(server: &Server, task: &TaskDestroyAccount) -> trc::Res
         .remove_grantee_references(account_id, task.member_group_ids.as_slice())
         .await
         .caused_by(trc::location!())?;
+
+    destroy_calendar_alarms(server, account_id).await?;
 
     // Destroy public keys, masked emails and OAuth grants
     for object in [
@@ -155,6 +175,13 @@ async fn destroy_account(server: &Server, task: &TaskDestroyAccount) -> trc::Res
         }
     }
 
+    let mut batch = BatchBuilder::new();
+    batch.clear(ValueClass::Registry(RegistryClass::Item {
+        object_id: ObjectType::CalendarSettings.to_id(),
+        item_id: u64::from(account_id),
+    }));
+    server.store().write_batch(&mut batch).await?;
+
     // Remove archived items
     // SPDX-SnippetBegin
     // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
@@ -179,28 +206,6 @@ async fn destroy_account(server: &Server, task: &TaskDestroyAccount) -> trc::Res
         },
     )
     .await?;
-
-    // Remove search index
-    for index in [
-        SearchIndex::Email,
-        SearchIndex::Contacts,
-        SearchIndex::Calendar,
-        SearchIndex::File,
-    ] {
-        if let Some(store) = server.search_store().internal_fts() {
-            store.unindex_account(index, account_id).await?;
-        } else {
-            server
-                .search_store()
-                .unindex(SearchQuery::new(index).with_account_id(account_id))
-                .await?;
-        }
-
-        server
-            .store()
-            .clear_search_index_queue(index, account_id)
-            .await?;
-    }
 
     // Unlink all accounts's blobs
     destroy_account_blobs(server, account_id).await?;
@@ -234,7 +239,137 @@ async fn destroy_account(server: &Server, task: &TaskDestroyAccount) -> trc::Res
         .await
         .caused_by(trc::location!())?;
 
+    // Remove search index
+    for index in [
+        SearchIndex::Email,
+        SearchIndex::Contacts,
+        SearchIndex::Calendar,
+        SearchIndex::File,
+    ] {
+        let deadline = Instant::now() + INDEX_LOCK_WAIT;
+        let mut backoff = INDEX_LOCK_BACKOFF_MIN;
+        while !server
+            .try_lock_search_index(index, account_id, LOCK_EXPIRY)
+            .await
+        {
+            if Instant::now() >= deadline {
+                return Ok(Outcome::transient("Search index partition is locked"));
+            }
+            tokio::time::sleep(backoff).await;
+            backoff = (backoff * 2).min(INDEX_LOCK_BACKOFF_MAX);
+        }
+
+        let result = async {
+            server
+                .store()
+                .clear_search_index_queue(index, account_id)
+                .await?;
+
+            if let Some(store) = server.search_store().internal_fts() {
+                store.unindex_account(index, account_id).await
+            } else {
+                server
+                    .search_store()
+                    .unindex(SearchQuery::new(index).with_account_id(account_id))
+                    .await
+                    .map(|_| ())
+            }
+        }
+        .await;
+        server.unlock_search_index(index, account_id).await;
+        result?;
+    }
+
     Ok(Outcome::done())
+}
+
+async fn destroy_calendar_alarms(server: &Server, account_id: u32) -> trc::Result<()> {
+    let mut alarm_ids = RoaringBitmap::new();
+    server
+        .archives(
+            account_id,
+            Collection::CalendarEvent,
+            Field::ARCHIVE,
+            &(),
+            |document_id, archive| {
+                if archive.unarchive::<CalendarEvent>()?.flags.to_native() & EVENT_HAS_ALARMS != 0 {
+                    alarm_ids.insert(document_id);
+                }
+                Ok(true)
+            },
+        )
+        .await
+        .caused_by(trc::location!())?;
+    let mut document_ids = alarm_ids.iter();
+    let mut chunk = Vec::with_capacity(
+        usize::try_from(alarm_ids.len())
+            .map_or(MAX_BATCH_DOCUMENTS, |len| len.min(MAX_BATCH_DOCUMENTS)),
+    );
+    loop {
+        chunk.clear();
+        chunk.extend(document_ids.by_ref().take(MAX_BATCH_DOCUMENTS));
+        if chunk.is_empty() {
+            return Ok(());
+        }
+        let archives = server
+            .archive_chunk(
+                account_id,
+                Collection::CalendarEvent,
+                &[],
+                Some((CalendarEventField::Content.field(), &chunk)),
+            )
+            .await
+            .caused_by(trc::location!())?;
+        let mut contents = Vec::with_capacity(chunk.len());
+        let mut task_ids = Vec::new();
+        for &document_id in &chunk {
+            let content = archives
+                .value(document_id)
+                .map(|content| content.unarchive::<CalendarEventContent>())
+                .transpose()
+                .caused_by(trc::location!())?;
+            if let Some(content) = content {
+                task_ids.extend(EventAlarmUsers::task_ids(account_id, document_id, content));
+            }
+            contents.push((document_id, content));
+        }
+        let mut tasks = AlarmTasks::pending(task_ids);
+        let mut batch = BatchBuilder::new();
+        for (document_id, content) in contents {
+            match content {
+                Some(content) => {
+                    server
+                        .clear_event_alarms(
+                            account_id,
+                            document_id,
+                            EventAlarmUsers::targets(account_id, content),
+                            &mut tasks,
+                            &mut batch,
+                        )
+                        .await?;
+                }
+                None => {
+                    server
+                        .clear_event_alarms(
+                            account_id,
+                            document_id,
+                            [AlarmTarget::Owner],
+                            &mut tasks,
+                            &mut batch,
+                        )
+                        .await?;
+                }
+            }
+            batch.commit_point();
+        }
+        if !batch.is_empty() {
+            server
+                .store()
+                .write_batch(&mut batch)
+                .await
+                .caused_by(trc::location!())?;
+        }
+    }
 }
 
 async fn destroy_temporary_items(

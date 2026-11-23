@@ -9,9 +9,12 @@ use crate::{
     Subspace,
     write::{commit_backoff, key::KeySerializer},
 };
-use foundationdb::{FdbError, KeySelector, RangeOption, Transaction, options};
-use futures::TryStreamExt;
-use std::{ops::Range, time::Instant};
+use fdb::{KeyValue, RangeCursor, RangeOptions, Readahead, Snapshot, TransactionOptions};
+use std::{
+    cmp::min,
+    ops::{Bound, Range},
+    time::Instant,
+};
 
 const BLOB_CHUNK_LEN: usize = std::mem::size_of::<u16>();
 
@@ -40,12 +43,15 @@ impl FdbStore {
         let bytes_start = range.start % MAX_VALUE_SIZE;
         let blob_range = range.end.saturating_sub(range.start);
 
-        if block_start > u16::MAX as usize {
+        let Ok(first_block) = u16::try_from(block_start) else {
             return Ok(None);
-        }
+        };
+        let last_block =
+            u16::try_from(range.end.saturating_sub(1).max(range.start) / MAX_VALUE_SIZE)
+                .unwrap_or(u16::MAX);
 
-        let begin = Self::blob_chunk_key(key, block_start as u16);
-        let (_, end) = Self::blob_chunk_range(key);
+        let begin = Self::blob_chunk_key(key, first_block);
+        let end = Self::blob_chunk_key(key, last_block);
         let chunk_key_len = begin.len();
         let mut retry_count = 0;
         let start = Instant::now();
@@ -55,7 +61,7 @@ impl FdbStore {
 
         loop {
             match Self::read_blob(
-                &trx,
+                trx.snapshot(),
                 &begin,
                 &end,
                 &mut last_key,
@@ -68,8 +74,7 @@ impl FdbStore {
             {
                 Ok(()) => return Ok(blob_data),
                 Err(err) => {
-                    trx = self
-                        .on_read_error(trx, err, &mut retry_count, start)
+                    self.on_read_error(&mut trx, err, &mut retry_count, start)
                         .await?;
                 }
             }
@@ -78,7 +83,7 @@ impl FdbStore {
 
     #[allow(clippy::too_many_arguments)]
     async fn read_blob(
-        trx: &Transaction,
+        snapshot: Snapshot<'_>,
         begin: &[u8],
         end: &[u8],
         last_key: &mut Vec<u8>,
@@ -86,77 +91,88 @@ impl FdbStore {
         chunk_key_len: usize,
         bytes_start: usize,
         blob_range: usize,
-    ) -> Result<(), FdbError> {
-        let begin_selector = if last_key.is_empty() {
-            KeySelector::first_greater_or_equal(begin)
-        } else {
-            KeySelector::first_greater_than(last_key.clone())
-        };
-        let mut chunks = trx.get_ranges_keyvalues(
-            RangeOption {
-                begin: begin_selector,
-                end: KeySelector::first_greater_or_equal(end),
-                mode: options::StreamingMode::WantAll,
-                ..Default::default()
-            },
-            true,
-        );
+    ) -> fdb::Result<()> {
+        let resume = std::mem::take(last_key);
+        let result = async {
+            let begin = if resume.is_empty() {
+                Bound::Included(begin)
+            } else {
+                Bound::Excluded(resume.as_slice())
+            };
+            let mut chunks = RangeCursor::new(
+                begin,
+                Bound::Included(end),
+                RangeOptions {
+                    readahead: Readahead::Next,
+                    ..Default::default()
+                },
+            )?;
 
-        while let Some(chunk) = chunks.try_next().await? {
-            let chunk_key = chunk.key();
-            if chunk_key.len() != chunk_key_len {
-                continue;
-            }
-            last_key.clear();
-            last_key.extend_from_slice(chunk_key);
-            let value = chunk.value();
+            while let Some(page) = chunks.next(snapshot).await? {
+                for KeyValue {
+                    key: chunk_key,
+                    value,
+                } in &page
+                {
+                    if chunk_key.len() != chunk_key_len {
+                        continue;
+                    }
+                    last_key.clear();
+                    last_key.extend_from_slice(chunk_key);
 
-            match blob_data {
-                Some(blob_data) => {
-                    blob_data.extend_from_slice(
-                        value
-                            .get(
-                                ..std::cmp::min(
-                                    blob_range.saturating_sub(blob_data.len()),
-                                    value.len(),
-                                ),
-                            )
-                            .unwrap_or(&[]),
-                    );
-                    if blob_data.len() == blob_range {
-                        break;
+                    match blob_data {
+                        Some(blob_data) => {
+                            blob_data.extend_from_slice(
+                                value
+                                    .get(
+                                        ..min(
+                                            blob_range.saturating_sub(blob_data.len()),
+                                            value.len(),
+                                        ),
+                                    )
+                                    .unwrap_or(&[]),
+                            );
+                            if blob_data.len() == blob_range {
+                                return Ok(());
+                            }
+                        }
+                        None => {
+                            let blob_size = if blob_range <= (5 * (1 << 20)) {
+                                blob_range
+                            } else if value.len() == MAX_VALUE_SIZE {
+                                MAX_VALUE_SIZE * 2
+                            } else {
+                                value.len()
+                            };
+                            let mut data = Vec::with_capacity(blob_size);
+                            data.extend_from_slice(
+                                value
+                                    .get(
+                                        bytes_start
+                                            ..min(
+                                                bytes_start.saturating_add(blob_range),
+                                                value.len(),
+                                            ),
+                                    )
+                                    .unwrap_or(&[]),
+                            );
+                            let is_done = data.len() == blob_range;
+                            *blob_data = Some(data);
+                            if is_done {
+                                return Ok(());
+                            }
+                        }
                     }
                 }
-                None => {
-                    let blob_size = if blob_range <= (5 * (1 << 20)) {
-                        blob_range
-                    } else if value.len() == MAX_VALUE_SIZE {
-                        MAX_VALUE_SIZE * 2
-                    } else {
-                        value.len()
-                    };
-                    let mut data = Vec::with_capacity(blob_size);
-                    data.extend_from_slice(
-                        value
-                            .get(
-                                bytes_start
-                                    ..std::cmp::min(
-                                        bytes_start.saturating_add(blob_range),
-                                        value.len(),
-                                    ),
-                            )
-                            .unwrap_or(&[]),
-                    );
-                    let is_done = data.len() == blob_range;
-                    *blob_data = Some(data);
-                    if is_done {
-                        break;
-                    }
-                }
             }
+
+            Ok(())
         }
-
-        Ok(())
+        .await;
+        if last_key.is_empty() {
+            *last_key = resume;
+        }
+        result
     }
 
     pub(crate) async fn put_blob(&self, key: &[u8], data: &[u8]) -> trc::Result<()> {
@@ -189,16 +205,17 @@ impl FdbStore {
         let mut retry_count = 0;
 
         loop {
-            let trx = self.db.create_trx().map_err(into_error)?;
+            let mut trx = self.db.transaction(TransactionOptions::default());
             if first_chunk == 0 {
                 let (begin, end) = Self::blob_chunk_range(key);
-                trx.clear_range(&begin, &end);
+                trx.clear_range(&begin, &end).map_err(into_error)?;
             }
             for (pos, bytes) in chunks.iter().enumerate() {
                 trx.set(
                     &Self::blob_chunk_key(key, (first_chunk + pos) as u16),
                     bytes,
-                );
+                )
+                .map_err(into_error)?;
             }
 
             if self.commit_attempt(trx, retry_count, start).await? {
@@ -222,8 +239,8 @@ impl FdbStore {
         let mut retry_count = 0;
 
         loop {
-            let trx = self.db.create_trx().map_err(into_error)?;
-            trx.clear_range(&begin, &end);
+            let mut trx = self.db.transaction(TransactionOptions::default());
+            trx.clear_range(&begin, &end).map_err(into_error)?;
 
             if self.commit_attempt(trx, retry_count, start).await? {
                 return Ok(true);

@@ -16,7 +16,7 @@ use jmap_proto::{
 };
 use registry::{
     schema::{
-        enums::AccountType,
+        enums::{AccountType, ResourceKind},
         prelude::{ObjectType, Permission, Property},
     },
     types::EnumImpl,
@@ -135,10 +135,16 @@ impl PrincipalQuery for Server {
                         filters.push(SearchFilter::is_in_set(ids));
                     }
                     PrincipalFilter::Type(principal_type) => {
-                        let typ = match principal_type {
-                            PrincipalType::Individual => AccountType::User,
-                            PrincipalType::Group => AccountType::Group,
-                            _ => {
+                        let (property, value) = match principal_type {
+                            PrincipalType::Individual => {
+                                (Property::Type, AccountType::User.to_id())
+                            }
+                            PrincipalType::Group => (Property::Type, AccountType::Group.to_id()),
+                            PrincipalType::Location => (Property::Kind, ResourceKind::Room.to_id()),
+                            PrincipalType::Resource => {
+                                (Property::Kind, ResourceKind::Equipment.to_id())
+                            }
+                            PrincipalType::Other => {
                                 filters.push(SearchFilter::is_in_set(Default::default()));
                                 continue;
                             }
@@ -153,7 +159,7 @@ impl PrincipalQuery for Server {
                         // SPDX-SnippetEnd
                         filters.push(SearchFilter::is_in_set(
                             self.registry()
-                                .query::<RoaringBitmap>(query.equal(Property::Type, typ.to_id()))
+                                .query::<RoaringBitmap>(query.equal(property, value))
                                 .await
                                 .caused_by(trc::location!())?,
                         ));

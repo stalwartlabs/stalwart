@@ -131,6 +131,11 @@ pub trait GroupwareCache: Sync + Send {
         account_info_owner: &AccountCache,
     ) -> impl Future<Output = trc::Result<Option<u32>>> + Send;
 
+    fn default_calendar_id(
+        &self,
+        account_id: u32,
+    ) -> impl Future<Output = trc::Result<Option<u32>>> + Send;
+
     fn cached_groupware_resources(
         &self,
         account_id: u32,
@@ -430,6 +435,10 @@ impl GroupwareCache for Server {
         } else {
             Ok(None)
         }
+    }
+
+    async fn default_calendar_id(&self, account_id: u32) -> trc::Result<Option<u32>> {
+        any_calendar_id(self, account_id).await
     }
 
     async fn get_or_create_default_calendar(

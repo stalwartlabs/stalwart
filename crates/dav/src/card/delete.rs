@@ -17,7 +17,7 @@ use dav_proto::RequestHeaders;
 use groupware::{
     DestroyArchive,
     cache::GroupwareCache,
-    contact::{AddressBook, ContactCard},
+    contact::{AddressBook, write::CardWriter},
 };
 use http_proto::HttpResponse;
 use hyper::StatusCode;
@@ -28,7 +28,6 @@ use store::{
 };
 use trc::AddContext;
 use types::{
-    acl::Acl,
     collection::{Collection, SyncCollection},
     field::PrincipalField,
 };
@@ -72,8 +71,6 @@ impl CardDeleteRequestHandler for Server {
             .ok_or(DavError::Code(StatusCode::NOT_FOUND))?;
         let document_id = delete_resource.document_id();
 
-        // Fetch entry
-        let mut batch = BatchBuilder::new();
         if delete_resource.is_container() {
             let book_ = self
                 .store()
@@ -119,6 +116,7 @@ impl CardDeleteRequestHandler for Server {
             .await?;
 
             // Delete addressbook and cards
+            let mut batch = BatchBuilder::new();
             let children = resources
                 .subtree(delete_path)
                 .filter(|r| !r.is_container())
@@ -160,34 +158,18 @@ impl CardDeleteRequestHandler for Server {
                 .with_collection(Collection::Principal)
                 .with_document(0)
                 .clear_if_equals(PrincipalField::DefaultAddressBookId, document_id);
+            self.commit_batch(batch).await.caused_by(trc::location!())?;
         } else {
-            // Validate ACL
-            let addressbook_id = delete_resource.parent_id().unwrap();
-            if !access_token.is_member(account_id)
-                && !resources.has_access_to_container(
-                    access_token,
-                    addressbook_id,
-                    Acl::RemoveItems,
-                )
-            {
-                return Err(DavError::Code(StatusCode::FORBIDDEN));
-            }
+            let writer = CardWriter {
+                server: self,
+                access_token,
+                account_id,
+                resources: &resources,
+            };
+            let deletion = writer
+                .prepare_delete(delete_resource.parent_id().unwrap(), document_id)
+                .await?;
 
-            let card_ = self
-                .store()
-                .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
-                    account_id,
-                    Collection::ContactCard,
-                    document_id,
-                ))
-                .await
-                .caused_by(trc::location!())?
-                .ok_or(DavError::Code(StatusCode::NOT_FOUND))?;
-            let card = card_
-                .to_unarchived::<ContactCard>()
-                .caused_by(trc::location!())?;
-
-            // Validate headers
             self.validate_headers(
                 access_token,
                 headers,
@@ -195,7 +177,16 @@ impl CardDeleteRequestHandler for Server {
                     account_id,
                     collection: Collection::ContactCard,
                     document_id: document_id.into(),
-                    etag: format!("\"{}\"", card.inner.etag.to_native()).into(),
+                    etag: format!(
+                        "\"{}\"",
+                        deletion
+                            .card()
+                            .caused_by(trc::location!())?
+                            .inner
+                            .etag
+                            .to_native()
+                    )
+                    .into(),
                     path: delete_path,
                     ..Default::default()
                 }],
@@ -204,22 +195,10 @@ impl CardDeleteRequestHandler for Server {
             )
             .await?;
 
-            // Delete card
-            DestroyArchive(card)
-                .delete(
-                    self,
-                    access_token.changed_by(),
-                    account_id,
-                    document_id,
-                    addressbook_id,
-                    resources.format_resource(delete_resource).into(),
-                    &mut batch,
-                )
-                .await
-                .caused_by(trc::location!())?;
+            writer
+                .delete(deletion, resources.format_resource(delete_resource).into())
+                .await?;
         }
-
-        self.commit_batch(batch).await.caused_by(trc::location!())?;
 
         Ok(HttpResponse::new(StatusCode::NO_CONTENT))
     }

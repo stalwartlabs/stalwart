@@ -13,9 +13,11 @@ use trc::AddContext;
 use types::{blob_hash::BlobHash, collection::Collection, field::SieveField};
 use utils::hash128::Hash128;
 
+mod addrbook;
 pub mod delete;
 pub mod index;
 pub mod ingest;
+pub mod rules;
 
 #[derive(Debug)]
 pub struct ActiveScript {
@@ -50,7 +52,7 @@ pub struct SieveScript {
     pub name: String,
     pub blob_hash: BlobHash,
     pub size: u32,
-    pub vacation_response: Option<VacationResponse>,
+    pub _vacation: Option<VacationResponse>,
     pub script: Vec<u8>,
     pub metadata_flags: u8,
 }
@@ -72,7 +74,7 @@ impl SieveScript {
         SieveScript {
             name: name.into(),
             blob_hash,
-            vacation_response: None,
+            _vacation: None,
             size: 0,
             script: Vec::new(),
             metadata_flags: 0,
@@ -91,11 +93,6 @@ impl SieveScript {
 
     pub fn with_size(mut self, size: u32) -> Self {
         self.size = size;
-        self
-    }
-
-    pub fn with_vacation_response(mut self, vacation_response: VacationResponse) -> Self {
-        self.vacation_response = Some(vacation_response);
         self
     }
 

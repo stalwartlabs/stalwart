@@ -35,6 +35,7 @@ use registry::schema::prelude::OBJ_FILTER_TENANT;
 // SPDX-SnippetEnd
 
 const MAX_OBJECT_PAYLOAD_SIZE: usize = 200_000;
+const OBJ_ACCOUNT_SINGLETON: u64 = OBJ_SINGLETON | OBJ_FILTER_ACCOUNT;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum RegistryWriteResult {
@@ -114,7 +115,20 @@ impl RegistryStore {
                 object_id = object_type.to_id();
                 object.index(&mut set_index);
 
-                item_id = if let Some(id) = id {
+                item_id = if object_flags & OBJ_ACCOUNT_SINGLETON == OBJ_ACCOUNT_SINGLETON {
+                    let Some(id) = id.filter(|id| !id.is_singleton()) else {
+                        return Ok(RegistryWriteResult::InvalidSingletonId);
+                    };
+                    write_id = false;
+                    batch.assert_value(
+                        ValueClass::Registry(RegistryClass::Item {
+                            object_id,
+                            item_id: id.id(),
+                        }),
+                        AssertValue::None,
+                    );
+                    id.id()
+                } else if let Some(id) = id {
                     id.id()
                 } else if object_flags & OBJ_SINGLETON != 0 {
                     write_id = false;
@@ -148,7 +162,11 @@ impl RegistryStore {
                 set_index.keys.retain(|key| !old_index.keys.contains(key));
 
                 // Validate singleton
-                if object_flags & OBJ_SINGLETON != 0 && !id.is_singleton() {
+                if match object_flags & OBJ_ACCOUNT_SINGLETON {
+                    OBJ_ACCOUNT_SINGLETON => id.is_singleton(),
+                    OBJ_SINGLETON => !id.is_singleton(),
+                    _ => false,
+                } {
                     return Ok(RegistryWriteResult::InvalidSingletonId);
                 }
 

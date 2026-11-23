@@ -398,7 +398,7 @@ impl Server {
         }
 
         if token.starts_with(TOKEN_HEADER) {
-            return self.authenticate_oauth_token(token, req.remote_ip).await;
+            return self.authenticate_oauth_token(req, token).await;
         }
 
         // Obtain external directory, if any. When no username is supplied
@@ -422,13 +422,21 @@ impl Server {
                         }),
                     };
                     let expires_in = external.expires_at.map(|exp| exp.saturating_sub(now()));
-                    return self
+                    let account_name = CompactString::from(external.account.email.as_str());
+                    let access_token = self
                         .build_directory_token(external.account, req.remote_ip)
-                        .await
-                        .map(|access_token| Authenticated {
-                            access_token: access_token.with_token_scope(token_scope),
-                            expires_in,
-                        });
+                        .await?;
+                    trc::event!(
+                        Auth(trc::AuthEvent::Success),
+                        AccountName = account_name,
+                        AccountId = access_token.account_id(),
+                        SpanId = req.session_id,
+                        Details = "Authenticated with external OAuth token",
+                    );
+                    return Ok(Authenticated {
+                        access_token: access_token.with_token_scope(token_scope),
+                        expires_in,
+                    });
                 }
                 Err(err) => {
                     external_error = Some(err);
@@ -437,7 +445,7 @@ impl Server {
         }
 
         // Internal OAuth
-        match self.authenticate_oauth_token(token, req.remote_ip).await {
+        match self.authenticate_oauth_token(req, token).await {
             Ok(authenticated) => Ok(authenticated),
             Err(err) => {
                 if let Some(external_error) = external_error {
@@ -504,8 +512,8 @@ impl Server {
 
     async fn authenticate_oauth_token(
         &self,
+        req: &AuthRequest,
         token: &str,
-        remote_ip: IpAddr,
     ) -> trc::Result<Authenticated> {
         let token_info = self
             .decode_access_token(GrantType::AccessToken.into(), token)
@@ -527,15 +535,21 @@ impl Server {
             .oauth_grant_scope(grant.id, token_info.account_id)
             .await?;
 
-        AccessToken::renew(inner, None, Some(token_scope), remote_ip).map(|access_token| {
-            Authenticated {
-                access_token,
-                expires_in: Some(token_info.expires_in),
-            }
+        let access_token = AccessToken::renew(inner, None, Some(token_scope), req.remote_ip)?;
+        trc::event!(
+            Auth(trc::AuthEvent::Success),
+            AccountId = token_info.account_id,
+            Id = grant.id,
+            SpanId = req.session_id,
+            Details = "Authenticated with OAuth token",
+        );
+        Ok(Authenticated {
+            access_token,
+            expires_in: Some(token_info.expires_in),
         })
     }
 
-    async fn impersonated_account_id(&self, username: &Username) -> trc::Result<Option<u32>> {
+    pub async fn impersonated_account_id(&self, username: &Username) -> trc::Result<Option<u32>> {
         let address = username.address();
 
         if let Some(account_id) = self.account_id_from_email(address, false).await? {

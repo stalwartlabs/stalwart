@@ -5,13 +5,14 @@
  */
 
 use crate::blob::download::BlobDownload;
-use calcard::vcard::VCard;
+use calcard::{Entry, Parser};
 use common::{Server, auth::AccessToken};
 use jmap_proto::{
     method::parse::{ParseRequest, ParseResponse},
     object::contact::ContactCard,
     request::{IntoValid, MaybeInvalid},
 };
+use jmap_tools::Value;
 use types::{blob::BlobId, id::Id};
 use utils::map::vec_map::VecMap;
 
@@ -54,23 +55,30 @@ impl ContactCardParse for Server {
                     continue;
                 }
             };
-            let Ok(vcard) = VCard::parse(std::str::from_utf8(&raw_vcard).unwrap_or_default())
-            else {
-                response.not_parsable.push(blob_id);
-                continue;
+            let mut parser = Parser::new(std::str::from_utf8(&raw_vcard).unwrap_or_default());
+            let mut cards = Vec::new();
+            let is_parsable = loop {
+                match parser.entry() {
+                    Entry::VCard(vcard) => {
+                        let mut js_contact = vcard.into_jscontact::<Id, BlobId>().into_inner();
+                        if !return_all_properties && let Some(entries) = js_contact.as_object_mut()
+                        {
+                            entries.as_mut_vec().retain(|(k, _)| {
+                                k.as_property().is_some_and(|k| properties.contains(k))
+                            });
+                        }
+                        cards.push(js_contact);
+                    }
+                    Entry::Eof => break !cards.is_empty(),
+                    _ => break false,
+                }
             };
-            let mut js_contact = vcard.into_jscontact::<Id, BlobId>();
 
-            if !return_all_properties {
-                js_contact
-                    .0
-                    .as_object_mut()
-                    .unwrap()
-                    .as_mut_vec()
-                    .retain(|(k, _)| k.as_property().is_some_and(|k| properties.contains(k)));
+            if is_parsable {
+                response.parsed.append(blob_id, Value::Array(cards));
+            } else {
+                response.not_parsable.push(blob_id);
             }
-
-            response.parsed.append(blob_id, js_contact.into_inner());
         }
 
         Ok(response)

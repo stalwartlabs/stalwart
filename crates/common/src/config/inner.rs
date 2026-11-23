@@ -5,6 +5,8 @@
  */
 
 use super::server::tls::build_self_signed_cert;
+#[cfg(feature = "exchange")]
+use crate::cache::exchange::ExchangeAccountCache;
 // SPDX-SnippetBegin
 // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
 // SPDX-License-Identifier: LicenseRef-SEL
@@ -52,6 +54,8 @@ use utils::{
     tls::build_tls_connector,
 };
 
+#[cfg(feature = "exchange")]
+const EXCHANGE_CACHE_ESTIMATE: u64 = (std::mem::size_of::<ExchangeAccountCache>() + 4096) as u64;
 const MAX_HARVEST_TASKS: usize = 8;
 
 impl Data {
@@ -111,6 +115,8 @@ impl Data {
             logos: Default::default(),
             smtp_connectors: TlsConnectors::try_new().failed("Failed to build TLS connectors"),
             memory_budget: Default::default(),
+            #[cfg(feature = "exchange")]
+            exchange_sessions: Default::default(),
             harvest_tasks: Arc::new(Semaphore::new(MAX_HARVEST_TASKS)),
             asn_geo_data: Default::default(),
             password_verifier: Default::default(),
@@ -179,6 +185,8 @@ impl Caches {
             )
             .with_name("scheduling"),
             metadata_viewers: MetadataViewerCache::new(cache.access_tokens / 4),
+            #[cfg(feature = "exchange")]
+            exchange: Cache::new(cache.exchange, EXCHANGE_CACHE_ESTIMATE).with_name("exchange"),
             emails: Cache::new(cache.email_addresses, 255u64).with_name("emailAddresses"),
             emails_negative: CacheWithTtl::new(
                 cache.email_addresses_negative,
@@ -308,6 +316,8 @@ impl Default for Data {
             logos: Default::default(),
             smtp_connectors: TlsConnectors::try_new().unwrap(),
             memory_budget: Default::default(),
+            #[cfg(feature = "exchange")]
+            exchange_sessions: Default::default(),
             harvest_tasks: Arc::new(Semaphore::new(MAX_HARVEST_TASKS)),
             asn_geo_data: Default::default(),
             password_verifier: Default::default(),

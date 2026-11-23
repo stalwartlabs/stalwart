@@ -1,6 +1,6 @@
 [package]
 name = "store"
-version = "1.1.1"
+version = "1.2.0"
 edition = "2024"
 
 [dependencies]
@@ -10,7 +10,9 @@ nlp = { path = "../nlp" }
 trc = { path = "../trc" }
 registry = { path = "../registry" }
 rocksdb = { version = "0.25", optional = true, features = ["multi-threaded-cf"] }
+fdb = { path = "../fdb", optional = true }
 foundationdb = { version = "0.11", features = ["embedded-fdb-include", "fdb-7_4"], optional = true }
+foundationdb-sys = { version = "0.11", features = ["embedded-fdb-include", "fdb-7_4"], optional = true }
 rusqlite = { version = "0.41", features = ["bundled"], optional = true }
 s3 = { path = "../s3", optional = true }
 azure_core = { version = "1.1", default-features = false, features = ["reqwest", "tokio"], optional = true }
@@ -70,7 +72,9 @@ rocks = ["rocksdb", "rayon", "num_cpus"]
 sqlite = ["rusqlite", "rayon", "r2d2", "num_cpus", "lru-cache"]
 postgres = ["tokio-postgres", "deadpool", "deadpool-postgres", "hashbrown", "tokio-rustls", "rustls", "rustls-pki-types", "x509-parser", "futures", "bytes"]
 mysql = ["mysql_async", "futures"]
-foundation = ["foundationdb", "futures", "libc"]
+foundation = ["futures"]
+foundation-native = ["foundation", "fdb"]
+foundation-c = ["foundation", "foundationdb", "foundationdb-sys", "libc"]
 fdb-chunked-bm = []
 
 # Blob stores
@@ -82,6 +86,7 @@ redis = ["dep:redis", "deadpool", "deadpool/rt_tokio_1", "futures"]
 keep = ["dep:keep-client", "dep:keep-proto"]
 
 enterprise = ["utils/enterprise", "trc/enterprise", "registry/enterprise"]
+exchange = []
 
 [lints]
 workspace = true

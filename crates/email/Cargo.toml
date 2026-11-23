@@ -1,6 +1,6 @@
 [package]
 name = "email"
-version = "1.1.1"
+version = "1.2.0"
 edition = "2024"
 
 [dependencies]
@@ -26,12 +26,14 @@ rkyv.workspace = true
 compact_str = "0.10.0"
 tinyvec = { version = "1.13.3", features = ["alloc"] }
 bytecount = "0.6"
+encodify = "1.0"
+percent-encoding = "2.3.2"
+blake3 = "1.8"
 
 [features]
 enterprise = ["utils/enterprise", "store/enterprise", "trc/enterprise", "jmap_proto/enterprise", "common/enterprise", "groupware/enterprise", "registry/enterprise"]
 
 [dev-dependencies]
-encodify = "1.0"
 tokio = { version = "1.54", features = ["full"] }
 serde_json = "1.0"
 

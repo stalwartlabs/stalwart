@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::action_vacation::MAX_SUBJECT_LEN;
+use super::action_vacation::{MAX_SUBJECT_LEN, header_safe};
 use crate::runtime::platform;
 use crate::{
     Context, Importance, Sieve,
@@ -148,7 +148,7 @@ impl<'x> Context<'x> {
                 .to_ascii_lowercase()
                 .contains(&self.user_address.to_ascii_lowercase())
             {
-                return from;
+                return header_safe(from, self.runtime.max_header_size);
             }
         }
         self.user_from_field().into()
@@ -202,42 +202,48 @@ impl<'x> Context<'x> {
         }
 
         let mut has_subject = None;
-        let mut has_date = false;
-        let mut has_message_id = false;
         for (header, value) in &params.headers {
             match header {
                 HeaderName::Subject => {
                     has_subject = value.into();
-                    continue;
                 }
-                HeaderName::Date => {
-                    has_date = true;
+                HeaderName::From
+                | HeaderName::Date
+                | HeaderName::MessageId
+                | HeaderName::AutoSubmitted
+                | HeaderName::Received
+                | HeaderName::ReturnPath
+                | HeaderName::MimeVersion
+                | HeaderName::ContentType
+                | HeaderName::ContentTransferEncoding
+                | HeaderName::ContentDisposition
+                | HeaderName::ContentDescription
+                | HeaderName::ContentId
+                | HeaderName::ContentLanguage
+                | HeaderName::ContentLocation
+                | HeaderName::ResentTo
+                | HeaderName::ResentFrom
+                | HeaderName::ResentBcc
+                | HeaderName::ResentCc
+                | HeaderName::ResentSender
+                | HeaderName::ResentDate
+                | HeaderName::ResentMessageId => (),
+                _ => {
+                    message.extend_from_slice(header.as_str().as_bytes());
+                    message.extend_from_slice(b": ");
+                    message.extend_from_slice(value.as_bytes());
+                    message.extend_from_slice(b"\r\n");
                 }
-                HeaderName::MessageId => {
-                    has_message_id = true;
-                }
-                HeaderName::From => {
-                    continue;
-                }
-                _ => (),
             }
-            message.extend_from_slice(header.as_str().as_bytes());
-            message.extend_from_slice(b": ");
-            message.extend_from_slice(value.as_bytes());
-            message.extend_from_slice(b"\r\n");
         }
 
-        if !has_date {
-            message.extend_from_slice(b"Date: ");
-            message.extend_from_slice(Date::new(self.current_time).to_rfc822().as_bytes());
-            message.extend_from_slice(b"\r\n");
-        }
+        message.extend_from_slice(b"Date: ");
+        message.extend_from_slice(Date::new(self.current_time).to_rfc822().as_bytes());
+        message.extend_from_slice(b"\r\n");
 
-        if !has_message_id {
-            message.extend_from_slice(b"Message-ID: ");
-            platform::write_message_id(&mut message, &self.runtime.local_hostname);
-            message.extend_from_slice(b"\r\n");
-        }
+        message.extend_from_slice(b"Message-ID: ");
+        platform::write_message_id(&mut message, &self.runtime.local_hostname);
+        message.extend_from_slice(b"\r\n");
 
         message.extend_from_slice(b"Importance: ");
         message.extend_from_slice(importance.as_bytes());
@@ -255,7 +261,10 @@ impl<'x> Context<'x> {
         } else {
             self.message.subject().unwrap_or_default()
         };
-        let mut iter = subject.chars().enumerate();
+        let mut iter = subject
+            .chars()
+            .filter(|ch| !matches!(ch, '\r' | '\n'))
+            .enumerate();
         let mut buf = [0; 4];
         #[allow(clippy::while_let_on_iterator)]
         while let Some((pos, char)) = iter.next() {
@@ -391,6 +400,9 @@ fn parse_mailto(uri: &str) -> Option<MailtoMessage> {
                     let ch = (hex1 << 4) | hex2;
 
                     match &state {
+                        State::Address(_) if matches!(ch, b'\r' | b'\n') => {
+                            return None;
+                        }
                         State::Address((header, has_at)) => match ch {
                             b',' => {
                                 if *has_at {
@@ -417,6 +429,11 @@ fn parse_mailto(uri: &str) -> Option<MailtoMessage> {
                                 buf.push(ch);
                             }
                         },
+                        State::ParamName if !ch.is_ascii_alphanumeric() && !b"-_".contains(&ch) => {
+                            return None;
+                        }
+                        State::ParamValue(Mailto::Header(_) | Mailto::Other(_))
+                            if matches!(ch, b'\r' | b'\n') => {}
                         _ => buf.push(ch),
                     }
                 } else {

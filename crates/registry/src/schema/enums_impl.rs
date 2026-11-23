@@ -15,6 +15,7 @@ impl EnumImpl for AccountType {
             AccountType,
             b"User" => AccountType::User,
             b"Group" => AccountType::Group,
+            b"Resource" => AccountType::Resource,
         }
         .copied()
     }
@@ -23,6 +24,7 @@ impl EnumImpl for AccountType {
         match self {
             AccountType::User => "User",
             AccountType::Group => "Group",
+            AccountType::Resource => "Resource",
         }
     }
 
@@ -34,11 +36,12 @@ impl EnumImpl for AccountType {
         match id {
             0 => Some(AccountType::User),
             1 => Some(AccountType::Group),
+            2 => Some(AccountType::Resource),
             _ => None,
         }
     }
 
-    const COUNT: usize = 2;
+    const COUNT: usize = 3;
 }
 
 impl serde::Serialize for AccountType {
@@ -3360,6 +3363,7 @@ impl EnumImpl for DnsRecordType {
             b"autoConfig" => DnsRecordType::AutoConfig,
             b"autoConfigLegacy" => DnsRecordType::AutoConfigLegacy,
             b"autoDiscover" => DnsRecordType::AutoDiscover,
+            b"dkim2Policy" => DnsRecordType::Dkim2Policy,
         }
         .copied()
     }
@@ -3378,6 +3382,7 @@ impl EnumImpl for DnsRecordType {
             DnsRecordType::AutoConfig => "autoConfig",
             DnsRecordType::AutoConfigLegacy => "autoConfigLegacy",
             DnsRecordType::AutoDiscover => "autoDiscover",
+            DnsRecordType::Dkim2Policy => "dkim2Policy",
         }
     }
 
@@ -3399,11 +3404,12 @@ impl EnumImpl for DnsRecordType {
             9 => Some(DnsRecordType::AutoConfig),
             10 => Some(DnsRecordType::AutoConfigLegacy),
             11 => Some(DnsRecordType::AutoDiscover),
+            12 => Some(DnsRecordType::Dkim2Policy),
             _ => None,
         }
     }
 
-    const COUNT: usize = 12;
+    const COUNT: usize = 13;
 }
 
 impl serde::Serialize for DnsRecordType {
@@ -4161,6 +4167,64 @@ impl<'de> serde::Deserialize<'de> for EventPolicy {
     }
 }
 
+impl EnumImpl for EwsVersion {
+    fn parse(value: &str) -> Option<Self> {
+        hashify::map! {
+            value.as_bytes(),
+            EwsVersion,
+            b"exchange2010Sp2" => EwsVersion::Exchange2010Sp2,
+            b"exchange2013" => EwsVersion::Exchange2013,
+            b"exchange2013Sp1" => EwsVersion::Exchange2013Sp1,
+            b"exchange2016" => EwsVersion::Exchange2016,
+        }
+        .copied()
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            EwsVersion::Exchange2010Sp2 => "exchange2010Sp2",
+            EwsVersion::Exchange2013 => "exchange2013",
+            EwsVersion::Exchange2013Sp1 => "exchange2013Sp1",
+            EwsVersion::Exchange2016 => "exchange2016",
+        }
+    }
+
+    fn to_id(&self) -> u16 {
+        *self as u16
+    }
+
+    fn from_id(id: u16) -> Option<Self> {
+        match id {
+            0 => Some(EwsVersion::Exchange2010Sp2),
+            1 => Some(EwsVersion::Exchange2013),
+            2 => Some(EwsVersion::Exchange2013Sp1),
+            3 => Some(EwsVersion::Exchange2016),
+            _ => None,
+        }
+    }
+
+    const COUNT: usize = 4;
+}
+
+impl serde::Serialize for EwsVersion {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for EwsVersion {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = Cow::<str>::deserialize(deserializer)?;
+        Self::parse(&s).ok_or_else(|| serde::de::Error::unknown_variant(&s, &[]))
+    }
+}
+
 impl EnumImpl for ExpressionConstant {
     fn parse(value: &str) -> Option<Self> {
         hashify::map! {
@@ -4705,6 +4769,174 @@ impl serde::Serialize for FailureReportingOption {
 }
 
 impl<'de> serde::Deserialize<'de> for FailureReportingOption {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = Cow::<str>::deserialize(deserializer)?;
+        Self::parse(&s).ok_or_else(|| serde::de::Error::unknown_variant(&s, &[]))
+    }
+}
+
+impl EnumImpl for FoundationDbClusterType {
+    fn parse(value: &str) -> Option<Self> {
+        hashify::map! {
+            value.as_bytes(),
+            FoundationDbClusterType,
+            b"File" => FoundationDbClusterType::File,
+            b"Manual" => FoundationDbClusterType::Manual,
+        }
+        .copied()
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            FoundationDbClusterType::File => "File",
+            FoundationDbClusterType::Manual => "Manual",
+        }
+    }
+
+    fn to_id(&self) -> u16 {
+        *self as u16
+    }
+
+    fn from_id(id: u16) -> Option<Self> {
+        match id {
+            0 => Some(FoundationDbClusterType::File),
+            1 => Some(FoundationDbClusterType::Manual),
+            _ => None,
+        }
+    }
+
+    const COUNT: usize = 2;
+}
+
+impl serde::Serialize for FoundationDbClusterType {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for FoundationDbClusterType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = Cow::<str>::deserialize(deserializer)?;
+        Self::parse(&s).ok_or_else(|| serde::de::Error::unknown_variant(&s, &[]))
+    }
+}
+
+impl EnumImpl for FoundationDbProtocol {
+    fn parse(value: &str) -> Option<Self> {
+        hashify::map! {
+            value.as_bytes(),
+            FoundationDbProtocol,
+            b"negotiate" => FoundationDbProtocol::Negotiate,
+            b"v71" => FoundationDbProtocol::V71,
+            b"v72" => FoundationDbProtocol::V72,
+            b"v73" => FoundationDbProtocol::V73,
+            b"v74" => FoundationDbProtocol::V74,
+            b"v80" => FoundationDbProtocol::V80,
+        }
+        .copied()
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            FoundationDbProtocol::Negotiate => "negotiate",
+            FoundationDbProtocol::V71 => "v71",
+            FoundationDbProtocol::V72 => "v72",
+            FoundationDbProtocol::V73 => "v73",
+            FoundationDbProtocol::V74 => "v74",
+            FoundationDbProtocol::V80 => "v80",
+        }
+    }
+
+    fn to_id(&self) -> u16 {
+        *self as u16
+    }
+
+    fn from_id(id: u16) -> Option<Self> {
+        match id {
+            0 => Some(FoundationDbProtocol::Negotiate),
+            1 => Some(FoundationDbProtocol::V71),
+            2 => Some(FoundationDbProtocol::V72),
+            3 => Some(FoundationDbProtocol::V73),
+            4 => Some(FoundationDbProtocol::V74),
+            5 => Some(FoundationDbProtocol::V80),
+            _ => None,
+        }
+    }
+
+    const COUNT: usize = 6;
+}
+
+impl serde::Serialize for FoundationDbProtocol {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for FoundationDbProtocol {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = Cow::<str>::deserialize(deserializer)?;
+        Self::parse(&s).ok_or_else(|| serde::de::Error::unknown_variant(&s, &[]))
+    }
+}
+
+impl EnumImpl for FoundationDbTlsType {
+    fn parse(value: &str) -> Option<Self> {
+        hashify::map! {
+            value.as_bytes(),
+            FoundationDbTlsType,
+            b"Default" => FoundationDbTlsType::Default,
+            b"Manual" => FoundationDbTlsType::Manual,
+        }
+        .copied()
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            FoundationDbTlsType::Default => "Default",
+            FoundationDbTlsType::Manual => "Manual",
+        }
+    }
+
+    fn to_id(&self) -> u16 {
+        *self as u16
+    }
+
+    fn from_id(id: u16) -> Option<Self> {
+        match id {
+            0 => Some(FoundationDbTlsType::Default),
+            1 => Some(FoundationDbTlsType::Manual),
+            _ => None,
+        }
+    }
+
+    const COUNT: usize = 2;
+}
+
+impl serde::Serialize for FoundationDbTlsType {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for FoundationDbTlsType {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -6874,6 +7106,505 @@ impl<'de> serde::Deserialize<'de> for LookupStoreType {
     }
 }
 
+impl EnumImpl for MailRuleAddressOperator {
+    fn parse(value: &str) -> Option<Self> {
+        hashify::map! {
+            value.as_bytes(),
+            MailRuleAddressOperator,
+            b"is" => MailRuleAddressOperator::Is,
+            b"contains" => MailRuleAddressOperator::Contains,
+            b"domain" => MailRuleAddressOperator::Domain,
+            b"matches" => MailRuleAddressOperator::Matches,
+        }
+        .copied()
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            MailRuleAddressOperator::Is => "is",
+            MailRuleAddressOperator::Contains => "contains",
+            MailRuleAddressOperator::Domain => "domain",
+            MailRuleAddressOperator::Matches => "matches",
+        }
+    }
+
+    fn to_id(&self) -> u16 {
+        *self as u16
+    }
+
+    fn from_id(id: u16) -> Option<Self> {
+        match id {
+            0 => Some(MailRuleAddressOperator::Is),
+            1 => Some(MailRuleAddressOperator::Contains),
+            2 => Some(MailRuleAddressOperator::Domain),
+            3 => Some(MailRuleAddressOperator::Matches),
+            _ => None,
+        }
+    }
+
+    const COUNT: usize = 4;
+}
+
+impl serde::Serialize for MailRuleAddressOperator {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for MailRuleAddressOperator {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = Cow::<str>::deserialize(deserializer)?;
+        Self::parse(&s).ok_or_else(|| serde::de::Error::unknown_variant(&s, &[]))
+    }
+}
+
+impl EnumImpl for MailRuleConditionType {
+    fn parse(value: &str) -> Option<Self> {
+        hashify::map! {
+            value.as_bytes(),
+            MailRuleConditionType,
+            b"From" => MailRuleConditionType::From,
+            b"To" => MailRuleConditionType::To,
+            b"Cc" => MailRuleConditionType::Cc,
+            b"ToOrCc" => MailRuleConditionType::ToOrCc,
+            b"SentToMe" => MailRuleConditionType::SentToMe,
+            b"Subject" => MailRuleConditionType::Subject,
+            b"Body" => MailRuleConditionType::Body,
+            b"Header" => MailRuleConditionType::Header,
+            b"SizeOver" => MailRuleConditionType::SizeOver,
+            b"SizeUnder" => MailRuleConditionType::SizeUnder,
+            b"HasAttachment" => MailRuleConditionType::HasAttachment,
+            b"Importance" => MailRuleConditionType::Importance,
+            b"Sensitivity" => MailRuleConditionType::Sensitivity,
+            b"MessageType" => MailRuleConditionType::MessageType,
+            b"HeaderExists" => MailRuleConditionType::HeaderExists,
+            b"AttachmentName" => MailRuleConditionType::AttachmentName,
+            b"AttachmentType" => MailRuleConditionType::AttachmentType,
+            b"MailingList" => MailRuleConditionType::MailingList,
+            b"RecipientAddress" => MailRuleConditionType::RecipientAddress,
+            b"RecipientDetail" => MailRuleConditionType::RecipientDetail,
+            b"SpamScore" => MailRuleConditionType::SpamScore,
+            b"SubjectOrBody" => MailRuleConditionType::SubjectOrBody,
+            b"ReceivedAfter" => MailRuleConditionType::ReceivedAfter,
+            b"ReceivedBefore" => MailRuleConditionType::ReceivedBefore,
+            b"Schedule" => MailRuleConditionType::Schedule,
+            b"PrivateEvent" => MailRuleConditionType::PrivateEvent,
+            b"Keyword" => MailRuleConditionType::Keyword,
+            b"AnyKeyword" => MailRuleConditionType::AnyKeyword,
+            b"Flagged" => MailRuleConditionType::Flagged,
+            b"IsAway" => MailRuleConditionType::IsAway,
+        }
+        .copied()
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            MailRuleConditionType::From => "From",
+            MailRuleConditionType::To => "To",
+            MailRuleConditionType::Cc => "Cc",
+            MailRuleConditionType::ToOrCc => "ToOrCc",
+            MailRuleConditionType::SentToMe => "SentToMe",
+            MailRuleConditionType::Subject => "Subject",
+            MailRuleConditionType::Body => "Body",
+            MailRuleConditionType::Header => "Header",
+            MailRuleConditionType::SizeOver => "SizeOver",
+            MailRuleConditionType::SizeUnder => "SizeUnder",
+            MailRuleConditionType::HasAttachment => "HasAttachment",
+            MailRuleConditionType::Importance => "Importance",
+            MailRuleConditionType::Sensitivity => "Sensitivity",
+            MailRuleConditionType::MessageType => "MessageType",
+            MailRuleConditionType::HeaderExists => "HeaderExists",
+            MailRuleConditionType::AttachmentName => "AttachmentName",
+            MailRuleConditionType::AttachmentType => "AttachmentType",
+            MailRuleConditionType::MailingList => "MailingList",
+            MailRuleConditionType::RecipientAddress => "RecipientAddress",
+            MailRuleConditionType::RecipientDetail => "RecipientDetail",
+            MailRuleConditionType::SpamScore => "SpamScore",
+            MailRuleConditionType::SubjectOrBody => "SubjectOrBody",
+            MailRuleConditionType::ReceivedAfter => "ReceivedAfter",
+            MailRuleConditionType::ReceivedBefore => "ReceivedBefore",
+            MailRuleConditionType::Schedule => "Schedule",
+            MailRuleConditionType::PrivateEvent => "PrivateEvent",
+            MailRuleConditionType::Keyword => "Keyword",
+            MailRuleConditionType::AnyKeyword => "AnyKeyword",
+            MailRuleConditionType::Flagged => "Flagged",
+            MailRuleConditionType::IsAway => "IsAway",
+        }
+    }
+
+    fn to_id(&self) -> u16 {
+        *self as u16
+    }
+
+    fn from_id(id: u16) -> Option<Self> {
+        match id {
+            0 => Some(MailRuleConditionType::From),
+            1 => Some(MailRuleConditionType::To),
+            2 => Some(MailRuleConditionType::Cc),
+            3 => Some(MailRuleConditionType::ToOrCc),
+            4 => Some(MailRuleConditionType::SentToMe),
+            5 => Some(MailRuleConditionType::Subject),
+            6 => Some(MailRuleConditionType::Body),
+            7 => Some(MailRuleConditionType::Header),
+            8 => Some(MailRuleConditionType::SizeOver),
+            9 => Some(MailRuleConditionType::SizeUnder),
+            10 => Some(MailRuleConditionType::HasAttachment),
+            11 => Some(MailRuleConditionType::Importance),
+            12 => Some(MailRuleConditionType::Sensitivity),
+            13 => Some(MailRuleConditionType::MessageType),
+            14 => Some(MailRuleConditionType::HeaderExists),
+            15 => Some(MailRuleConditionType::AttachmentName),
+            16 => Some(MailRuleConditionType::AttachmentType),
+            17 => Some(MailRuleConditionType::MailingList),
+            18 => Some(MailRuleConditionType::RecipientAddress),
+            19 => Some(MailRuleConditionType::RecipientDetail),
+            20 => Some(MailRuleConditionType::SpamScore),
+            21 => Some(MailRuleConditionType::SubjectOrBody),
+            22 => Some(MailRuleConditionType::ReceivedAfter),
+            23 => Some(MailRuleConditionType::ReceivedBefore),
+            24 => Some(MailRuleConditionType::Schedule),
+            25 => Some(MailRuleConditionType::PrivateEvent),
+            26 => Some(MailRuleConditionType::Keyword),
+            27 => Some(MailRuleConditionType::AnyKeyword),
+            28 => Some(MailRuleConditionType::Flagged),
+            29 => Some(MailRuleConditionType::IsAway),
+            _ => None,
+        }
+    }
+
+    const COUNT: usize = 30;
+}
+
+impl serde::Serialize for MailRuleConditionType {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for MailRuleConditionType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = Cow::<str>::deserialize(deserializer)?;
+        Self::parse(&s).ok_or_else(|| serde::de::Error::unknown_variant(&s, &[]))
+    }
+}
+
+impl EnumImpl for MailRuleImportanceLevel {
+    fn parse(value: &str) -> Option<Self> {
+        hashify::map! {
+            value.as_bytes(),
+            MailRuleImportanceLevel,
+            b"low" => MailRuleImportanceLevel::Low,
+            b"normal" => MailRuleImportanceLevel::Normal,
+            b"high" => MailRuleImportanceLevel::High,
+        }
+        .copied()
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            MailRuleImportanceLevel::Low => "low",
+            MailRuleImportanceLevel::Normal => "normal",
+            MailRuleImportanceLevel::High => "high",
+        }
+    }
+
+    fn to_id(&self) -> u16 {
+        *self as u16
+    }
+
+    fn from_id(id: u16) -> Option<Self> {
+        match id {
+            0 => Some(MailRuleImportanceLevel::Low),
+            1 => Some(MailRuleImportanceLevel::Normal),
+            2 => Some(MailRuleImportanceLevel::High),
+            _ => None,
+        }
+    }
+
+    const COUNT: usize = 3;
+}
+
+impl serde::Serialize for MailRuleImportanceLevel {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for MailRuleImportanceLevel {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = Cow::<str>::deserialize(deserializer)?;
+        Self::parse(&s).ok_or_else(|| serde::de::Error::unknown_variant(&s, &[]))
+    }
+}
+
+impl EnumImpl for MailRuleMessageKind {
+    fn parse(value: &str) -> Option<Self> {
+        hashify::map! {
+            value.as_bytes(),
+            MailRuleMessageKind,
+            b"meetingRequest" => MailRuleMessageKind::MeetingRequest,
+            b"meetingResponse" => MailRuleMessageKind::MeetingResponse,
+            b"meetingCancellation" => MailRuleMessageKind::MeetingCancellation,
+            b"nonDeliveryReport" => MailRuleMessageKind::NonDeliveryReport,
+            b"readReceipt" => MailRuleMessageKind::ReadReceipt,
+            b"automaticReply" => MailRuleMessageKind::AutomaticReply,
+            b"signed" => MailRuleMessageKind::Signed,
+            b"encrypted" => MailRuleMessageKind::Encrypted,
+            b"automaticForward" => MailRuleMessageKind::AutomaticForward,
+            b"voicemail" => MailRuleMessageKind::Voicemail,
+        }
+        .copied()
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            MailRuleMessageKind::MeetingRequest => "meetingRequest",
+            MailRuleMessageKind::MeetingResponse => "meetingResponse",
+            MailRuleMessageKind::MeetingCancellation => "meetingCancellation",
+            MailRuleMessageKind::NonDeliveryReport => "nonDeliveryReport",
+            MailRuleMessageKind::ReadReceipt => "readReceipt",
+            MailRuleMessageKind::AutomaticReply => "automaticReply",
+            MailRuleMessageKind::Signed => "signed",
+            MailRuleMessageKind::Encrypted => "encrypted",
+            MailRuleMessageKind::AutomaticForward => "automaticForward",
+            MailRuleMessageKind::Voicemail => "voicemail",
+        }
+    }
+
+    fn to_id(&self) -> u16 {
+        *self as u16
+    }
+
+    fn from_id(id: u16) -> Option<Self> {
+        match id {
+            0 => Some(MailRuleMessageKind::MeetingRequest),
+            1 => Some(MailRuleMessageKind::MeetingResponse),
+            2 => Some(MailRuleMessageKind::MeetingCancellation),
+            3 => Some(MailRuleMessageKind::NonDeliveryReport),
+            4 => Some(MailRuleMessageKind::ReadReceipt),
+            5 => Some(MailRuleMessageKind::AutomaticReply),
+            6 => Some(MailRuleMessageKind::Signed),
+            7 => Some(MailRuleMessageKind::Encrypted),
+            8 => Some(MailRuleMessageKind::AutomaticForward),
+            9 => Some(MailRuleMessageKind::Voicemail),
+            _ => None,
+        }
+    }
+
+    const COUNT: usize = 10;
+}
+
+impl serde::Serialize for MailRuleMessageKind {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for MailRuleMessageKind {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = Cow::<str>::deserialize(deserializer)?;
+        Self::parse(&s).ok_or_else(|| serde::de::Error::unknown_variant(&s, &[]))
+    }
+}
+
+impl EnumImpl for MailRuleSensitivityLevel {
+    fn parse(value: &str) -> Option<Self> {
+        hashify::map! {
+            value.as_bytes(),
+            MailRuleSensitivityLevel,
+            b"normal" => MailRuleSensitivityLevel::Normal,
+            b"personal" => MailRuleSensitivityLevel::Personal,
+            b"private" => MailRuleSensitivityLevel::Private,
+            b"confidential" => MailRuleSensitivityLevel::Confidential,
+        }
+        .copied()
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            MailRuleSensitivityLevel::Normal => "normal",
+            MailRuleSensitivityLevel::Personal => "personal",
+            MailRuleSensitivityLevel::Private => "private",
+            MailRuleSensitivityLevel::Confidential => "confidential",
+        }
+    }
+
+    fn to_id(&self) -> u16 {
+        *self as u16
+    }
+
+    fn from_id(id: u16) -> Option<Self> {
+        match id {
+            0 => Some(MailRuleSensitivityLevel::Normal),
+            1 => Some(MailRuleSensitivityLevel::Personal),
+            2 => Some(MailRuleSensitivityLevel::Private),
+            3 => Some(MailRuleSensitivityLevel::Confidential),
+            _ => None,
+        }
+    }
+
+    const COUNT: usize = 4;
+}
+
+impl serde::Serialize for MailRuleSensitivityLevel {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for MailRuleSensitivityLevel {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = Cow::<str>::deserialize(deserializer)?;
+        Self::parse(&s).ok_or_else(|| serde::de::Error::unknown_variant(&s, &[]))
+    }
+}
+
+impl EnumImpl for MailRuleSentToMePlacement {
+    fn parse(value: &str) -> Option<Self> {
+        hashify::map! {
+            value.as_bytes(),
+            MailRuleSentToMePlacement,
+            b"to" => MailRuleSentToMePlacement::To,
+            b"cc" => MailRuleSentToMePlacement::Cc,
+            b"toOrCc" => MailRuleSentToMePlacement::ToOrCc,
+            b"notTo" => MailRuleSentToMePlacement::NotTo,
+            b"onlyTo" => MailRuleSentToMePlacement::OnlyTo,
+        }
+        .copied()
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            MailRuleSentToMePlacement::To => "to",
+            MailRuleSentToMePlacement::Cc => "cc",
+            MailRuleSentToMePlacement::ToOrCc => "toOrCc",
+            MailRuleSentToMePlacement::NotTo => "notTo",
+            MailRuleSentToMePlacement::OnlyTo => "onlyTo",
+        }
+    }
+
+    fn to_id(&self) -> u16 {
+        *self as u16
+    }
+
+    fn from_id(id: u16) -> Option<Self> {
+        match id {
+            0 => Some(MailRuleSentToMePlacement::To),
+            1 => Some(MailRuleSentToMePlacement::Cc),
+            2 => Some(MailRuleSentToMePlacement::ToOrCc),
+            3 => Some(MailRuleSentToMePlacement::NotTo),
+            4 => Some(MailRuleSentToMePlacement::OnlyTo),
+            _ => None,
+        }
+    }
+
+    const COUNT: usize = 5;
+}
+
+impl serde::Serialize for MailRuleSentToMePlacement {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for MailRuleSentToMePlacement {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = Cow::<str>::deserialize(deserializer)?;
+        Self::parse(&s).ok_or_else(|| serde::de::Error::unknown_variant(&s, &[]))
+    }
+}
+
+impl EnumImpl for MailRuleTextOperator {
+    fn parse(value: &str) -> Option<Self> {
+        hashify::map! {
+            value.as_bytes(),
+            MailRuleTextOperator,
+            b"contains" => MailRuleTextOperator::Contains,
+            b"is" => MailRuleTextOperator::Is,
+            b"matches" => MailRuleTextOperator::Matches,
+        }
+        .copied()
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            MailRuleTextOperator::Contains => "contains",
+            MailRuleTextOperator::Is => "is",
+            MailRuleTextOperator::Matches => "matches",
+        }
+    }
+
+    fn to_id(&self) -> u16 {
+        *self as u16
+    }
+
+    fn from_id(id: u16) -> Option<Self> {
+        match id {
+            0 => Some(MailRuleTextOperator::Contains),
+            1 => Some(MailRuleTextOperator::Is),
+            2 => Some(MailRuleTextOperator::Matches),
+            _ => None,
+        }
+    }
+
+    const COUNT: usize = 3;
+}
+
+impl serde::Serialize for MailRuleTextOperator {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for MailRuleTextOperator {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = Cow::<str>::deserialize(deserializer)?;
+        Self::parse(&s).ok_or_else(|| serde::de::Error::unknown_variant(&s, &[]))
+    }
+}
+
 impl EnumImpl for MessageFlag {
     fn parse(value: &str) -> Option<Self> {
         hashify::map! {
@@ -8974,6 +9705,10 @@ impl EnumImpl for Permission {
             b"sysBlockedIpUpdate" => Permission::SysBlockedIpUpdate,
             b"sysBlockedIpDestroy" => Permission::SysBlockedIpDestroy,
             b"sysBlockedIpQuery" => Permission::SysBlockedIpQuery,
+            b"sysBlockedSenderGet" => Permission::SysBlockedSenderGet,
+            b"sysBlockedSenderCreate" => Permission::SysBlockedSenderCreate,
+            b"sysBlockedSenderDestroy" => Permission::SysBlockedSenderDestroy,
+            b"sysBlockedSenderQuery" => Permission::SysBlockedSenderQuery,
             b"sysBootstrapGet" => Permission::SysBootstrapGet,
             b"sysBootstrapUpdate" => Permission::SysBootstrapUpdate,
             b"sysCacheGet" => Permission::SysCacheGet,
@@ -8984,6 +9719,8 @@ impl EnumImpl for Permission {
             b"sysCalendarAlarmUpdate" => Permission::SysCalendarAlarmUpdate,
             b"sysCalendarSchedulingGet" => Permission::SysCalendarSchedulingGet,
             b"sysCalendarSchedulingUpdate" => Permission::SysCalendarSchedulingUpdate,
+            b"sysCalendarSettingsGet" => Permission::SysCalendarSettingsGet,
+            b"sysCalendarSettingsUpdate" => Permission::SysCalendarSettingsUpdate,
             b"sysCertificateGet" => Permission::SysCertificateGet,
             b"sysCertificateCreate" => Permission::SysCertificateCreate,
             b"sysCertificateUpdate" => Permission::SysCertificateUpdate,
@@ -9048,6 +9785,8 @@ impl EnumImpl for Permission {
             b"sysEventTracingLevelUpdate" => Permission::SysEventTracingLevelUpdate,
             b"sysEventTracingLevelDestroy" => Permission::SysEventTracingLevelDestroy,
             b"sysEventTracingLevelQuery" => Permission::SysEventTracingLevelQuery,
+            b"sysExchangeGet" => Permission::SysExchangeGet,
+            b"sysExchangeUpdate" => Permission::SysExchangeUpdate,
             b"sysExternalPublicKeyGet" => Permission::SysExternalPublicKeyGet,
             b"sysExternalPublicKeyCreate" => Permission::SysExternalPublicKeyCreate,
             b"sysExternalPublicKeyUpdate" => Permission::SysExternalPublicKeyUpdate,
@@ -9075,6 +9814,11 @@ impl EnumImpl for Permission {
             b"sysJmapUpdate" => Permission::SysJmapUpdate,
             b"sysLogGet" => Permission::SysLogGet,
             b"sysLogQuery" => Permission::SysLogQuery,
+            b"sysMailRuleGet" => Permission::SysMailRuleGet,
+            b"sysMailRuleCreate" => Permission::SysMailRuleCreate,
+            b"sysMailRuleUpdate" => Permission::SysMailRuleUpdate,
+            b"sysMailRuleDestroy" => Permission::SysMailRuleDestroy,
+            b"sysMailRuleQuery" => Permission::SysMailRuleQuery,
             b"sysMailingListGet" => Permission::SysMailingListGet,
             b"sysMailingListCreate" => Permission::SysMailingListCreate,
             b"sysMailingListUpdate" => Permission::SysMailingListUpdate,
@@ -9209,6 +9953,10 @@ impl EnumImpl for Permission {
             b"sysRoleUpdate" => Permission::SysRoleUpdate,
             b"sysRoleDestroy" => Permission::SysRoleDestroy,
             b"sysRoleQuery" => Permission::SysRoleQuery,
+            b"sysSafeSenderGet" => Permission::SysSafeSenderGet,
+            b"sysSafeSenderCreate" => Permission::SysSafeSenderCreate,
+            b"sysSafeSenderDestroy" => Permission::SysSafeSenderDestroy,
+            b"sysSafeSenderQuery" => Permission::SysSafeSenderQuery,
             b"sysSearchGet" => Permission::SysSearchGet,
             b"sysSearchUpdate" => Permission::SysSearchUpdate,
             b"sysSearchStoreGet" => Permission::SysSearchStoreGet,
@@ -9633,6 +10381,10 @@ impl EnumImpl for Permission {
             b"sysBlockedIpUpdate" => Permission::SysBlockedIpUpdate,
             b"sysBlockedIpDestroy" => Permission::SysBlockedIpDestroy,
             b"sysBlockedIpQuery" => Permission::SysBlockedIpQuery,
+            b"sysBlockedSenderGet" => Permission::SysBlockedSenderGet,
+            b"sysBlockedSenderCreate" => Permission::SysBlockedSenderCreate,
+            b"sysBlockedSenderDestroy" => Permission::SysBlockedSenderDestroy,
+            b"sysBlockedSenderQuery" => Permission::SysBlockedSenderQuery,
             b"sysBootstrapGet" => Permission::SysBootstrapGet,
             b"sysBootstrapUpdate" => Permission::SysBootstrapUpdate,
             b"sysCacheGet" => Permission::SysCacheGet,
@@ -9643,6 +10395,8 @@ impl EnumImpl for Permission {
             b"sysCalendarAlarmUpdate" => Permission::SysCalendarAlarmUpdate,
             b"sysCalendarSchedulingGet" => Permission::SysCalendarSchedulingGet,
             b"sysCalendarSchedulingUpdate" => Permission::SysCalendarSchedulingUpdate,
+            b"sysCalendarSettingsGet" => Permission::SysCalendarSettingsGet,
+            b"sysCalendarSettingsUpdate" => Permission::SysCalendarSettingsUpdate,
             b"sysCertificateGet" => Permission::SysCertificateGet,
             b"sysCertificateCreate" => Permission::SysCertificateCreate,
             b"sysCertificateUpdate" => Permission::SysCertificateUpdate,
@@ -9705,6 +10459,8 @@ impl EnumImpl for Permission {
             b"sysEventTracingLevelUpdate" => Permission::SysEventTracingLevelUpdate,
             b"sysEventTracingLevelDestroy" => Permission::SysEventTracingLevelDestroy,
             b"sysEventTracingLevelQuery" => Permission::SysEventTracingLevelQuery,
+            b"sysExchangeGet" => Permission::SysExchangeGet,
+            b"sysExchangeUpdate" => Permission::SysExchangeUpdate,
             b"sysExternalPublicKeyGet" => Permission::SysExternalPublicKeyGet,
             b"sysExternalPublicKeyCreate" => Permission::SysExternalPublicKeyCreate,
             b"sysExternalPublicKeyUpdate" => Permission::SysExternalPublicKeyUpdate,
@@ -9732,6 +10488,11 @@ impl EnumImpl for Permission {
             b"sysJmapUpdate" => Permission::SysJmapUpdate,
             b"sysLogGet" => Permission::SysLogGet,
             b"sysLogQuery" => Permission::SysLogQuery,
+            b"sysMailRuleGet" => Permission::SysMailRuleGet,
+            b"sysMailRuleCreate" => Permission::SysMailRuleCreate,
+            b"sysMailRuleUpdate" => Permission::SysMailRuleUpdate,
+            b"sysMailRuleDestroy" => Permission::SysMailRuleDestroy,
+            b"sysMailRuleQuery" => Permission::SysMailRuleQuery,
             b"sysMailingListGet" => Permission::SysMailingListGet,
             b"sysMailingListCreate" => Permission::SysMailingListCreate,
             b"sysMailingListUpdate" => Permission::SysMailingListUpdate,
@@ -9862,6 +10623,10 @@ impl EnumImpl for Permission {
             b"sysRoleUpdate" => Permission::SysRoleUpdate,
             b"sysRoleDestroy" => Permission::SysRoleDestroy,
             b"sysRoleQuery" => Permission::SysRoleQuery,
+            b"sysSafeSenderGet" => Permission::SysSafeSenderGet,
+            b"sysSafeSenderCreate" => Permission::SysSafeSenderCreate,
+            b"sysSafeSenderDestroy" => Permission::SysSafeSenderDestroy,
+            b"sysSafeSenderQuery" => Permission::SysSafeSenderQuery,
             b"sysSearchGet" => Permission::SysSearchGet,
             b"sysSearchUpdate" => Permission::SysSearchUpdate,
             b"sysSearchStoreGet" => Permission::SysSearchStoreGet,
@@ -10335,6 +11100,10 @@ impl EnumImpl for Permission {
             Permission::SysBlockedIpUpdate => "sysBlockedIpUpdate",
             Permission::SysBlockedIpDestroy => "sysBlockedIpDestroy",
             Permission::SysBlockedIpQuery => "sysBlockedIpQuery",
+            Permission::SysBlockedSenderGet => "sysBlockedSenderGet",
+            Permission::SysBlockedSenderCreate => "sysBlockedSenderCreate",
+            Permission::SysBlockedSenderDestroy => "sysBlockedSenderDestroy",
+            Permission::SysBlockedSenderQuery => "sysBlockedSenderQuery",
             Permission::SysBootstrapGet => "sysBootstrapGet",
             Permission::SysBootstrapUpdate => "sysBootstrapUpdate",
             Permission::SysCacheGet => "sysCacheGet",
@@ -10345,6 +11114,8 @@ impl EnumImpl for Permission {
             Permission::SysCalendarAlarmUpdate => "sysCalendarAlarmUpdate",
             Permission::SysCalendarSchedulingGet => "sysCalendarSchedulingGet",
             Permission::SysCalendarSchedulingUpdate => "sysCalendarSchedulingUpdate",
+            Permission::SysCalendarSettingsGet => "sysCalendarSettingsGet",
+            Permission::SysCalendarSettingsUpdate => "sysCalendarSettingsUpdate",
             Permission::SysCertificateGet => "sysCertificateGet",
             Permission::SysCertificateCreate => "sysCertificateCreate",
             Permission::SysCertificateUpdate => "sysCertificateUpdate",
@@ -10415,6 +11186,8 @@ impl EnumImpl for Permission {
             Permission::SysEventTracingLevelUpdate => "sysEventTracingLevelUpdate",
             Permission::SysEventTracingLevelDestroy => "sysEventTracingLevelDestroy",
             Permission::SysEventTracingLevelQuery => "sysEventTracingLevelQuery",
+            Permission::SysExchangeGet => "sysExchangeGet",
+            Permission::SysExchangeUpdate => "sysExchangeUpdate",
             Permission::SysExternalPublicKeyGet => "sysExternalPublicKeyGet",
             Permission::SysExternalPublicKeyCreate => "sysExternalPublicKeyCreate",
             Permission::SysExternalPublicKeyUpdate => "sysExternalPublicKeyUpdate",
@@ -10442,6 +11215,11 @@ impl EnumImpl for Permission {
             Permission::SysJmapUpdate => "sysJmapUpdate",
             Permission::SysLogGet => "sysLogGet",
             Permission::SysLogQuery => "sysLogQuery",
+            Permission::SysMailRuleGet => "sysMailRuleGet",
+            Permission::SysMailRuleCreate => "sysMailRuleCreate",
+            Permission::SysMailRuleUpdate => "sysMailRuleUpdate",
+            Permission::SysMailRuleDestroy => "sysMailRuleDestroy",
+            Permission::SysMailRuleQuery => "sysMailRuleQuery",
             Permission::SysMailingListGet => "sysMailingListGet",
             Permission::SysMailingListCreate => "sysMailingListCreate",
             Permission::SysMailingListUpdate => "sysMailingListUpdate",
@@ -10588,6 +11366,10 @@ impl EnumImpl for Permission {
             Permission::SysRoleUpdate => "sysRoleUpdate",
             Permission::SysRoleDestroy => "sysRoleDestroy",
             Permission::SysRoleQuery => "sysRoleQuery",
+            Permission::SysSafeSenderGet => "sysSafeSenderGet",
+            Permission::SysSafeSenderCreate => "sysSafeSenderCreate",
+            Permission::SysSafeSenderDestroy => "sysSafeSenderDestroy",
+            Permission::SysSafeSenderQuery => "sysSafeSenderQuery",
             Permission::SysSearchGet => "sysSearchGet",
             Permission::SysSearchUpdate => "sysSearchUpdate",
             Permission::SysSearchStoreGet => "sysSearchStoreGet",
@@ -11104,6 +11886,10 @@ impl EnumImpl for Permission {
             295 => Some(Permission::SysBlockedIpUpdate),
             296 => Some(Permission::SysBlockedIpDestroy),
             297 => Some(Permission::SysBlockedIpQuery),
+            667 => Some(Permission::SysBlockedSenderGet),
+            668 => Some(Permission::SysBlockedSenderCreate),
+            669 => Some(Permission::SysBlockedSenderDestroy),
+            670 => Some(Permission::SysBlockedSenderQuery),
             298 => Some(Permission::SysBootstrapGet),
             299 => Some(Permission::SysBootstrapUpdate),
             300 => Some(Permission::SysCacheGet),
@@ -11114,6 +11900,8 @@ impl EnumImpl for Permission {
             305 => Some(Permission::SysCalendarAlarmUpdate),
             306 => Some(Permission::SysCalendarSchedulingGet),
             307 => Some(Permission::SysCalendarSchedulingUpdate),
+            671 => Some(Permission::SysCalendarSettingsGet),
+            672 => Some(Permission::SysCalendarSettingsUpdate),
             308 => Some(Permission::SysCertificateGet),
             309 => Some(Permission::SysCertificateCreate),
             310 => Some(Permission::SysCertificateUpdate),
@@ -11184,6 +11972,8 @@ impl EnumImpl for Permission {
             367 => Some(Permission::SysEventTracingLevelUpdate),
             368 => Some(Permission::SysEventTracingLevelDestroy),
             369 => Some(Permission::SysEventTracingLevelQuery),
+            673 => Some(Permission::SysExchangeGet),
+            674 => Some(Permission::SysExchangeUpdate),
             645 => Some(Permission::SysExternalPublicKeyGet),
             646 => Some(Permission::SysExternalPublicKeyCreate),
             647 => Some(Permission::SysExternalPublicKeyUpdate),
@@ -11211,6 +12001,11 @@ impl EnumImpl for Permission {
             389 => Some(Permission::SysJmapUpdate),
             390 => Some(Permission::SysLogGet),
             391 => Some(Permission::SysLogQuery),
+            675 => Some(Permission::SysMailRuleGet),
+            676 => Some(Permission::SysMailRuleCreate),
+            677 => Some(Permission::SysMailRuleUpdate),
+            678 => Some(Permission::SysMailRuleDestroy),
+            679 => Some(Permission::SysMailRuleQuery),
             392 => Some(Permission::SysMailingListGet),
             393 => Some(Permission::SysMailingListCreate),
             394 => Some(Permission::SysMailingListUpdate),
@@ -11357,6 +12152,10 @@ impl EnumImpl for Permission {
             518 => Some(Permission::SysRoleUpdate),
             519 => Some(Permission::SysRoleDestroy),
             520 => Some(Permission::SysRoleQuery),
+            680 => Some(Permission::SysSafeSenderGet),
+            681 => Some(Permission::SysSafeSenderCreate),
+            682 => Some(Permission::SysSafeSenderDestroy),
+            683 => Some(Permission::SysSafeSenderQuery),
             521 => Some(Permission::SysSearchGet),
             522 => Some(Permission::SysSearchUpdate),
             523 => Some(Permission::SysSearchStoreGet),
@@ -11532,7 +12331,7 @@ impl EnumImpl for Permission {
         }
     }
 
-    const COUNT: usize = 667;
+    const COUNT: usize = 684;
 }
 
 impl Permission {
@@ -12297,6 +13096,23 @@ impl Permission {
         Permission::SysPasskeyUpdate,
         Permission::SysPasskeyDestroy,
         Permission::SysPasskeyQuery,
+        Permission::SysBlockedSenderGet,
+        Permission::SysBlockedSenderCreate,
+        Permission::SysBlockedSenderDestroy,
+        Permission::SysBlockedSenderQuery,
+        Permission::SysCalendarSettingsGet,
+        Permission::SysCalendarSettingsUpdate,
+        Permission::SysExchangeGet,
+        Permission::SysExchangeUpdate,
+        Permission::SysMailRuleGet,
+        Permission::SysMailRuleCreate,
+        Permission::SysMailRuleUpdate,
+        Permission::SysMailRuleDestroy,
+        Permission::SysMailRuleQuery,
+        Permission::SysSafeSenderGet,
+        Permission::SysSafeSenderCreate,
+        Permission::SysSafeSenderDestroy,
+        Permission::SysSafeSenderQuery,
     ];
 }
 
@@ -12780,6 +13596,64 @@ impl<'de> serde::Deserialize<'de> for PublicStringOptionalType {
     }
 }
 
+impl EnumImpl for PublicTextOptionalType {
+    fn parse(value: &str) -> Option<Self> {
+        hashify::map! {
+            value.as_bytes(),
+            PublicTextOptionalType,
+            b"None" => PublicTextOptionalType::None,
+            b"Text" => PublicTextOptionalType::Text,
+            b"EnvironmentVariable" => PublicTextOptionalType::EnvironmentVariable,
+            b"File" => PublicTextOptionalType::File,
+        }
+        .copied()
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            PublicTextOptionalType::None => "None",
+            PublicTextOptionalType::Text => "Text",
+            PublicTextOptionalType::EnvironmentVariable => "EnvironmentVariable",
+            PublicTextOptionalType::File => "File",
+        }
+    }
+
+    fn to_id(&self) -> u16 {
+        *self as u16
+    }
+
+    fn from_id(id: u16) -> Option<Self> {
+        match id {
+            0 => Some(PublicTextOptionalType::None),
+            1 => Some(PublicTextOptionalType::Text),
+            2 => Some(PublicTextOptionalType::EnvironmentVariable),
+            3 => Some(PublicTextOptionalType::File),
+            _ => None,
+        }
+    }
+
+    const COUNT: usize = 4;
+}
+
+impl serde::Serialize for PublicTextOptionalType {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for PublicTextOptionalType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = Cow::<str>::deserialize(deserializer)?;
+        Self::parse(&s).ok_or_else(|| serde::de::Error::unknown_variant(&s, &[]))
+    }
+}
+
 impl EnumImpl for PublicTextType {
     fn parse(value: &str) -> Option<Self> {
         hashify::map! {
@@ -13040,6 +13914,110 @@ impl serde::Serialize for RedisProtocol {
 }
 
 impl<'de> serde::Deserialize<'de> for RedisProtocol {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = Cow::<str>::deserialize(deserializer)?;
+        Self::parse(&s).ok_or_else(|| serde::de::Error::unknown_variant(&s, &[]))
+    }
+}
+
+impl EnumImpl for ResourceBookingType {
+    fn parse(value: &str) -> Option<Self> {
+        hashify::map! {
+            value.as_bytes(),
+            ResourceBookingType,
+            b"Automatic" => ResourceBookingType::Automatic,
+            b"Manual" => ResourceBookingType::Manual,
+        }
+        .copied()
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            ResourceBookingType::Automatic => "Automatic",
+            ResourceBookingType::Manual => "Manual",
+        }
+    }
+
+    fn to_id(&self) -> u16 {
+        *self as u16
+    }
+
+    fn from_id(id: u16) -> Option<Self> {
+        match id {
+            0 => Some(ResourceBookingType::Automatic),
+            1 => Some(ResourceBookingType::Manual),
+            _ => None,
+        }
+    }
+
+    const COUNT: usize = 2;
+}
+
+impl serde::Serialize for ResourceBookingType {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for ResourceBookingType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = Cow::<str>::deserialize(deserializer)?;
+        Self::parse(&s).ok_or_else(|| serde::de::Error::unknown_variant(&s, &[]))
+    }
+}
+
+impl EnumImpl for ResourceKind {
+    fn parse(value: &str) -> Option<Self> {
+        hashify::map! {
+            value.as_bytes(),
+            ResourceKind,
+            b"room" => ResourceKind::Room,
+            b"equipment" => ResourceKind::Equipment,
+        }
+        .copied()
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            ResourceKind::Room => "room",
+            ResourceKind::Equipment => "equipment",
+        }
+    }
+
+    fn to_id(&self) -> u16 {
+        *self as u16
+    }
+
+    fn from_id(id: u16) -> Option<Self> {
+        match id {
+            0 => Some(ResourceKind::Room),
+            1 => Some(ResourceKind::Equipment),
+            _ => None,
+        }
+    }
+
+    const COUNT: usize = 2;
+}
+
+impl serde::Serialize for ResourceKind {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for ResourceKind {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -18821,6 +19799,73 @@ impl serde::Serialize for VCardVersion {
 }
 
 impl<'de> serde::Deserialize<'de> for VCardVersion {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = Cow::<str>::deserialize(deserializer)?;
+        Self::parse(&s).ok_or_else(|| serde::de::Error::unknown_variant(&s, &[]))
+    }
+}
+
+impl EnumImpl for Weekday {
+    fn parse(value: &str) -> Option<Self> {
+        hashify::map! {
+            value.as_bytes(),
+            Weekday,
+            b"monday" => Weekday::Monday,
+            b"tuesday" => Weekday::Tuesday,
+            b"wednesday" => Weekday::Wednesday,
+            b"thursday" => Weekday::Thursday,
+            b"friday" => Weekday::Friday,
+            b"saturday" => Weekday::Saturday,
+            b"sunday" => Weekday::Sunday,
+        }
+        .copied()
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            Weekday::Monday => "monday",
+            Weekday::Tuesday => "tuesday",
+            Weekday::Wednesday => "wednesday",
+            Weekday::Thursday => "thursday",
+            Weekday::Friday => "friday",
+            Weekday::Saturday => "saturday",
+            Weekday::Sunday => "sunday",
+        }
+    }
+
+    fn to_id(&self) -> u16 {
+        *self as u16
+    }
+
+    fn from_id(id: u16) -> Option<Self> {
+        match id {
+            0 => Some(Weekday::Monday),
+            1 => Some(Weekday::Tuesday),
+            2 => Some(Weekday::Wednesday),
+            3 => Some(Weekday::Thursday),
+            4 => Some(Weekday::Friday),
+            5 => Some(Weekday::Saturday),
+            6 => Some(Weekday::Sunday),
+            _ => None,
+        }
+    }
+
+    const COUNT: usize = 7;
+}
+
+impl serde::Serialize for Weekday {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Weekday {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,

@@ -11,7 +11,7 @@ use common::{
 };
 use compact_str::format_compact;
 use coordinator::MsgKind;
-use registry::types::EnumImpl;
+use registry::{schema::prelude::ObjectType, types::EnumImpl};
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -25,6 +25,13 @@ use tokio::sync::{mpsc, watch};
 use trc::{ClusterEvent, ServerEvent};
 
 const STABLE_SUBSCRIPTION: Duration = Duration::from_secs(1);
+const CATCH_UP_RELOADS: [ObjectType; 5] = [
+    ObjectType::SpamClassifier,
+    ObjectType::Certificate,
+    ObjectType::StoreLookup,
+    ObjectType::BlockedIp,
+    ObjectType::Application,
+];
 
 struct BroadcastReceiver {
     inner: Arc<Inner>,
@@ -139,6 +146,21 @@ impl BroadcastReceiver {
                 .queue_tx
                 .send(QueueEvent::Refresh(QueueRefresh::All))
                 .await;
+        }
+        for object in CATCH_UP_RELOADS {
+            if self
+                .registry_tx
+                .send(RegistryChange::Reload(object))
+                .await
+                .is_err()
+            {
+                trc::event!(
+                    Server(ServerEvent::ThreadError),
+                    Details = "Error sending registry change.",
+                    CausedBy = trc::location!()
+                );
+                break;
+            }
         }
     }
 

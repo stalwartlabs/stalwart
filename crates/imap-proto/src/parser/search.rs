@@ -21,6 +21,7 @@ use super::{parse_date, parse_number, parse_sequence_set};
 
 const FILTERS_INIT_LEN: usize = 16;
 const MAX_FILTER_DEPTH: usize = 32;
+const MAX_SEARCH_CRITERIA: usize = 256;
 
 impl Request<Command> {
     #[allow(clippy::while_let_on_iterator)]
@@ -102,8 +103,13 @@ pub fn parse_filters(
     let mut filters_len = 0;
     let mut filters_stack = Vec::new();
     let mut operator = Filter::And;
+    let mut criteria = 0;
 
     while let Some(token) = tokens.next() {
+        criteria += 1;
+        if criteria > MAX_SEARCH_CRITERIA {
+            return Err(Cow::from("Too many search criteria."));
+        }
         let mut found_parenthesis = false;
         match token {
             Token::Argument(value) => {

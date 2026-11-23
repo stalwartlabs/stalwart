@@ -8,7 +8,9 @@ use super::{ImapSessionManager, MAX_CONCURRENT_OPS, Session, State};
 use crate::{auth_capability, greeting};
 use common::{
     BuildServer,
-    network::{SessionData, SessionManager, SessionResult, SessionStream, stream::NullIo},
+    network::{
+        SessionData, SessionManager, SessionResult, SessionStream, ready_or_timeout, stream::NullIo,
+    },
 };
 use compact_str::ToCompactString;
 use imap_proto::{
@@ -16,10 +18,10 @@ use imap_proto::{
     protocol::{ProtocolVersion, SerializeResponse, id::ClientId},
     receiver::{MAX_UNAUTHENTICATED_REQUEST_SIZE, Receiver},
 };
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 use store::write::is_commit_contention;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::sync::Semaphore;
+use tokio::io::{AsyncReadExt, AsyncWriteExt, WriteHalf};
+use tokio::sync::{Mutex, Semaphore};
 use tokio_rustls::server::TlsStream;
 
 impl SessionManager for ImapSessionManager {
@@ -53,11 +55,7 @@ impl<T: SessionStream> Session<T> {
         loop {
             tokio::select! {
                 result = tokio::time::timeout(
-                    if !matches!(self.state, State::NotAuthenticated {..}) {
-                        self.server.core.imap.timeout_auth
-                    } else {
-                        self.server.core.imap.timeout_unauth
-                    },
+                    self.timeout(),
                     self.stream_rx.read(&mut buf)) => {
                     match result {
                         Ok(Ok(bytes_read)) => {
@@ -246,15 +244,14 @@ impl<T: SessionStream> Session<T> {
             Contents = trc::Value::from_maybe_string(bytes),
         );
 
-        let mut stream = self.stream_tx.lock().await;
-        if let Err(err) = stream.write_all(bytes).await {
-            Err(trc::NetworkEvent::WriteError
-                .into_err()
-                .reason(err)
-                .details("Failed to write to stream"))
+        write_stream(&self.stream_tx, bytes, self.timeout()).await
+    }
+
+    fn timeout(&self) -> Duration {
+        if !matches!(self.state, State::NotAuthenticated { .. }) {
+            self.server.core.imap.timeout_auth
         } else {
-            let _ = stream.flush().await;
-            Ok(())
+            self.server.core.imap.timeout_unauth
         }
     }
 
@@ -276,6 +273,30 @@ impl<T: SessionStream> Session<T> {
             false
         }
     }
+}
+
+async fn write_stream<T: SessionStream>(
+    stream_tx: &Mutex<WriteHalf<T>>,
+    bytes: &[u8],
+    timeout: Duration,
+) -> trc::Result<()> {
+    let mut stream = stream_tx.lock().await;
+    ready_or_timeout(timeout, async {
+        stream.write_all(bytes).await.map_err(|err| {
+            trc::NetworkEvent::WriteError
+                .into_err()
+                .reason(err)
+                .details("Failed to write to stream")
+        })?;
+        let _ = stream.flush().await;
+        Ok(())
+    })
+    .await
+    .unwrap_or_else(|| {
+        Err(trc::NetworkEvent::Timeout
+            .into_err()
+            .details("Write timed out"))
+    })
 }
 
 fn error_response(err: &trc::Error) -> Vec<u8> {
@@ -323,16 +344,7 @@ impl<T: SessionStream> super::SessionData<T> {
             Contents = trc::Value::from_maybe_string(bytes),
         );
 
-        let mut stream = self.stream_tx.lock().await;
-        if let Err(err) = stream.write_all(bytes.as_ref()).await {
-            Err(trc::NetworkEvent::WriteError
-                .into_err()
-                .reason(err)
-                .details("Failed to write to stream"))
-        } else {
-            let _ = stream.flush().await;
-            Ok(())
-        }
+        write_stream(&self.stream_tx, bytes, self.server.core.imap.timeout_auth).await
     }
 
     pub async fn write_error(&self, err: trc::Error) -> trc::Result<()> {

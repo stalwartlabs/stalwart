@@ -9,7 +9,7 @@ use std::char;
 use std::slice::Iter;
 use std::str::from_utf8;
 
-use crate::*;
+use crate::{xtext::XText, *};
 
 use super::scan::{
     MEMCHR_MIN_LEN, TOKEN_UPPER, find_any3, find_any4, find_lf, find_non_atext, preceding_byte,
@@ -18,6 +18,8 @@ use super::scan::{
 use super::*;
 
 const MAX_ADDRESS_LEN: usize = 256;
+pub const POSTMASTER: &str = "postmaster";
+const POSTMASTER_LEN: usize = POSTMASTER.len();
 const MAX_DOMAIN_LEN: usize = 255;
 const MAX_FUTURE_RELEASE_INTERVAL: usize = 999_999_999;
 const MAX_EXACT_SIZE_DIGITS: u32 = usize::MAX.ilog10();
@@ -63,6 +65,11 @@ impl<'a> Request<Cow<'a, str>> {
                 {
                     if let Some(from) = parser.address()? {
                         if parser.stop_char == b'>' {
+                            let from = if from.eq_ignore_ascii_case(POSTMASTER) {
+                                Cow::Borrowed("")
+                            } else {
+                                from
+                            };
                             return Ok(Request::Mail {
                                 from: parser.mail_from_parameters(from)?,
                             });
@@ -146,6 +153,9 @@ impl<'a> Request<Cow<'a, str>> {
                         mechanism,
                         initial_response,
                     });
+                }
+                if parser.stop_char != LF {
+                    parser.seek_lf()?;
                 }
                 Err(Error::SyntaxError {
                     syntax: "AUTH mechanism [initial-response]",
@@ -439,8 +449,10 @@ impl<'x, 'y> Rfc5321Parser<'x, 'y> {
 
                     return Ok(match value.len() {
                         1..=MAX_ADDRESS_LEN if at_count == 1 && lp_len > 0 => Some(value),
-                        10 if at_count == 0 && value.eq_ignore_ascii_case("postmaster") => {
-                            Some("".into())
+                        POSTMASTER_LEN
+                            if at_count == 0 && value.eq_ignore_ascii_case(POSTMASTER) =>
+                        {
+                            Some(value)
                         }
                         0 => Some("".into()),
                         _ => None,
@@ -1030,7 +1042,10 @@ impl<'x, 'y> Rfc5321Parser<'x, 'y> {
                 }
                 ENVID if self.stop_char == b'=' => {
                     let env_id = self.xtext()?;
-                    if self.stop_char.is_ascii_whitespace() && (1..=100).contains(&env_id.len()) {
+                    if self.stop_char.is_ascii_whitespace()
+                        && (1..=100).contains(&env_id.len())
+                        && XText(&env_id).is_printable()
+                    {
                         params.env_id = env_id.into();
                     } else {
                         self.seek_lf()?;
@@ -1206,6 +1221,7 @@ impl<'x, 'y> Rfc5321Parser<'x, 'y> {
                     let addr = self.xtext()?;
                     if self.stop_char.is_ascii_whitespace()
                         && (1..=MAX_ADDRESS_LEN).contains(&addr.len())
+                        && XText(&addr).is_printable()
                     {
                         params.orcpt = addr.into();
                     } else {

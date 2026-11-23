@@ -12,6 +12,7 @@ pub enum AccountType {
     #[default]
     User = 0,
     Group = 1,
+    Resource = 2,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -620,6 +621,7 @@ pub enum DnsRecordType {
     AutoConfig = 9,
     AutoConfigLegacy = 10,
     AutoDiscover = 11,
+    Dkim2Policy = 12,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -813,6 +815,16 @@ pub enum EventPolicy {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 #[repr(u16)]
+pub enum EwsVersion {
+    #[default]
+    Exchange2010Sp2 = 0,
+    Exchange2013 = 1,
+    Exchange2013Sp1 = 2,
+    Exchange2016 = 3,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[repr(u16)]
 pub enum ExpressionConstant {
     #[default]
     Relaxed = 0,
@@ -956,6 +968,34 @@ pub enum FailureReportingOption {
     Any = 1,
     DkimFailure = 2,
     SpfFailure = 3,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[repr(u16)]
+pub enum FoundationDbClusterType {
+    #[default]
+    File = 0,
+    Manual = 1,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[repr(u16)]
+pub enum FoundationDbProtocol {
+    #[default]
+    Negotiate = 0,
+    V71 = 1,
+    V72 = 2,
+    V73 = 3,
+    V74 = 4,
+    V80 = 5,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[repr(u16)]
+pub enum FoundationDbTlsType {
+    #[default]
+    Default = 0,
+    Manual = 1,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -1488,6 +1528,107 @@ pub enum LookupStoreType {
     RedisCluster = 5,
     RedisSentinel = 6,
     Keep = 7,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[repr(u16)]
+pub enum MailRuleAddressOperator {
+    #[default]
+    Is = 0,
+    Contains = 1,
+    Domain = 2,
+    Matches = 3,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[repr(u16)]
+pub enum MailRuleConditionType {
+    #[default]
+    From = 0,
+    To = 1,
+    Cc = 2,
+    ToOrCc = 3,
+    SentToMe = 4,
+    Subject = 5,
+    Body = 6,
+    Header = 7,
+    SizeOver = 8,
+    SizeUnder = 9,
+    HasAttachment = 10,
+    Importance = 11,
+    Sensitivity = 12,
+    MessageType = 13,
+    HeaderExists = 14,
+    AttachmentName = 15,
+    AttachmentType = 16,
+    MailingList = 17,
+    RecipientAddress = 18,
+    RecipientDetail = 19,
+    SpamScore = 20,
+    SubjectOrBody = 21,
+    ReceivedAfter = 22,
+    ReceivedBefore = 23,
+    Schedule = 24,
+    PrivateEvent = 25,
+    Keyword = 26,
+    AnyKeyword = 27,
+    Flagged = 28,
+    IsAway = 29,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[repr(u16)]
+pub enum MailRuleImportanceLevel {
+    #[default]
+    Low = 0,
+    Normal = 1,
+    High = 2,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[repr(u16)]
+pub enum MailRuleMessageKind {
+    #[default]
+    MeetingRequest = 0,
+    MeetingResponse = 1,
+    MeetingCancellation = 2,
+    NonDeliveryReport = 3,
+    ReadReceipt = 4,
+    AutomaticReply = 5,
+    Signed = 6,
+    Encrypted = 7,
+    AutomaticForward = 8,
+    Voicemail = 9,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[repr(u16)]
+pub enum MailRuleSensitivityLevel {
+    #[default]
+    Normal = 0,
+    Personal = 1,
+    Private = 2,
+    Confidential = 3,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[repr(u16)]
+pub enum MailRuleSentToMePlacement {
+    #[default]
+    To = 0,
+    Cc = 1,
+    ToOrCc = 2,
+    NotTo = 3,
+    OnlyTo = 4,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[repr(u16)]
+pub enum MailRuleTextOperator {
+    #[default]
+    Contains = 0,
+    Is = 1,
+    Matches = 2,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -2153,6 +2294,10 @@ pub enum Permission {
     SysBlockedIpUpdate = 295,
     SysBlockedIpDestroy = 296,
     SysBlockedIpQuery = 297,
+    SysBlockedSenderGet = 667,
+    SysBlockedSenderCreate = 668,
+    SysBlockedSenderDestroy = 669,
+    SysBlockedSenderQuery = 670,
     SysBootstrapGet = 298,
     SysBootstrapUpdate = 299,
     SysCacheGet = 300,
@@ -2163,6 +2308,8 @@ pub enum Permission {
     SysCalendarAlarmUpdate = 305,
     SysCalendarSchedulingGet = 306,
     SysCalendarSchedulingUpdate = 307,
+    SysCalendarSettingsGet = 671,
+    SysCalendarSettingsUpdate = 672,
     SysCertificateGet = 308,
     SysCertificateCreate = 309,
     SysCertificateUpdate = 310,
@@ -2233,6 +2380,8 @@ pub enum Permission {
     SysEventTracingLevelUpdate = 367,
     SysEventTracingLevelDestroy = 368,
     SysEventTracingLevelQuery = 369,
+    SysExchangeGet = 673,
+    SysExchangeUpdate = 674,
     SysExternalPublicKeyGet = 645,
     SysExternalPublicKeyCreate = 646,
     SysExternalPublicKeyUpdate = 647,
@@ -2260,6 +2409,11 @@ pub enum Permission {
     SysJmapUpdate = 389,
     SysLogGet = 390,
     SysLogQuery = 391,
+    SysMailRuleGet = 675,
+    SysMailRuleCreate = 676,
+    SysMailRuleUpdate = 677,
+    SysMailRuleDestroy = 678,
+    SysMailRuleQuery = 679,
     SysMailingListGet = 392,
     SysMailingListCreate = 393,
     SysMailingListUpdate = 394,
@@ -2406,6 +2560,10 @@ pub enum Permission {
     SysRoleUpdate = 518,
     SysRoleDestroy = 519,
     SysRoleQuery = 520,
+    SysSafeSenderGet = 680,
+    SysSafeSenderCreate = 681,
+    SysSafeSenderDestroy = 682,
+    SysSafeSenderQuery = 683,
     SysSearchGet = 521,
     SysSearchUpdate = 522,
     SysSearchStoreGet = 523,
@@ -2660,6 +2818,16 @@ pub enum PublicStringOptionalType {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 #[repr(u16)]
+pub enum PublicTextOptionalType {
+    #[default]
+    None = 0,
+    Text = 1,
+    EnvironmentVariable = 2,
+    File = 3,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[repr(u16)]
 pub enum PublicTextType {
     #[default]
     Text = 0,
@@ -2699,6 +2867,22 @@ pub enum RedisProtocol {
     #[default]
     Resp2 = 0,
     Resp3 = 1,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[repr(u16)]
+pub enum ResourceBookingType {
+    #[default]
+    Automatic = 0,
+    Manual = 1,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[repr(u16)]
+pub enum ResourceKind {
+    #[default]
+    Room = 0,
+    Equipment = 1,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -4079,6 +4263,19 @@ pub enum VCardVersion {
     #[default]
     V4 = 0,
     V3 = 1,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[repr(u16)]
+pub enum Weekday {
+    #[default]
+    Monday = 0,
+    Tuesday = 1,
+    Wednesday = 2,
+    Thursday = 3,
+    Friday = 4,
+    Saturday = 5,
+    Sunday = 6,
 }
 
 pub static ENCRYPTION_HARVEST_VARIABLE: &[ExpressionVariable] =

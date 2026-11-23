@@ -35,11 +35,13 @@ impl EnumImpl for ObjectType {
             b"Authentication" => ObjectType::Authentication,
             b"BlobStore" => ObjectType::BlobStore,
             b"BlockedIp" => ObjectType::BlockedIp,
+            b"BlockedSender" => ObjectType::BlockedSender,
             b"Bootstrap" => ObjectType::Bootstrap,
             b"Cache" => ObjectType::Cache,
             b"Calendar" => ObjectType::Calendar,
             b"CalendarAlarm" => ObjectType::CalendarAlarm,
             b"CalendarScheduling" => ObjectType::CalendarScheduling,
+            b"CalendarSettings" => ObjectType::CalendarSettings,
             b"Certificate" => ObjectType::Certificate,
             b"ClusterNode" => ObjectType::ClusterNode,
             b"ClusterRole" => ObjectType::ClusterRole,
@@ -60,6 +62,7 @@ impl EnumImpl for ObjectType {
             b"Encryption" => ObjectType::Encryption,
             b"Enterprise" => ObjectType::Enterprise,
             b"EventTracingLevel" => ObjectType::EventTracingLevel,
+            b"Exchange" => ObjectType::Exchange,
             b"ExternalPublicKey" => ObjectType::ExternalPublicKey,
             b"FileStorage" => ObjectType::FileStorage,
             b"Http" => ObjectType::Http,
@@ -70,6 +73,7 @@ impl EnumImpl for ObjectType {
             b"IndexQueueStatus" => ObjectType::IndexQueueStatus,
             b"Jmap" => ObjectType::Jmap,
             b"Log" => ObjectType::Log,
+            b"MailRule" => ObjectType::MailRule,
             b"MailingList" => ObjectType::MailingList,
             b"MaskedEmail" => ObjectType::MaskedEmail,
             b"MemoryLookupKey" => ObjectType::MemoryLookupKey,
@@ -107,6 +111,7 @@ impl EnumImpl for ObjectType {
             b"QueuedMessage" => ObjectType::QueuedMessage,
             b"ReportSettings" => ObjectType::ReportSettings,
             b"Role" => ObjectType::Role,
+            b"SafeSender" => ObjectType::SafeSender,
             b"Search" => ObjectType::Search,
             b"SearchStore" => ObjectType::SearchStore,
             b"Security" => ObjectType::Security,
@@ -167,11 +172,13 @@ impl EnumImpl for ObjectType {
             b"Authentication" => ObjectType::Authentication,
             b"BlobStore" => ObjectType::BlobStore,
             b"BlockedIp" => ObjectType::BlockedIp,
+            b"BlockedSender" => ObjectType::BlockedSender,
             b"Bootstrap" => ObjectType::Bootstrap,
             b"Cache" => ObjectType::Cache,
             b"Calendar" => ObjectType::Calendar,
             b"CalendarAlarm" => ObjectType::CalendarAlarm,
             b"CalendarScheduling" => ObjectType::CalendarScheduling,
+            b"CalendarSettings" => ObjectType::CalendarSettings,
             b"Certificate" => ObjectType::Certificate,
             b"ClusterNode" => ObjectType::ClusterNode,
             b"ClusterRole" => ObjectType::ClusterRole,
@@ -191,6 +198,7 @@ impl EnumImpl for ObjectType {
             b"Email" => ObjectType::Email,
             b"Encryption" => ObjectType::Encryption,
             b"EventTracingLevel" => ObjectType::EventTracingLevel,
+            b"Exchange" => ObjectType::Exchange,
             b"ExternalPublicKey" => ObjectType::ExternalPublicKey,
             b"FileStorage" => ObjectType::FileStorage,
             b"Http" => ObjectType::Http,
@@ -201,6 +209,7 @@ impl EnumImpl for ObjectType {
             b"IndexQueueStatus" => ObjectType::IndexQueueStatus,
             b"Jmap" => ObjectType::Jmap,
             b"Log" => ObjectType::Log,
+            b"MailRule" => ObjectType::MailRule,
             b"MailingList" => ObjectType::MailingList,
             b"MaskedEmail" => ObjectType::MaskedEmail,
             b"MemoryLookupKey" => ObjectType::MemoryLookupKey,
@@ -236,6 +245,7 @@ impl EnumImpl for ObjectType {
             b"QueuedMessage" => ObjectType::QueuedMessage,
             b"ReportSettings" => ObjectType::ReportSettings,
             b"Role" => ObjectType::Role,
+            b"SafeSender" => ObjectType::SafeSender,
             b"Search" => ObjectType::Search,
             b"SearchStore" => ObjectType::SearchStore,
             b"Security" => ObjectType::Security,
@@ -302,11 +312,13 @@ impl EnumImpl for ObjectType {
             ObjectType::Authentication => "Authentication",
             ObjectType::BlobStore => "BlobStore",
             ObjectType::BlockedIp => "BlockedIp",
+            ObjectType::BlockedSender => "BlockedSender",
             ObjectType::Bootstrap => "Bootstrap",
             ObjectType::Cache => "Cache",
             ObjectType::Calendar => "Calendar",
             ObjectType::CalendarAlarm => "CalendarAlarm",
             ObjectType::CalendarScheduling => "CalendarScheduling",
+            ObjectType::CalendarSettings => "CalendarSettings",
             ObjectType::Certificate => "Certificate",
             ObjectType::ClusterNode => "ClusterNode",
             ObjectType::ClusterRole => "ClusterRole",
@@ -332,6 +344,7 @@ impl EnumImpl for ObjectType {
             ObjectType::Enterprise => "Enterprise",
             // SPDX-SnippetEnd
             ObjectType::EventTracingLevel => "EventTracingLevel",
+            ObjectType::Exchange => "Exchange",
             ObjectType::ExternalPublicKey => "ExternalPublicKey",
             ObjectType::FileStorage => "FileStorage",
             ObjectType::Http => "Http",
@@ -342,6 +355,7 @@ impl EnumImpl for ObjectType {
             ObjectType::IndexQueueStatus => "IndexQueueStatus",
             ObjectType::Jmap => "Jmap",
             ObjectType::Log => "Log",
+            ObjectType::MailRule => "MailRule",
             ObjectType::MailingList => "MailingList",
             ObjectType::MaskedEmail => "MaskedEmail",
             ObjectType::MemoryLookupKey => "MemoryLookupKey",
@@ -389,6 +403,7 @@ impl EnumImpl for ObjectType {
             ObjectType::QueuedMessage => "QueuedMessage",
             ObjectType::ReportSettings => "ReportSettings",
             ObjectType::Role => "Role",
+            ObjectType::SafeSender => "SafeSender",
             ObjectType::Search => "Search",
             ObjectType::SearchStore => "SearchStore",
             ObjectType::Security => "Security",
@@ -482,11 +497,13 @@ impl EnumImpl for ObjectType {
             15 => Some(ObjectType::Authentication),
             16 => Some(ObjectType::BlobStore),
             17 => Some(ObjectType::BlockedIp),
+            125 => Some(ObjectType::BlockedSender),
             18 => Some(ObjectType::Bootstrap),
             19 => Some(ObjectType::Cache),
             20 => Some(ObjectType::Calendar),
             21 => Some(ObjectType::CalendarAlarm),
             22 => Some(ObjectType::CalendarScheduling),
+            126 => Some(ObjectType::CalendarSettings),
             23 => Some(ObjectType::Certificate),
             24 => Some(ObjectType::ClusterNode),
             25 => Some(ObjectType::ClusterRole),
@@ -512,6 +529,7 @@ impl EnumImpl for ObjectType {
             40 => Some(ObjectType::Enterprise),
             // SPDX-SnippetEnd
             41 => Some(ObjectType::EventTracingLevel),
+            127 => Some(ObjectType::Exchange),
             121 => Some(ObjectType::ExternalPublicKey),
             42 => Some(ObjectType::FileStorage),
             43 => Some(ObjectType::Http),
@@ -522,6 +540,7 @@ impl EnumImpl for ObjectType {
             48 => Some(ObjectType::IndexQueueStatus),
             49 => Some(ObjectType::Jmap),
             50 => Some(ObjectType::Log),
+            128 => Some(ObjectType::MailRule),
             51 => Some(ObjectType::MailingList),
             52 => Some(ObjectType::MaskedEmail),
             53 => Some(ObjectType::MemoryLookupKey),
@@ -569,6 +588,7 @@ impl EnumImpl for ObjectType {
             84 => Some(ObjectType::QueuedMessage),
             85 => Some(ObjectType::ReportSettings),
             86 => Some(ObjectType::Role),
+            129 => Some(ObjectType::SafeSender),
             87 => Some(ObjectType::Search),
             88 => Some(ObjectType::SearchStore),
             89 => Some(ObjectType::Security),
@@ -628,7 +648,7 @@ impl EnumImpl for ObjectType {
         }
     }
 
-    const COUNT: usize = 125;
+    const COUNT: usize = 130;
 }
 
 impl serde::Serialize for ObjectType {
@@ -678,16 +698,19 @@ impl EnumImpl for Property {
             b"accountUri" => Property::AccountUri,
             b"accounts" => Property::Accounts,
             b"acmeProviderId" => Property::AcmeProviderId,
+            b"actions" => Property::Actions,
             b"addAuthResultsHeader" => Property::AddAuthResultsHeader,
             b"addDateHeader" => Property::AddDateHeader,
             b"addDeliveredToHeader" => Property::AddDeliveredToHeader,
             b"addHeader" => Property::AddHeader,
+            b"addKeywords" => Property::AddKeywords,
             b"addMessageIdHeader" => Property::AddMessageIdHeader,
             b"addReceivedHeader" => Property::AddReceivedHeader,
             b"addReceivedSpfHeader" => Property::AddReceivedSpfHeader,
             b"addReturnPathHeader" => Property::AddReturnPathHeader,
             b"additionalInformation" => Property::AdditionalInformation,
             b"address" => Property::Address,
+            b"addresses" => Property::Addresses,
             b"aggregateContactInfo" => Property::AggregateContactInfo,
             b"aggregateDkimSignDomain" => Property::AggregateDkimSignDomain,
             b"aggregateFromAddress" => Property::AggregateFromAddress,
@@ -702,15 +725,19 @@ impl EnumImpl for Property {
             b"algorithm" => Property::Algorithm,
             b"algorithms" => Property::Algorithms,
             b"aliases" => Property::Aliases,
+            b"allowConflicts" => Property::AllowConflicts,
             b"allowCount" => Property::AllowCount,
             b"allowDirectoryQueries" => Property::AllowDirectoryQueries,
+            b"allowExternal" => Property::AllowExternal,
             b"allowExternalRcpts" => Property::AllowExternalRcpts,
             b"allowIdTokenClaims" => Property::AllowIdTokenClaims,
             b"allowInvalidCerts" => Property::AllowInvalidCerts,
             b"allowPlainTextAuth" => Property::AllowPlainTextAuth,
+            b"allowRecurring" => Property::AllowRecurring,
             b"allowRelaying" => Property::AllowRelaying,
             b"allowScimProvisioning" => Property::AllowScimProvisioning,
             b"allowSpamTraining" => Property::AllowSpamTraining,
+            b"allowSubdomainSigning" => Property::AllowSubdomainSigning,
             b"allowedEndpoints" => Property::AllowedEndpoints,
             b"allowedIps" => Property::AllowedIps,
             b"allowedNotifyUris" => Property::AllowedNotifyUris,
@@ -774,6 +801,8 @@ impl EnumImpl for Property {
             b"blockCount" => Property::BlockCount,
             b"blockedFingerprints" => Property::BlockedFingerprints,
             b"body" => Property::Body,
+            b"booking" => Property::Booking,
+            b"bookingWindow" => Property::BookingWindow,
             b"breakerCooldown" => Property::BreakerCooldown,
             b"breakerThreshold" => Property::BreakerThreshold,
             b"bucket" => Property::Bucket,
@@ -781,11 +810,13 @@ impl EnumImpl for Property {
             b"bucketMedium" => Property::BucketMedium,
             b"bufferSize" => Property::BufferSize,
             b"buffered" => Property::Buffered,
+            b"caCertificate" => Property::CaCertificate,
             b"caPath" => Property::CaPath,
             b"caaIdentities" => Property::CaaIdentities,
             b"cacheSize" => Property::CacheSize,
             b"canonicalization" => Property::Canonicalization,
             b"capabilities" => Property::Capabilities,
+            b"capacity" => Property::Capacity,
             b"catchAllAddress" => Property::CatchAllAddress,
             b"categories" => Property::Categories,
             b"certPath" => Property::CertPath,
@@ -798,6 +829,7 @@ impl EnumImpl for Property {
             b"claimGroups" => Property::ClaimGroups,
             b"claimName" => Property::ClaimName,
             b"claimUsername" => Property::ClaimUsername,
+            b"clearKeywords" => Property::ClearKeywords,
             b"cleartext" => Property::Cleartext,
             b"clientCapacity" => Property::ClientCapacity,
             b"clientDataJson" => Property::ClientDataJson,
@@ -810,6 +842,7 @@ impl EnumImpl for Property {
             b"clientName" => Property::ClientName,
             b"clientSecret" => Property::ClientSecret,
             b"clientToken" => Property::ClientToken,
+            b"cluster" => Property::Cluster,
             b"clusterDiscovery" => Property::ClusterDiscovery,
             b"clusterFile" => Property::ClusterFile,
             b"columnClass" => Property::ColumnClass,
@@ -822,6 +855,7 @@ impl EnumImpl for Property {
             b"compression" => Property::Compression,
             b"compressionAlgorithm" => Property::CompressionAlgorithm,
             b"condition" => Property::Condition,
+            b"conditions" => Property::Conditions,
             b"config" => Property::Config,
             b"configName" => Property::ConfigName,
             b"connectTimeout" => Property::ConnectTimeout,
@@ -835,6 +869,8 @@ impl EnumImpl for Property {
             b"contentTypes" => Property::ContentTypes,
             b"contents" => Property::Contents,
             b"context" => Property::Context,
+            b"coordinators" => Property::Coordinators,
+            b"copyTo" => Property::CopyTo,
             b"count" => Property::Count,
             b"create" => Property::Create,
             b"createdAt" => Property::CreatedAt,
@@ -851,9 +887,11 @@ impl EnumImpl for Property {
             b"dataTypes" => Property::DataTypes,
             b"database" => Property::Database,
             b"datacenterId" => Property::DatacenterId,
+            b"date" => Property::Date,
             b"dateRangeEnd" => Property::DateRangeEnd,
             b"dateRangeStart" => Property::DateRangeStart,
             b"day" => Property::Day,
+            b"days" => Property::Days,
             b"deadline" => Property::Deadline,
             b"defaultAdminRoleIds" => Property::DefaultAdminRoleIds,
             b"defaultCertificateId" => Property::DefaultCertificateId,
@@ -877,6 +915,7 @@ impl EnumImpl for Property {
             b"defaultUserRoleIds" => Property::DefaultUserRoleIds,
             b"definition" => Property::Definition,
             b"delay" => Property::Delay,
+            b"delegateIds" => Property::DelegateIds,
             b"deleteAfter" => Property::DeleteAfter,
             b"deleteAfterUse" => Property::DeleteAfterUse,
             b"deliverAt" => Property::DeliverAt,
@@ -891,7 +930,9 @@ impl EnumImpl for Property {
             b"directoryRecipients" => Property::DirectoryRecipients,
             b"directoryRecipientsTtl" => Property::DirectoryRecipientsTtl,
             b"disableCapabilities" => Property::DisableCapabilities,
+            b"disablePlaintextConnection" => Property::DisablePlaintextConnection,
             b"disabledPermissions" => Property::DisabledPermissions,
+            b"discard" => Property::Discard,
             b"discardAfter" => Property::DiscardAfter,
             b"discoveryProxy" => Property::DiscoveryProxy,
             b"disposition" => Property::Disposition,
@@ -966,6 +1007,7 @@ impl EnumImpl for Property {
             b"encryption" => Property::Encryption,
             b"encryptionAtRest" => Property::EncryptionAtRest,
             b"encryptionKey" => Property::EncryptionKey,
+            b"end" => Property::End,
             b"envId" => Property::EnvId,
             b"envelopeFrom" => Property::EnvelopeFrom,
             b"envelopeTo" => Property::EnvelopeTo,
@@ -990,6 +1032,8 @@ impl EnumImpl for Property {
             b"eventStartTz" => Property::EventStartTz,
             b"events" => Property::Events,
             b"eventsPolicy" => Property::EventsPolicy,
+            b"ewsVersion" => Property::EwsVersion,
+            b"exchange" => Property::Exchange,
             b"expire" => Property::Expire,
             b"expires" => Property::Expires,
             b"expiresAt" => Property::ExpiresAt,
@@ -1069,6 +1113,7 @@ impl EnumImpl for Property {
             b"groupwareLarge" => Property::GroupwareLarge,
             b"groupwareLargeTtl" => Property::GroupwareLargeTtl,
             b"harvestKeys" => Property::HarvestKeys,
+            b"header" => Property::Header,
             b"headerFrom" => Property::HeaderFrom,
             b"headerProtection" => Property::HeaderProtection,
             b"headers" => Property::Headers,
@@ -1082,6 +1127,7 @@ impl EnumImpl for Property {
             b"hostname" => Property::Hostname,
             b"hosts" => Property::Hosts,
             b"hour" => Property::Hour,
+            b"htmlBody" => Property::HtmlBody,
             b"httpAuth" => Property::HttpAuth,
             b"httpHeaders" => Property::HttpHeaders,
             b"httpRsvpEnable" => Property::HttpRsvpEnable,
@@ -1141,6 +1187,7 @@ impl EnumImpl for Property {
             b"isActive" => Property::IsActive,
             b"isArchive" => Property::IsArchive,
             b"isBad" => Property::IsBad,
+            b"isEnabled" => Property::IsEnabled,
             b"isFromOrganizer" => Property::IsFromOrganizer,
             b"isGlobPattern" => Property::IsGlobPattern,
             b"isGzipped" => Property::IsGzipped,
@@ -1153,6 +1200,7 @@ impl EnumImpl for Property {
             b"issuerUrl" => Property::IssuerUrl,
             b"jitter" => Property::Jitter,
             b"keepAlive" => Property::KeepAlive,
+            b"keepCopy" => Property::KeepCopy,
             b"key" => Property::Key,
             b"keyId" => Property::KeyId,
             b"keyName" => Property::KeyName,
@@ -1161,6 +1209,8 @@ impl EnumImpl for Property {
             b"keyRefreshInterval" => Property::KeyRefreshInterval,
             b"keyType" => Property::KeyType,
             b"keyValues" => Property::KeyValues,
+            b"keywords" => Property::Keywords,
+            b"kilobytes" => Property::Kilobytes,
             b"kind" => Property::Kind,
             b"l1Ratio" => Property::L1Ratio,
             b"l2Ratio" => Property::L2Ratio,
@@ -1182,6 +1232,7 @@ impl EnumImpl for Property {
             b"localIp" => Property::LocalIp,
             b"localIps" => Property::LocalIps,
             b"locale" => Property::Locale,
+            b"location" => Property::Location,
             b"logo" => Property::Logo,
             b"logprobs" => Property::Logprobs,
             b"loiterBanPeriod" => Property::LoiterBanPeriod,
@@ -1197,6 +1248,9 @@ impl EnumImpl for Property {
             b"maintenanceType" => Property::MaintenanceType,
             b"managedZone" => Property::ManagedZone,
             b"match" => Property::Match,
+            b"matchAll" => Property::MatchAll,
+            b"matchAny" => Property::MatchAny,
+            b"matchNone" => Property::MatchNone,
             b"maxAccountSize" => Property::MaxAccountSize,
             b"maxAddressBooks" => Property::MaxAddressBooks,
             b"maxAddressBooksPerCard" => Property::MaxAddressBooksPerCard,
@@ -1229,6 +1283,7 @@ impl EnumImpl for Property {
             b"maxCrlSize" => Property::MaxCrlSize,
             b"maxDelay" => Property::MaxDelay,
             b"maxDepth" => Property::MaxDepth,
+            b"maxDevices" => Property::MaxDevices,
             b"maxDuration" => Property::MaxDuration,
             b"maxEntries" => Property::MaxEntries,
             b"maxEntrySize" => Property::MaxEntrySize,
@@ -1251,6 +1306,7 @@ impl EnumImpl for Property {
             b"maxGetResults" => Property::MaxGetResults,
             b"maxHeaderCount" => Property::MaxHeaderCount,
             b"maxHeaderSize" => Property::MaxHeaderSize,
+            b"maxHeartbeat" => Property::MaxHeartbeat,
             b"maxICalendarSize" => Property::MaxICalendarSize,
             b"maxIdentities" => Property::MaxIdentities,
             b"maxInboundReportSize" => Property::MaxInboundReportSize,
@@ -1281,6 +1337,7 @@ impl EnumImpl for Property {
             b"maxNestedForEvery" => Property::MaxNestedForEvery,
             b"maxNestedIncludes" => Property::MaxNestedIncludes,
             b"maxNestedTests" => Property::MaxNestedTests,
+            b"maxObjectSize" => Property::MaxObjectSize,
             b"maxOutMessages" => Property::MaxOutMessages,
             b"maxOutputTokens" => Property::MaxOutputTokens,
             b"maxParticipantIdentities" => Property::MaxParticipantIdentities,
@@ -1348,6 +1405,7 @@ impl EnumImpl for Property {
             b"mode" => Property::Mode,
             b"model" => Property::Model,
             b"modelId" => Property::ModelId,
+            b"moveTo" => Property::MoveTo,
             b"mtPriority" => Property::MtPriority,
             b"mtaSts" => Property::MtaSts,
             b"mtaStsTimeout" => Property::MtaStsTimeout,
@@ -1385,6 +1443,7 @@ impl EnumImpl for Property {
             b"onSuccessRenewCertificate" => Property::OnSuccessRenewCertificate,
             b"opaqueTokenValidation" => Property::OpaqueTokenValidation,
             b"openTelemetry" => Property::OpenTelemetry,
+            b"operator" => Property::Operator,
             b"options" => Property::Options,
             b"orcpt" => Property::Orcpt,
             b"orgName" => Property::OrgName,
@@ -1411,11 +1470,13 @@ impl EnumImpl for Property {
             b"passwordHashAlgorithm" => Property::PasswordHashAlgorithm,
             b"path" => Property::Path,
             b"pending" => Property::Pending,
+            b"percent" => Property::Percent,
             b"period" => Property::Period,
             b"permissions" => Property::Permissions,
             b"pingInterval" => Property::PingInterval,
             b"pinned" => Property::Pinned,
             b"pipelining" => Property::Pipelining,
+            b"placement" => Property::Placement,
             b"policies" => Property::Policies,
             b"policyAdkim" => Property::PolicyAdkim,
             b"policyAspf" => Property::PolicyAspf,
@@ -1441,6 +1502,7 @@ impl EnumImpl for Property {
             b"poolTimeoutWait" => Property::PoolTimeoutWait,
             b"poolWorkers" => Property::PoolWorkers,
             b"port" => Property::Port,
+            b"position" => Property::Position,
             b"postLogoutRedirectUris" => Property::PostLogoutRedirectUris,
             b"preferredChain" => Property::PreferredChain,
             b"prefix" => Property::Prefix,
@@ -1501,6 +1563,7 @@ impl EnumImpl for Property {
             b"recipients" => Property::Recipients,
             b"records" => Property::Records,
             b"recurrenceId" => Property::RecurrenceId,
+            b"redirect" => Property::Redirect,
             b"redirectCacheTtl" => Property::RedirectCacheTtl,
             b"redirectRoot" => Property::RedirectRoot,
             b"redirectTimeout" => Property::RedirectTimeout,
@@ -1509,9 +1572,12 @@ impl EnumImpl for Property {
             b"refreshTokenExpiry" => Property::RefreshTokenExpiry,
             b"region" => Property::Region,
             b"registration" => Property::Registration,
+            b"reject" => Property::Reject,
             b"rejectNonFqdn" => Property::RejectNonFqdn,
             b"remoteIp" => Property::RemoteIp,
+            b"removeKeywords" => Property::RemoveKeywords,
             b"renewBefore" => Property::RenewBefore,
+            b"reply" => Property::Reply,
             b"report" => Property::Report,
             b"reportAddressUri" => Property::ReportAddressUri,
             b"reportId" => Property::ReportId,
@@ -1586,8 +1652,10 @@ impl EnumImpl for Property {
             b"services" => Property::Services,
             b"sessionTimeout" => Property::SessionTimeout,
             b"sessionToken" => Property::SessionToken,
+            b"setImportance" => Property::SetImportance,
             b"shardConnections" => Property::ShardConnections,
             b"shardIndex" => Property::ShardIndex,
+            b"shareFreeBusy" => Property::ShareFreeBusy,
             b"sharedSecret" => Property::SharedSecret,
             b"signals" => Property::Signals,
             b"signatureAlgorithm" => Property::SignatureAlgorithm,
@@ -1596,6 +1664,7 @@ impl EnumImpl for Property {
             b"skipAudienceValidation" => Property::SkipAudienceValidation,
             b"skipDeploy" => Property::SkipDeploy,
             b"skipFirst" => Property::SkipFirst,
+            b"slots" => Property::Slots,
             b"smimeCiphers" => Property::SmimeCiphers,
             b"smimeOaep" => Property::SmimeOaep,
             b"smimeSignedAt" => Property::SmimeSignedAt,
@@ -1624,9 +1693,11 @@ impl EnumImpl for Property {
             b"spfResults" => Property::SpfResults,
             b"stage" => Property::Stage,
             b"stages" => Property::Stages,
+            b"start" => Property::Start,
             b"startTime" => Property::StartTime,
             b"startTls" => Property::StartTls,
             b"status" => Property::Status,
+            b"stopProcessing" => Property::StopProcessing,
             b"storageAccount" => Property::StorageAccount,
             b"store" => Property::Store,
             b"stores" => Property::Stores,
@@ -1658,6 +1729,7 @@ impl EnumImpl for Property {
             b"tenantId" => Property::TenantId,
             b"tenants" => Property::Tenants,
             b"text" => Property::Text,
+            b"textBody" => Property::TextBody,
             b"then" => Property::Then,
             b"thirdParty" => Property::ThirdParty,
             b"thirdPartyHash" => Property::ThirdPartyHash,
@@ -1715,12 +1787,14 @@ impl EnumImpl for Property {
             b"vCardVersion" => Property::VCardVersion,
             b"validateDomain" => Property::ValidateDomain,
             b"value" => Property::Value,
+            b"values" => Property::Values,
             b"variableName" => Property::VariableName,
             b"vendorNamespaces" => Property::VendorNamespaces,
             b"verbalHigh" => Property::VerbalHigh,
             b"verbalLow" => Property::VerbalLow,
             b"verbalMedium" => Property::VerbalMedium,
             b"verifyAfterWrite" => Property::VerifyAfterWrite,
+            b"verifyPeers" => Property::VerifyPeers,
             b"version" => Property::Version,
             b"viewName" => Property::ViewName,
             b"vrfy" => Property::Vrfy,
@@ -1734,6 +1808,7 @@ impl EnumImpl for Property {
             b"websocketThrottle" => Property::WebsocketThrottle,
             b"websocketTimeout" => Property::WebsocketTimeout,
             b"windowEnd" => Property::WindowEnd,
+            b"workingHours" => Property::WorkingHours,
             b"zone" => Property::Zone,
             b"zoneIpV4" => Property::ZoneIpV4,
             b"zoneIpV6" => Property::ZoneIpV6,
@@ -1766,15 +1841,18 @@ impl EnumImpl for Property {
             b"accountUri" => Property::AccountUri,
             b"accounts" => Property::Accounts,
             b"acmeProviderId" => Property::AcmeProviderId,
+            b"actions" => Property::Actions,
             b"addAuthResultsHeader" => Property::AddAuthResultsHeader,
             b"addDateHeader" => Property::AddDateHeader,
             b"addDeliveredToHeader" => Property::AddDeliveredToHeader,
+            b"addKeywords" => Property::AddKeywords,
             b"addMessageIdHeader" => Property::AddMessageIdHeader,
             b"addReceivedHeader" => Property::AddReceivedHeader,
             b"addReceivedSpfHeader" => Property::AddReceivedSpfHeader,
             b"addReturnPathHeader" => Property::AddReturnPathHeader,
             b"additionalInformation" => Property::AdditionalInformation,
             b"address" => Property::Address,
+            b"addresses" => Property::Addresses,
             b"aggregateContactInfo" => Property::AggregateContactInfo,
             b"aggregateDkimSignDomain" => Property::AggregateDkimSignDomain,
             b"aggregateFromAddress" => Property::AggregateFromAddress,
@@ -1786,14 +1864,18 @@ impl EnumImpl for Property {
             b"algorithm" => Property::Algorithm,
             b"algorithms" => Property::Algorithms,
             b"aliases" => Property::Aliases,
+            b"allowConflicts" => Property::AllowConflicts,
             b"allowCount" => Property::AllowCount,
             b"allowDirectoryQueries" => Property::AllowDirectoryQueries,
+            b"allowExternal" => Property::AllowExternal,
             b"allowExternalRcpts" => Property::AllowExternalRcpts,
             b"allowIdTokenClaims" => Property::AllowIdTokenClaims,
             b"allowInvalidCerts" => Property::AllowInvalidCerts,
             b"allowPlainTextAuth" => Property::AllowPlainTextAuth,
+            b"allowRecurring" => Property::AllowRecurring,
             b"allowRelaying" => Property::AllowRelaying,
             b"allowSpamTraining" => Property::AllowSpamTraining,
+            b"allowSubdomainSigning" => Property::AllowSubdomainSigning,
             b"allowedEndpoints" => Property::AllowedEndpoints,
             b"allowedIps" => Property::AllowedIps,
             b"allowedNotifyUris" => Property::AllowedNotifyUris,
@@ -1851,14 +1933,18 @@ impl EnumImpl for Property {
             b"blobStore" => Property::BlobStore,
             b"blockCount" => Property::BlockCount,
             b"blockedFingerprints" => Property::BlockedFingerprints,
+            b"booking" => Property::Booking,
+            b"bookingWindow" => Property::BookingWindow,
             b"bucket" => Property::Bucket,
             b"bufferSize" => Property::BufferSize,
             b"buffered" => Property::Buffered,
+            b"caCertificate" => Property::CaCertificate,
             b"caPath" => Property::CaPath,
             b"caaIdentities" => Property::CaaIdentities,
             b"cacheSize" => Property::CacheSize,
             b"canonicalization" => Property::Canonicalization,
             b"capabilities" => Property::Capabilities,
+            b"capacity" => Property::Capacity,
             b"catchAllAddress" => Property::CatchAllAddress,
             b"certPath" => Property::CertPath,
             b"certificate" => Property::Certificate,
@@ -1870,6 +1956,7 @@ impl EnumImpl for Property {
             b"claimGroups" => Property::ClaimGroups,
             b"claimName" => Property::ClaimName,
             b"claimUsername" => Property::ClaimUsername,
+            b"clearKeywords" => Property::ClearKeywords,
             b"cleartext" => Property::Cleartext,
             b"clientCapacity" => Property::ClientCapacity,
             b"clientDataJson" => Property::ClientDataJson,
@@ -1882,6 +1969,7 @@ impl EnumImpl for Property {
             b"clientName" => Property::ClientName,
             b"clientSecret" => Property::ClientSecret,
             b"clientToken" => Property::ClientToken,
+            b"cluster" => Property::Cluster,
             b"clusterDiscovery" => Property::ClusterDiscovery,
             b"clusterFile" => Property::ClusterFile,
             b"columnClass" => Property::ColumnClass,
@@ -1894,6 +1982,7 @@ impl EnumImpl for Property {
             b"compression" => Property::Compression,
             b"compressionAlgorithm" => Property::CompressionAlgorithm,
             b"condition" => Property::Condition,
+            b"conditions" => Property::Conditions,
             b"config" => Property::Config,
             b"configName" => Property::ConfigName,
             b"connectTimeout" => Property::ConnectTimeout,
@@ -1907,6 +1996,8 @@ impl EnumImpl for Property {
             b"contentTypes" => Property::ContentTypes,
             b"contents" => Property::Contents,
             b"context" => Property::Context,
+            b"coordinators" => Property::Coordinators,
+            b"copyTo" => Property::CopyTo,
             b"count" => Property::Count,
             b"create" => Property::Create,
             b"createdAt" => Property::CreatedAt,
@@ -1923,9 +2014,11 @@ impl EnumImpl for Property {
             b"dataTypes" => Property::DataTypes,
             b"database" => Property::Database,
             b"datacenterId" => Property::DatacenterId,
+            b"date" => Property::Date,
             b"dateRangeEnd" => Property::DateRangeEnd,
             b"dateRangeStart" => Property::DateRangeStart,
             b"day" => Property::Day,
+            b"days" => Property::Days,
             b"deadline" => Property::Deadline,
             b"defaultAdminRoleIds" => Property::DefaultAdminRoleIds,
             b"defaultCertificateId" => Property::DefaultCertificateId,
@@ -1948,6 +2041,7 @@ impl EnumImpl for Property {
             b"defaultUserRoleIds" => Property::DefaultUserRoleIds,
             b"definition" => Property::Definition,
             b"delay" => Property::Delay,
+            b"delegateIds" => Property::DelegateIds,
             b"deleteAfter" => Property::DeleteAfter,
             b"deleteAfterUse" => Property::DeleteAfterUse,
             b"deliverAt" => Property::DeliverAt,
@@ -1962,7 +2056,9 @@ impl EnumImpl for Property {
             b"directoryRecipients" => Property::DirectoryRecipients,
             b"directoryRecipientsTtl" => Property::DirectoryRecipientsTtl,
             b"disableCapabilities" => Property::DisableCapabilities,
+            b"disablePlaintextConnection" => Property::DisablePlaintextConnection,
             b"disabledPermissions" => Property::DisabledPermissions,
+            b"discard" => Property::Discard,
             b"discardAfter" => Property::DiscardAfter,
             b"discoveryProxy" => Property::DiscoveryProxy,
             b"disposition" => Property::Disposition,
@@ -2035,6 +2131,7 @@ impl EnumImpl for Property {
             b"encryption" => Property::Encryption,
             b"encryptionAtRest" => Property::EncryptionAtRest,
             b"encryptionKey" => Property::EncryptionKey,
+            b"end" => Property::End,
             b"envId" => Property::EnvId,
             b"envelopeFrom" => Property::EnvelopeFrom,
             b"envelopeTo" => Property::EnvelopeTo,
@@ -2055,6 +2152,8 @@ impl EnumImpl for Property {
             b"eventStartTz" => Property::EventStartTz,
             b"events" => Property::Events,
             b"eventsPolicy" => Property::EventsPolicy,
+            b"ewsVersion" => Property::EwsVersion,
+            b"exchange" => Property::Exchange,
             b"expire" => Property::Expire,
             b"expires" => Property::Expires,
             b"expiresAt" => Property::ExpiresAt,
@@ -2131,6 +2230,7 @@ impl EnumImpl for Property {
             b"groupwareLarge" => Property::GroupwareLarge,
             b"groupwareLargeTtl" => Property::GroupwareLargeTtl,
             b"harvestKeys" => Property::HarvestKeys,
+            b"header" => Property::Header,
             b"headerFrom" => Property::HeaderFrom,
             b"headerProtection" => Property::HeaderProtection,
             b"headers" => Property::Headers,
@@ -2142,6 +2242,7 @@ impl EnumImpl for Property {
             b"hostname" => Property::Hostname,
             b"hosts" => Property::Hosts,
             b"hour" => Property::Hour,
+            b"htmlBody" => Property::HtmlBody,
             b"httpAuth" => Property::HttpAuth,
             b"httpHeaders" => Property::HttpHeaders,
             b"httpRsvpEnable" => Property::HttpRsvpEnable,
@@ -2194,6 +2295,7 @@ impl EnumImpl for Property {
             b"isActive" => Property::IsActive,
             b"isArchive" => Property::IsArchive,
             b"isBad" => Property::IsBad,
+            b"isEnabled" => Property::IsEnabled,
             b"isFromOrganizer" => Property::IsFromOrganizer,
             b"isGlobPattern" => Property::IsGlobPattern,
             b"isGzipped" => Property::IsGzipped,
@@ -2205,6 +2307,7 @@ impl EnumImpl for Property {
             b"issuerDomainNames" => Property::IssuerDomainNames,
             b"issuerUrl" => Property::IssuerUrl,
             b"jitter" => Property::Jitter,
+            b"keepCopy" => Property::KeepCopy,
             b"key" => Property::Key,
             b"keyId" => Property::KeyId,
             b"keyName" => Property::KeyName,
@@ -2212,6 +2315,8 @@ impl EnumImpl for Property {
             b"keyPrefix" => Property::KeyPrefix,
             b"keyRefreshInterval" => Property::KeyRefreshInterval,
             b"keyType" => Property::KeyType,
+            b"keywords" => Property::Keywords,
+            b"kilobytes" => Property::Kilobytes,
             b"kind" => Property::Kind,
             b"l1Ratio" => Property::L1Ratio,
             b"l2Ratio" => Property::L2Ratio,
@@ -2231,6 +2336,7 @@ impl EnumImpl for Property {
             b"localIp" => Property::LocalIp,
             b"localIps" => Property::LocalIps,
             b"locale" => Property::Locale,
+            b"location" => Property::Location,
             b"logo" => Property::Logo,
             b"loiterBanPeriod" => Property::LoiterBanPeriod,
             b"loiterBanRate" => Property::LoiterBanRate,
@@ -2245,6 +2351,9 @@ impl EnumImpl for Property {
             b"maintenanceType" => Property::MaintenanceType,
             b"managedZone" => Property::ManagedZone,
             b"match" => Property::Match,
+            b"matchAll" => Property::MatchAll,
+            b"matchAny" => Property::MatchAny,
+            b"matchNone" => Property::MatchNone,
             b"maxAccountSize" => Property::MaxAccountSize,
             b"maxAddressBooks" => Property::MaxAddressBooks,
             b"maxAddressBooksPerCard" => Property::MaxAddressBooksPerCard,
@@ -2276,6 +2385,7 @@ impl EnumImpl for Property {
             b"maxCrlSize" => Property::MaxCrlSize,
             b"maxDelay" => Property::MaxDelay,
             b"maxDepth" => Property::MaxDepth,
+            b"maxDevices" => Property::MaxDevices,
             b"maxDuration" => Property::MaxDuration,
             b"maxEntries" => Property::MaxEntries,
             b"maxEntrySize" => Property::MaxEntrySize,
@@ -2298,6 +2408,7 @@ impl EnumImpl for Property {
             b"maxGetResults" => Property::MaxGetResults,
             b"maxHeaderCount" => Property::MaxHeaderCount,
             b"maxHeaderSize" => Property::MaxHeaderSize,
+            b"maxHeartbeat" => Property::MaxHeartbeat,
             b"maxICalendarSize" => Property::MaxICalendarSize,
             b"maxIdentities" => Property::MaxIdentities,
             b"maxInboundReportSize" => Property::MaxInboundReportSize,
@@ -2326,6 +2437,7 @@ impl EnumImpl for Property {
             b"maxNestedForEvery" => Property::MaxNestedForEvery,
             b"maxNestedIncludes" => Property::MaxNestedIncludes,
             b"maxNestedTests" => Property::MaxNestedTests,
+            b"maxObjectSize" => Property::MaxObjectSize,
             b"maxOutMessages" => Property::MaxOutMessages,
             b"maxParticipantIdentities" => Property::MaxParticipantIdentities,
             b"maxPasskeys" => Property::MaxPasskeys,
@@ -2387,6 +2499,7 @@ impl EnumImpl for Property {
             b"minute" => Property::Minute,
             b"mode" => Property::Mode,
             b"model" => Property::Model,
+            b"moveTo" => Property::MoveTo,
             b"mtPriority" => Property::MtPriority,
             b"mtaSts" => Property::MtaSts,
             b"mtaStsTimeout" => Property::MtaStsTimeout,
@@ -2424,6 +2537,7 @@ impl EnumImpl for Property {
             b"onSuccessRenewCertificate" => Property::OnSuccessRenewCertificate,
             b"opaqueTokenValidation" => Property::OpaqueTokenValidation,
             b"openTelemetry" => Property::OpenTelemetry,
+            b"operator" => Property::Operator,
             b"options" => Property::Options,
             b"orcpt" => Property::Orcpt,
             b"orgName" => Property::OrgName,
@@ -2450,11 +2564,13 @@ impl EnumImpl for Property {
             b"passwordHashAlgorithm" => Property::PasswordHashAlgorithm,
             b"path" => Property::Path,
             b"pending" => Property::Pending,
+            b"percent" => Property::Percent,
             b"period" => Property::Period,
             b"permissions" => Property::Permissions,
             b"pingInterval" => Property::PingInterval,
             b"pinned" => Property::Pinned,
             b"pipelining" => Property::Pipelining,
+            b"placement" => Property::Placement,
             b"policies" => Property::Policies,
             b"policyAdkim" => Property::PolicyAdkim,
             b"policyAspf" => Property::PolicyAspf,
@@ -2480,6 +2596,7 @@ impl EnumImpl for Property {
             b"poolTimeoutWait" => Property::PoolTimeoutWait,
             b"poolWorkers" => Property::PoolWorkers,
             b"port" => Property::Port,
+            b"position" => Property::Position,
             b"postLogoutRedirectUris" => Property::PostLogoutRedirectUris,
             b"preferredChain" => Property::PreferredChain,
             b"prefix" => Property::Prefix,
@@ -2537,6 +2654,7 @@ impl EnumImpl for Property {
             b"recipients" => Property::Recipients,
             b"records" => Property::Records,
             b"recurrenceId" => Property::RecurrenceId,
+            b"redirect" => Property::Redirect,
             b"redirectCacheTtl" => Property::RedirectCacheTtl,
             b"redirectRoot" => Property::RedirectRoot,
             b"redirectTimeout" => Property::RedirectTimeout,
@@ -2545,9 +2663,12 @@ impl EnumImpl for Property {
             b"refreshTokenExpiry" => Property::RefreshTokenExpiry,
             b"region" => Property::Region,
             b"registration" => Property::Registration,
+            b"reject" => Property::Reject,
             b"rejectNonFqdn" => Property::RejectNonFqdn,
             b"remoteIp" => Property::RemoteIp,
+            b"removeKeywords" => Property::RemoveKeywords,
             b"renewBefore" => Property::RenewBefore,
+            b"reply" => Property::Reply,
             b"report" => Property::Report,
             b"reportAddressUri" => Property::ReportAddressUri,
             b"reportId" => Property::ReportId,
@@ -2621,8 +2742,10 @@ impl EnumImpl for Property {
             b"services" => Property::Services,
             b"sessionTimeout" => Property::SessionTimeout,
             b"sessionToken" => Property::SessionToken,
+            b"setImportance" => Property::SetImportance,
             b"shardConnections" => Property::ShardConnections,
             b"shardIndex" => Property::ShardIndex,
+            b"shareFreeBusy" => Property::ShareFreeBusy,
             b"sharedSecret" => Property::SharedSecret,
             b"signatureAlgorithm" => Property::SignatureAlgorithm,
             b"signatureKey" => Property::SignatureKey,
@@ -2630,6 +2753,7 @@ impl EnumImpl for Property {
             b"skipAudienceValidation" => Property::SkipAudienceValidation,
             b"skipDeploy" => Property::SkipDeploy,
             b"skipFirst" => Property::SkipFirst,
+            b"slots" => Property::Slots,
             b"smimeCiphers" => Property::SmimeCiphers,
             b"smimeOaep" => Property::SmimeOaep,
             b"smimeSignedAt" => Property::SmimeSignedAt,
@@ -2658,8 +2782,10 @@ impl EnumImpl for Property {
             b"spfResults" => Property::SpfResults,
             b"stage" => Property::Stage,
             b"stages" => Property::Stages,
+            b"start" => Property::Start,
             b"startTls" => Property::StartTls,
             b"status" => Property::Status,
+            b"stopProcessing" => Property::StopProcessing,
             b"storageAccount" => Property::StorageAccount,
             b"store" => Property::Store,
             b"strategy" => Property::Strategy,
@@ -2686,6 +2812,7 @@ impl EnumImpl for Property {
             b"tenancyOcid" => Property::TenancyOcid,
             b"tenantId" => Property::TenantId,
             b"text" => Property::Text,
+            b"textBody" => Property::TextBody,
             b"then" => Property::Then,
             b"thirdParty" => Property::ThirdParty,
             b"thirdPartyHash" => Property::ThirdPartyHash,
@@ -2737,9 +2864,11 @@ impl EnumImpl for Property {
             b"vCardVersion" => Property::VCardVersion,
             b"validateDomain" => Property::ValidateDomain,
             b"value" => Property::Value,
+            b"values" => Property::Values,
             b"variableName" => Property::VariableName,
             b"vendorNamespaces" => Property::VendorNamespaces,
             b"verifyAfterWrite" => Property::VerifyAfterWrite,
+            b"verifyPeers" => Property::VerifyPeers,
             b"version" => Property::Version,
             b"viewName" => Property::ViewName,
             b"vrfy" => Property::Vrfy,
@@ -2752,6 +2881,7 @@ impl EnumImpl for Property {
             b"websocketThrottle" => Property::WebsocketThrottle,
             b"websocketTimeout" => Property::WebsocketTimeout,
             b"windowEnd" => Property::WindowEnd,
+            b"workingHours" => Property::WorkingHours,
             b"zone" => Property::Zone,
             b"zoneIpV4" => Property::ZoneIpV4,
             b"zoneIpV6" => Property::ZoneIpV6,
@@ -2780,6 +2910,7 @@ impl EnumImpl for Property {
             Property::AccountUri => "accountUri",
             Property::Accounts => "accounts",
             Property::AcmeProviderId => "acmeProviderId",
+            Property::Actions => "actions",
             Property::AddAuthResultsHeader => "addAuthResultsHeader",
             Property::AddDateHeader => "addDateHeader",
             Property::AddDeliveredToHeader => "addDeliveredToHeader",
@@ -2789,12 +2920,14 @@ impl EnumImpl for Property {
             #[cfg(feature = "enterprise")]
             Property::AddHeader => "addHeader",
             // SPDX-SnippetEnd
+            Property::AddKeywords => "addKeywords",
             Property::AddMessageIdHeader => "addMessageIdHeader",
             Property::AddReceivedHeader => "addReceivedHeader",
             Property::AddReceivedSpfHeader => "addReceivedSpfHeader",
             Property::AddReturnPathHeader => "addReturnPathHeader",
             Property::AdditionalInformation => "additionalInformation",
             Property::Address => "address",
+            Property::Addresses => "addresses",
             Property::AggregateContactInfo => "aggregateContactInfo",
             Property::AggregateDkimSignDomain => "aggregateDkimSignDomain",
             Property::AggregateFromAddress => "aggregateFromAddress",
@@ -2816,12 +2949,15 @@ impl EnumImpl for Property {
             Property::Algorithm => "algorithm",
             Property::Algorithms => "algorithms",
             Property::Aliases => "aliases",
+            Property::AllowConflicts => "allowConflicts",
             Property::AllowCount => "allowCount",
             Property::AllowDirectoryQueries => "allowDirectoryQueries",
+            Property::AllowExternal => "allowExternal",
             Property::AllowExternalRcpts => "allowExternalRcpts",
             Property::AllowIdTokenClaims => "allowIdTokenClaims",
             Property::AllowInvalidCerts => "allowInvalidCerts",
             Property::AllowPlainTextAuth => "allowPlainTextAuth",
+            Property::AllowRecurring => "allowRecurring",
             Property::AllowRelaying => "allowRelaying",
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
@@ -2830,6 +2966,7 @@ impl EnumImpl for Property {
             Property::AllowScimProvisioning => "allowScimProvisioning",
             // SPDX-SnippetEnd
             Property::AllowSpamTraining => "allowSpamTraining",
+            Property::AllowSubdomainSigning => "allowSubdomainSigning",
             Property::AllowedEndpoints => "allowedEndpoints",
             Property::AllowedIps => "allowedIps",
             Property::AllowedNotifyUris => "allowedNotifyUris",
@@ -2906,6 +3043,12 @@ impl EnumImpl for Property {
             // SPDX-License-Identifier: LicenseRef-SEL
             #[cfg(feature = "enterprise")]
             Property::Body => "body",
+            // SPDX-SnippetEnd
+            Property::Booking => "booking",
+            Property::BookingWindow => "bookingWindow",
+            // SPDX-SnippetBegin
+            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+            // SPDX-License-Identifier: LicenseRef-SEL
             #[cfg(feature = "enterprise")]
             Property::BreakerCooldown => "breakerCooldown",
             #[cfg(feature = "enterprise")]
@@ -2922,11 +3065,13 @@ impl EnumImpl for Property {
             // SPDX-SnippetEnd
             Property::BufferSize => "bufferSize",
             Property::Buffered => "buffered",
+            Property::CaCertificate => "caCertificate",
             Property::CaPath => "caPath",
             Property::CaaIdentities => "caaIdentities",
             Property::CacheSize => "cacheSize",
             Property::Canonicalization => "canonicalization",
             Property::Capabilities => "capabilities",
+            Property::Capacity => "capacity",
             Property::CatchAllAddress => "catchAllAddress",
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
@@ -2944,6 +3089,7 @@ impl EnumImpl for Property {
             Property::ClaimGroups => "claimGroups",
             Property::ClaimName => "claimName",
             Property::ClaimUsername => "claimUsername",
+            Property::ClearKeywords => "clearKeywords",
             Property::Cleartext => "cleartext",
             Property::ClientCapacity => "clientCapacity",
             Property::ClientDataJson => "clientDataJson",
@@ -2956,6 +3102,7 @@ impl EnumImpl for Property {
             Property::ClientName => "clientName",
             Property::ClientSecret => "clientSecret",
             Property::ClientToken => "clientToken",
+            Property::Cluster => "cluster",
             Property::ClusterDiscovery => "clusterDiscovery",
             Property::ClusterFile => "clusterFile",
             Property::ColumnClass => "columnClass",
@@ -2968,6 +3115,7 @@ impl EnumImpl for Property {
             Property::Compression => "compression",
             Property::CompressionAlgorithm => "compressionAlgorithm",
             Property::Condition => "condition",
+            Property::Conditions => "conditions",
             Property::Config => "config",
             Property::ConfigName => "configName",
             Property::ConnectTimeout => "connectTimeout",
@@ -2981,6 +3129,8 @@ impl EnumImpl for Property {
             Property::ContentTypes => "contentTypes",
             Property::Contents => "contents",
             Property::Context => "context",
+            Property::Coordinators => "coordinators",
+            Property::CopyTo => "copyTo",
             Property::Count => "count",
             Property::Create => "create",
             Property::CreatedAt => "createdAt",
@@ -2997,9 +3147,11 @@ impl EnumImpl for Property {
             Property::DataTypes => "dataTypes",
             Property::Database => "database",
             Property::DatacenterId => "datacenterId",
+            Property::Date => "date",
             Property::DateRangeEnd => "dateRangeEnd",
             Property::DateRangeStart => "dateRangeStart",
             Property::Day => "day",
+            Property::Days => "days",
             Property::Deadline => "deadline",
             Property::DefaultAdminRoleIds => "defaultAdminRoleIds",
             Property::DefaultCertificateId => "defaultCertificateId",
@@ -3028,6 +3180,7 @@ impl EnumImpl for Property {
             Property::DefaultUserRoleIds => "defaultUserRoleIds",
             Property::Definition => "definition",
             Property::Delay => "delay",
+            Property::DelegateIds => "delegateIds",
             Property::DeleteAfter => "deleteAfter",
             Property::DeleteAfterUse => "deleteAfterUse",
             Property::DeliverAt => "deliverAt",
@@ -3042,7 +3195,9 @@ impl EnumImpl for Property {
             Property::DirectoryRecipients => "directoryRecipients",
             Property::DirectoryRecipientsTtl => "directoryRecipientsTtl",
             Property::DisableCapabilities => "disableCapabilities",
+            Property::DisablePlaintextConnection => "disablePlaintextConnection",
             Property::DisabledPermissions => "disabledPermissions",
+            Property::Discard => "discard",
             Property::DiscardAfter => "discardAfter",
             Property::DiscoveryProxy => "discoveryProxy",
             Property::Disposition => "disposition",
@@ -3127,6 +3282,7 @@ impl EnumImpl for Property {
             Property::Encryption => "encryption",
             Property::EncryptionAtRest => "encryptionAtRest",
             Property::EncryptionKey => "encryptionKey",
+            Property::End => "end",
             Property::EnvId => "envId",
             Property::EnvelopeFrom => "envelopeFrom",
             Property::EnvelopeTo => "envelopeTo",
@@ -3167,6 +3323,8 @@ impl EnumImpl for Property {
             Property::EventStartTz => "eventStartTz",
             Property::Events => "events",
             Property::EventsPolicy => "eventsPolicy",
+            Property::EwsVersion => "ewsVersion",
+            Property::Exchange => "exchange",
             Property::Expire => "expire",
             Property::Expires => "expires",
             Property::ExpiresAt => "expiresAt",
@@ -3261,6 +3419,7 @@ impl EnumImpl for Property {
             Property::GroupwareLarge => "groupwareLarge",
             Property::GroupwareLargeTtl => "groupwareLargeTtl",
             Property::HarvestKeys => "harvestKeys",
+            Property::Header => "header",
             Property::HeaderFrom => "headerFrom",
             Property::HeaderProtection => "headerProtection",
             Property::Headers => "headers",
@@ -3284,6 +3443,7 @@ impl EnumImpl for Property {
             Property::Hostname => "hostname",
             Property::Hosts => "hosts",
             Property::Hour => "hour",
+            Property::HtmlBody => "htmlBody",
             Property::HttpAuth => "httpAuth",
             Property::HttpHeaders => "httpHeaders",
             Property::HttpRsvpEnable => "httpRsvpEnable",
@@ -3370,6 +3530,7 @@ impl EnumImpl for Property {
             Property::IsActive => "isActive",
             Property::IsArchive => "isArchive",
             Property::IsBad => "isBad",
+            Property::IsEnabled => "isEnabled",
             Property::IsFromOrganizer => "isFromOrganizer",
             Property::IsGlobPattern => "isGlobPattern",
             Property::IsGzipped => "isGzipped",
@@ -3387,6 +3548,7 @@ impl EnumImpl for Property {
             #[cfg(feature = "enterprise")]
             Property::KeepAlive => "keepAlive",
             // SPDX-SnippetEnd
+            Property::KeepCopy => "keepCopy",
             Property::Key => "key",
             Property::KeyId => "keyId",
             Property::KeyName => "keyName",
@@ -3400,6 +3562,8 @@ impl EnumImpl for Property {
             #[cfg(feature = "enterprise")]
             Property::KeyValues => "keyValues",
             // SPDX-SnippetEnd
+            Property::Keywords => "keywords",
+            Property::Kilobytes => "kilobytes",
             Property::Kind => "kind",
             Property::L1Ratio => "l1Ratio",
             Property::L2Ratio => "l2Ratio",
@@ -3431,6 +3595,7 @@ impl EnumImpl for Property {
             Property::LocalIp => "localIp",
             Property::LocalIps => "localIps",
             Property::Locale => "locale",
+            Property::Location => "location",
             Property::Logo => "logo",
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
@@ -3451,6 +3616,9 @@ impl EnumImpl for Property {
             Property::MaintenanceType => "maintenanceType",
             Property::ManagedZone => "managedZone",
             Property::Match => "match",
+            Property::MatchAll => "matchAll",
+            Property::MatchAny => "matchAny",
+            Property::MatchNone => "matchNone",
             Property::MaxAccountSize => "maxAccountSize",
             Property::MaxAddressBooks => "maxAddressBooks",
             Property::MaxAddressBooksPerCard => "maxAddressBooksPerCard",
@@ -3488,6 +3656,7 @@ impl EnumImpl for Property {
             Property::MaxCrlSize => "maxCrlSize",
             Property::MaxDelay => "maxDelay",
             Property::MaxDepth => "maxDepth",
+            Property::MaxDevices => "maxDevices",
             Property::MaxDuration => "maxDuration",
             Property::MaxEntries => "maxEntries",
             Property::MaxEntrySize => "maxEntrySize",
@@ -3510,6 +3679,7 @@ impl EnumImpl for Property {
             Property::MaxGetResults => "maxGetResults",
             Property::MaxHeaderCount => "maxHeaderCount",
             Property::MaxHeaderSize => "maxHeaderSize",
+            Property::MaxHeartbeat => "maxHeartbeat",
             Property::MaxICalendarSize => "maxICalendarSize",
             Property::MaxIdentities => "maxIdentities",
             Property::MaxInboundReportSize => "maxInboundReportSize",
@@ -3550,6 +3720,7 @@ impl EnumImpl for Property {
             Property::MaxNestedForEvery => "maxNestedForEvery",
             Property::MaxNestedIncludes => "maxNestedIncludes",
             Property::MaxNestedTests => "maxNestedTests",
+            Property::MaxObjectSize => "maxObjectSize",
             Property::MaxOutMessages => "maxOutMessages",
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
@@ -3647,6 +3818,7 @@ impl EnumImpl for Property {
             #[cfg(feature = "enterprise")]
             Property::ModelId => "modelId",
             // SPDX-SnippetEnd
+            Property::MoveTo => "moveTo",
             Property::MtPriority => "mtPriority",
             Property::MtaSts => "mtaSts",
             Property::MtaStsTimeout => "mtaStsTimeout",
@@ -3684,6 +3856,7 @@ impl EnumImpl for Property {
             Property::OnSuccessRenewCertificate => "onSuccessRenewCertificate",
             Property::OpaqueTokenValidation => "opaqueTokenValidation",
             Property::OpenTelemetry => "openTelemetry",
+            Property::Operator => "operator",
             Property::Options => "options",
             Property::Orcpt => "orcpt",
             Property::OrgName => "orgName",
@@ -3710,11 +3883,13 @@ impl EnumImpl for Property {
             Property::PasswordHashAlgorithm => "passwordHashAlgorithm",
             Property::Path => "path",
             Property::Pending => "pending",
+            Property::Percent => "percent",
             Property::Period => "period",
             Property::Permissions => "permissions",
             Property::PingInterval => "pingInterval",
             Property::Pinned => "pinned",
             Property::Pipelining => "pipelining",
+            Property::Placement => "placement",
             Property::Policies => "policies",
             Property::PolicyAdkim => "policyAdkim",
             Property::PolicyAspf => "policyAspf",
@@ -3740,6 +3915,7 @@ impl EnumImpl for Property {
             Property::PoolTimeoutWait => "poolTimeoutWait",
             Property::PoolWorkers => "poolWorkers",
             Property::Port => "port",
+            Property::Position => "position",
             Property::PostLogoutRedirectUris => "postLogoutRedirectUris",
             Property::PreferredChain => "preferredChain",
             Property::Prefix => "prefix",
@@ -3815,6 +3991,7 @@ impl EnumImpl for Property {
             Property::Recipients => "recipients",
             Property::Records => "records",
             Property::RecurrenceId => "recurrenceId",
+            Property::Redirect => "redirect",
             Property::RedirectCacheTtl => "redirectCacheTtl",
             Property::RedirectRoot => "redirectRoot",
             Property::RedirectTimeout => "redirectTimeout",
@@ -3823,9 +4000,12 @@ impl EnumImpl for Property {
             Property::RefreshTokenExpiry => "refreshTokenExpiry",
             Property::Region => "region",
             Property::Registration => "registration",
+            Property::Reject => "reject",
             Property::RejectNonFqdn => "rejectNonFqdn",
             Property::RemoteIp => "remoteIp",
+            Property::RemoveKeywords => "removeKeywords",
             Property::RenewBefore => "renewBefore",
+            Property::Reply => "reply",
             Property::Report => "report",
             Property::ReportAddressUri => "reportAddressUri",
             Property::ReportId => "reportId",
@@ -3905,8 +4085,10 @@ impl EnumImpl for Property {
             Property::Services => "services",
             Property::SessionTimeout => "sessionTimeout",
             Property::SessionToken => "sessionToken",
+            Property::SetImportance => "setImportance",
             Property::ShardConnections => "shardConnections",
             Property::ShardIndex => "shardIndex",
+            Property::ShareFreeBusy => "shareFreeBusy",
             Property::SharedSecret => "sharedSecret",
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
@@ -3920,6 +4102,7 @@ impl EnumImpl for Property {
             Property::SkipAudienceValidation => "skipAudienceValidation",
             Property::SkipDeploy => "skipDeploy",
             Property::SkipFirst => "skipFirst",
+            Property::Slots => "slots",
             Property::SmimeCiphers => "smimeCiphers",
             Property::SmimeOaep => "smimeOaep",
             Property::SmimeSignedAt => "smimeSignedAt",
@@ -3948,6 +4131,7 @@ impl EnumImpl for Property {
             Property::SpfResults => "spfResults",
             Property::Stage => "stage",
             Property::Stages => "stages",
+            Property::Start => "start",
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -3956,6 +4140,7 @@ impl EnumImpl for Property {
             // SPDX-SnippetEnd
             Property::StartTls => "startTls",
             Property::Status => "status",
+            Property::StopProcessing => "stopProcessing",
             Property::StorageAccount => "storageAccount",
             Property::Store => "store",
             // SPDX-SnippetBegin
@@ -4008,6 +4193,7 @@ impl EnumImpl for Property {
             Property::Tenants => "tenants",
             // SPDX-SnippetEnd
             Property::Text => "text",
+            Property::TextBody => "textBody",
             Property::Then => "then",
             Property::ThirdParty => "thirdParty",
             Property::ThirdPartyHash => "thirdPartyHash",
@@ -4095,6 +4281,7 @@ impl EnumImpl for Property {
             Property::VCardVersion => "vCardVersion",
             Property::ValidateDomain => "validateDomain",
             Property::Value => "value",
+            Property::Values => "values",
             Property::VariableName => "variableName",
             Property::VendorNamespaces => "vendorNamespaces",
             // SPDX-SnippetBegin
@@ -4108,6 +4295,7 @@ impl EnumImpl for Property {
             Property::VerbalMedium => "verbalMedium",
             // SPDX-SnippetEnd
             Property::VerifyAfterWrite => "verifyAfterWrite",
+            Property::VerifyPeers => "verifyPeers",
             Property::Version => "version",
             Property::ViewName => "viewName",
             Property::Vrfy => "vrfy",
@@ -4126,6 +4314,7 @@ impl EnumImpl for Property {
             Property::WebsocketThrottle => "websocketThrottle",
             Property::WebsocketTimeout => "websocketTimeout",
             Property::WindowEnd => "windowEnd",
+            Property::WorkingHours => "workingHours",
             Property::Zone => "zone",
             Property::ZoneIpV4 => "zoneIpV4",
             Property::ZoneIpV6 => "zoneIpV6",
@@ -4157,6 +4346,7 @@ impl EnumImpl for Property {
             16 => Some(Property::AccountUri),
             182 => Some(Property::Accounts),
             220 => Some(Property::AcmeProviderId),
+            1098 => Some(Property::Actions),
             649 => Some(Property::AddAuthResultsHeader),
             650 => Some(Property::AddDateHeader),
             651 => Some(Property::AddDeliveredToHeader),
@@ -4166,12 +4356,14 @@ impl EnumImpl for Property {
             #[cfg(feature = "enterprise")]
             852 => Some(Property::AddHeader),
             // SPDX-SnippetEnd
+            1099 => Some(Property::AddKeywords),
             652 => Some(Property::AddMessageIdHeader),
             653 => Some(Property::AddReceivedHeader),
             654 => Some(Property::AddReceivedSpfHeader),
             655 => Some(Property::AddReturnPathHeader),
             980 => Some(Property::AdditionalInformation),
             58 => Some(Property::Address),
+            1118 => Some(Property::Addresses),
             311 => Some(Property::AggregateContactInfo),
             317 => Some(Property::AggregateDkimSignDomain),
             312 => Some(Property::AggregateFromAddress),
@@ -4193,12 +4385,15 @@ impl EnumImpl for Property {
             1064 => Some(Property::Algorithm),
             265 => Some(Property::Algorithms),
             411 => Some(Property::Aliases),
+            1078 => Some(Property::AllowConflicts),
             903 => Some(Property::AllowCount),
             809 => Some(Property::AllowDirectoryQueries),
+            1080 => Some(Property::AllowExternal),
             203 => Some(Property::AllowExternalRcpts),
             717 => Some(Property::AllowIdTokenClaims),
             41 => Some(Property::AllowInvalidCerts),
             502 => Some(Property::AllowPlainTextAuth),
+            1079 => Some(Property::AllowRecurring),
             419 => Some(Property::AllowRelaying),
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
@@ -4207,6 +4402,7 @@ impl EnumImpl for Property {
             421 => Some(Property::AllowScimProvisioning),
             // SPDX-SnippetEnd
             446 => Some(Property::AllowSpamTraining),
+            1085 => Some(Property::AllowSubdomainSigning),
             475 => Some(Property::AllowedEndpoints),
             63 => Some(Property::AllowedIps),
             824 => Some(Property::AllowedNotifyUris),
@@ -4283,6 +4479,12 @@ impl EnumImpl for Property {
             // SPDX-License-Identifier: LicenseRef-SEL
             #[cfg(feature = "enterprise")]
             52 => Some(Property::Body),
+            // SPDX-SnippetEnd
+            1129 => Some(Property::Booking),
+            1081 => Some(Property::BookingWindow),
+            // SPDX-SnippetBegin
+            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+            // SPDX-License-Identifier: LicenseRef-SEL
             #[cfg(feature = "enterprise")]
             862 => Some(Property::BreakerCooldown),
             #[cfg(feature = "enterprise")]
@@ -4299,11 +4501,13 @@ impl EnumImpl for Property {
             // SPDX-SnippetEnd
             764 => Some(Property::BufferSize),
             1004 => Some(Property::Buffered),
+            1092 => Some(Property::CaCertificate),
             1073 => Some(Property::CaPath),
             19 => Some(Property::CaaIdentities),
             766 => Some(Property::CacheSize),
             254 => Some(Property::Canonicalization),
             1039 => Some(Property::Capabilities),
+            1127 => Some(Property::Capacity),
             417 => Some(Property::CatchAllAddress),
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
@@ -4321,6 +4525,7 @@ impl EnumImpl for Property {
             709 => Some(Property::ClaimGroups),
             708 => Some(Property::ClaimName),
             706 => Some(Property::ClaimUsername),
+            1101 => Some(Property::ClearKeywords),
             807 => Some(Property::Cleartext),
             677 => Some(Property::ClientCapacity),
             1065 => Some(Property::ClientDataJson),
@@ -4333,6 +4538,7 @@ impl EnumImpl for Property {
             700 => Some(Property::ClientName),
             133 => Some(Property::ClientSecret),
             377 => Some(Property::ClientToken),
+            1091 => Some(Property::Cluster),
             1068 => Some(Property::ClusterDiscovery),
             458 => Some(Property::ClusterFile),
             921 => Some(Property::ColumnClass),
@@ -4345,6 +4551,7 @@ impl EnumImpl for Property {
             1059 => Some(Property::Compression),
             431 => Some(Property::CompressionAlgorithm),
             48 => Some(Property::Condition),
+            1097 => Some(Property::Conditions),
             1011 => Some(Property::Config),
             367 => Some(Property::ConfigName),
             602 => Some(Property::ConnectTimeout),
@@ -4358,6 +4565,8 @@ impl EnumImpl for Property {
             900 => Some(Property::ContentTypes),
             79 => Some(Property::Contents),
             364 => Some(Property::Context),
+            1090 => Some(Property::Coordinators),
+            1105 => Some(Property::CopyTo),
             301 => Some(Property::Count),
             444 => Some(Property::Create),
             60 => Some(Property::CreatedAt),
@@ -4374,9 +4583,11 @@ impl EnumImpl for Property {
             582 => Some(Property::DataTypes),
             670 => Some(Property::Database),
             459 => Some(Property::DatacenterId),
+            1115 => Some(Property::Date),
             286 => Some(Property::DateRangeEnd),
             285 => Some(Property::DateRangeStart),
             230 => Some(Property::Day),
+            1122 => Some(Property::Days),
             860 => Some(Property::Deadline),
             123 => Some(Property::DefaultAdminRoleIds),
             929 => Some(Property::DefaultCertificateId),
@@ -4405,6 +4616,7 @@ impl EnumImpl for Property {
             120 => Some(Property::DefaultUserRoleIds),
             275 => Some(Property::Definition),
             966 => Some(Property::Delay),
+            1130 => Some(Property::DelegateIds),
             269 => Some(Property::DeleteAfter),
             918 => Some(Property::DeleteAfterUse),
             278 => Some(Property::DeliverAt),
@@ -4419,7 +4631,9 @@ impl EnumImpl for Property {
             188 => Some(Property::DirectoryRecipients),
             189 => Some(Property::DirectoryRecipientsTtl),
             823 => Some(Property::DisableCapabilities),
+            1094 => Some(Property::DisablePlaintextConnection),
             732 => Some(Property::DisabledPermissions),
+            1107 => Some(Property::Discard),
             1010 => Some(Property::DiscardAfter),
             1026 => Some(Property::DiscoveryProxy),
             890 => Some(Property::Disposition),
@@ -4504,6 +4718,7 @@ impl EnumImpl for Property {
             1060 => Some(Property::Encryption),
             9 => Some(Property::EncryptionAtRest),
             724 => Some(Property::EncryptionKey),
+            1132 => Some(Property::End),
             740 => Some(Property::EnvId),
             307 => Some(Property::EnvelopeFrom),
             306 => Some(Property::EnvelopeTo),
@@ -4544,6 +4759,8 @@ impl EnumImpl for Property {
             942 => Some(Property::EventStartTz),
             169 => Some(Property::Events),
             996 => Some(Property::EventsPolicy),
+            1086 => Some(Property::EwsVersion),
+            1082 => Some(Property::Exchange),
             255 => Some(Property::Expire),
             745 => Some(Property::Expires),
             61 => Some(Property::ExpiresAt),
@@ -4638,6 +4855,7 @@ impl EnumImpl for Property {
             175 => Some(Property::GroupwareLarge),
             176 => Some(Property::GroupwareLargeTtl),
             1024 => Some(Property::HarvestKeys),
+            1116 => Some(Property::Header),
             308 => Some(Property::HeaderFrom),
             1032 => Some(Property::HeaderProtection),
             107 => Some(Property::Headers),
@@ -4661,6 +4879,7 @@ impl EnumImpl for Property {
             223 => Some(Property::Hostname),
             547 => Some(Property::Hosts),
             228 => Some(Property::Hour),
+            1121 => Some(Property::HtmlBody),
             118 => Some(Property::HttpAuth),
             40 => Some(Property::HttpHeaders),
             206 => Some(Property::HttpRsvpEnable),
@@ -4747,6 +4966,7 @@ impl EnumImpl for Property {
             820 => Some(Property::IsActive),
             897 => Some(Property::IsArchive),
             898 => Some(Property::IsBad),
+            1095 => Some(Property::IsEnabled),
             947 => Some(Property::IsFromOrganizer),
             580 => Some(Property::IsGlobPattern),
             494 => Some(Property::IsGzipped),
@@ -4764,6 +4984,7 @@ impl EnumImpl for Property {
             #[cfg(feature = "enterprise")]
             46 => Some(Property::KeepAlive),
             // SPDX-SnippetEnd
+            1119 => Some(Property::KeepCopy),
             375 => Some(Property::Key),
             1061 => Some(Property::KeyId),
             406 => Some(Property::KeyName),
@@ -4777,6 +4998,8 @@ impl EnumImpl for Property {
             #[cfg(feature = "enterprise")]
             994 => Some(Property::KeyValues),
             // SPDX-SnippetEnd
+            1117 => Some(Property::Keywords),
+            1125 => Some(Property::Kilobytes),
             1037 => Some(Property::Kind),
             467 => Some(Property::L1Ratio),
             468 => Some(Property::L2Ratio),
@@ -4808,6 +5031,7 @@ impl EnumImpl for Property {
             600 => Some(Property::LocalIp),
             601 => Some(Property::LocalIps),
             7 => Some(Property::Locale),
+            1128 => Some(Property::Location),
             412 => Some(Property::Logo),
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
@@ -4828,6 +5052,9 @@ impl EnumImpl for Property {
             936 => Some(Property::MaintenanceType),
             382 => Some(Property::ManagedZone),
             450 => Some(Property::Match),
+            1112 => Some(Property::MatchAll),
+            1113 => Some(Property::MatchAny),
+            1114 => Some(Property::MatchNone),
             146 => Some(Property::MaxAccountSize),
             27 => Some(Property::MaxAddressBooks),
             30 => Some(Property::MaxAddressBooksPerCard),
@@ -4865,6 +5092,7 @@ impl EnumImpl for Property {
             1031 => Some(Property::MaxCrlSize),
             964 => Some(Property::MaxDelay),
             585 => Some(Property::MaxDepth),
+            1087 => Some(Property::MaxDevices),
             627 => Some(Property::MaxDuration),
             495 => Some(Property::MaxEntries),
             496 => Some(Property::MaxEntrySize),
@@ -4887,6 +5115,7 @@ impl EnumImpl for Property {
             522 => Some(Property::MaxGetResults),
             443 => Some(Property::MaxHeaderCount),
             442 => Some(Property::MaxHeaderSize),
+            1088 => Some(Property::MaxHeartbeat),
             193 => Some(Property::MaxICalendarSize),
             435 => Some(Property::MaxIdentities),
             762 => Some(Property::MaxInboundReportSize),
@@ -4927,6 +5156,7 @@ impl EnumImpl for Property {
             832 => Some(Property::MaxNestedForEvery),
             816 => Some(Property::MaxNestedIncludes),
             833 => Some(Property::MaxNestedTests),
+            1089 => Some(Property::MaxObjectSize),
             817 => Some(Property::MaxOutMessages),
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
@@ -5024,6 +5254,7 @@ impl EnumImpl for Property {
             #[cfg(feature = "enterprise")]
             866 => Some(Property::ModelId),
             // SPDX-SnippetEnd
+            1106 => Some(Property::MoveTo),
             619 => Some(Property::MtPriority),
             665 => Some(Property::MtaSts),
             667 => Some(Property::MtaStsTimeout),
@@ -5061,6 +5292,7 @@ impl EnumImpl for Property {
             955 => Some(Property::OnSuccessRenewCertificate),
             711 => Some(Property::OpaqueTokenValidation),
             592 => Some(Property::OpenTelemetry),
+            1110 => Some(Property::Operator),
             733 => Some(Property::Options),
             747 => Some(Property::Orcpt),
             281 => Some(Property::OrgName),
@@ -5087,11 +5319,13 @@ impl EnumImpl for Property {
             124 => Some(Property::PasswordHashAlgorithm),
             456 => Some(Property::Path),
             704 => Some(Property::Pending),
+            1126 => Some(Property::Percent),
             748 => Some(Property::Period),
             62 => Some(Property::Permissions),
             676 => Some(Property::PingInterval),
             1033 => Some(Property::Pinned),
             621 => Some(Property::Pipelining),
+            1124 => Some(Property::Placement),
             987 => Some(Property::Policies),
             290 => Some(Property::PolicyAdkim),
             291 => Some(Property::PolicyAspf),
@@ -5117,6 +5351,7 @@ impl EnumImpl for Property {
             570 => Some(Property::PoolTimeoutWait),
             765 => Some(Property::PoolWorkers),
             344 => Some(Property::Port),
+            1096 => Some(Property::Position),
             696 => Some(Property::PostLogoutRedirectUris),
             22 => Some(Property::PreferredChain),
             997 => Some(Property::Prefix),
@@ -5192,6 +5427,7 @@ impl EnumImpl for Property {
             573 => Some(Property::Recipients),
             296 => Some(Property::Records),
             945 => Some(Property::RecurrenceId),
+            1103 => Some(Property::Redirect),
             916 => Some(Property::RedirectCacheTtl),
             481 => Some(Property::RedirectRoot),
             915 => Some(Property::RedirectTimeout),
@@ -5200,9 +5436,12 @@ impl EnumImpl for Property {
             720 => Some(Property::RefreshTokenExpiry),
             356 => Some(Property::Region),
             1063 => Some(Property::Registration),
+            1108 => Some(Property::Reject),
             658 => Some(Property::RejectNonFqdn),
             324 => Some(Property::RemoteIp),
+            1100 => Some(Property::RemoveKeywords),
             20 => Some(Property::RenewBefore),
+            1104 => Some(Property::Reply),
             80 => Some(Property::Report),
             420 => Some(Property::ReportAddressUri),
             284 => Some(Property::ReportId),
@@ -5282,8 +5521,10 @@ impl EnumImpl for Property {
             933 => Some(Property::Services),
             550 => Some(Property::SessionTimeout),
             357 => Some(Property::SessionToken),
+            1102 => Some(Property::SetImportance),
             1070 => Some(Property::ShardConnections),
             973 => Some(Property::ShardIndex),
+            1083 => Some(Property::ShareFreeBusy),
             388 => Some(Property::SharedSecret),
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
@@ -5297,6 +5538,7 @@ impl EnumImpl for Property {
             716 => Some(Property::SkipAudienceValidation),
             369 => Some(Property::SkipDeploy),
             500 => Some(Property::SkipFirst),
+            1123 => Some(Property::Slots),
             1040 => Some(Property::SmimeCiphers),
             1041 => Some(Property::SmimeOaep),
             1042 => Some(Property::SmimeSignedAt),
@@ -5325,6 +5567,7 @@ impl EnumImpl for Property {
             310 => Some(Property::SpfResults),
             262 => Some(Property::Stage),
             626 => Some(Property::Stages),
+            1131 => Some(Property::Start),
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
@@ -5333,6 +5576,7 @@ impl EnumImpl for Property {
             // SPDX-SnippetEnd
             666 => Some(Property::StartTls),
             75 => Some(Property::Status),
+            1109 => Some(Property::StopProcessing),
             136 => Some(Property::StorageAccount),
             142 => Some(Property::Store),
             // SPDX-SnippetBegin
@@ -5385,6 +5629,7 @@ impl EnumImpl for Property {
             184 => Some(Property::Tenants),
             // SPDX-SnippetEnd
             2 => Some(Property::Text),
+            1120 => Some(Property::TextBody),
             453 => Some(Property::Then),
             257 => Some(Property::ThirdParty),
             258 => Some(Property::ThirdPartyHash),
@@ -5472,6 +5717,7 @@ impl EnumImpl for Property {
             29 => Some(Property::VCardVersion),
             491 => Some(Property::ValidateDomain),
             581 => Some(Property::Value),
+            1111 => Some(Property::Values),
             789 => Some(Property::VariableName),
             583 => Some(Property::VendorNamespaces),
             // SPDX-SnippetBegin
@@ -5485,6 +5731,7 @@ impl EnumImpl for Property {
             849 => Some(Property::VerbalMedium),
             // SPDX-SnippetEnd
             768 => Some(Property::VerifyAfterWrite),
+            1093 => Some(Property::VerifyPeers),
             94 => Some(Property::Version),
             368 => Some(Property::ViewName),
             623 => Some(Property::Vrfy),
@@ -5503,6 +5750,7 @@ impl EnumImpl for Property {
             541 => Some(Property::WebsocketThrottle),
             542 => Some(Property::WebsocketTimeout),
             960 => Some(Property::WindowEnd),
+            1084 => Some(Property::WorkingHours),
             501 => Some(Property::Zone),
             112 => Some(Property::ZoneIpV4),
             113 => Some(Property::ZoneIpV6),
@@ -5510,7 +5758,7 @@ impl EnumImpl for Property {
         }
     }
 
-    const COUNT: usize = 1078;
+    const COUNT: usize = 1133;
 }
 
 impl serde::Serialize for Property {
@@ -5564,11 +5812,13 @@ impl ObjectType {
             ObjectType::Authentication => Authentication::FLAGS,
             ObjectType::BlobStore => BlobStore::FLAGS,
             ObjectType::BlockedIp => BlockedIp::FLAGS,
+            ObjectType::BlockedSender => BlockedSender::FLAGS,
             ObjectType::Bootstrap => Bootstrap::FLAGS,
             ObjectType::Cache => Cache::FLAGS,
             ObjectType::Calendar => Calendar::FLAGS,
             ObjectType::CalendarAlarm => CalendarAlarm::FLAGS,
             ObjectType::CalendarScheduling => CalendarScheduling::FLAGS,
+            ObjectType::CalendarSettings => CalendarSettings::FLAGS,
             ObjectType::Certificate => Certificate::FLAGS,
             ObjectType::ClusterNode => ClusterNode::FLAGS,
             ObjectType::ClusterRole => ClusterRole::FLAGS,
@@ -5594,6 +5844,7 @@ impl ObjectType {
             ObjectType::Enterprise => Enterprise::FLAGS,
             // SPDX-SnippetEnd
             ObjectType::EventTracingLevel => EventTracingLevel::FLAGS,
+            ObjectType::Exchange => Exchange::FLAGS,
             ObjectType::ExternalPublicKey => ExternalPublicKey::FLAGS,
             ObjectType::FileStorage => FileStorage::FLAGS,
             ObjectType::Http => Http::FLAGS,
@@ -5604,6 +5855,7 @@ impl ObjectType {
             ObjectType::IndexQueueStatus => IndexQueueStatus::FLAGS,
             ObjectType::Jmap => Jmap::FLAGS,
             ObjectType::Log => Log::FLAGS,
+            ObjectType::MailRule => MailRule::FLAGS,
             ObjectType::MailingList => MailingList::FLAGS,
             ObjectType::MaskedEmail => MaskedEmail::FLAGS,
             ObjectType::MemoryLookupKey => MemoryLookupKey::FLAGS,
@@ -5651,6 +5903,7 @@ impl ObjectType {
             ObjectType::QueuedMessage => QueuedMessage::FLAGS,
             ObjectType::ReportSettings => ReportSettings::FLAGS,
             ObjectType::Role => Role::FLAGS,
+            ObjectType::SafeSender => SafeSender::FLAGS,
             ObjectType::Search => Search::FLAGS,
             ObjectType::SearchStore => SearchStore::FLAGS,
             ObjectType::Security => Security::FLAGS,
@@ -5723,6 +5976,11 @@ impl ObjectType {
                     IndexSchemaValueType::Enum,
                 ),
                 IndexSchema::new(
+                    Property::DelegateIds,
+                    IndexSchemaType::Search,
+                    IndexSchemaValueType::Id,
+                ),
+                IndexSchema::new(
                     Property::DomainId,
                     IndexSchemaType::Search,
                     IndexSchemaValueType::Id,
@@ -5737,6 +5995,11 @@ impl ObjectType {
                     IndexSchemaValueType::Keyword,
                 ),
                 // SPDX-SnippetEnd
+                IndexSchema::new(
+                    Property::Kind,
+                    IndexSchemaType::Search,
+                    IndexSchemaValueType::Enum,
+                ),
                 IndexSchema::new(
                     Property::MemberGroupIds,
                     IndexSchemaType::Search,
@@ -6103,11 +6366,13 @@ impl ObjectType {
             ObjectType::Authentication => Permission::SysAuthenticationGet,
             ObjectType::BlobStore => Permission::SysBlobStoreGet,
             ObjectType::BlockedIp => Permission::SysBlockedIpGet,
+            ObjectType::BlockedSender => Permission::SysBlockedSenderGet,
             ObjectType::Bootstrap => Permission::SysBootstrapGet,
             ObjectType::Cache => Permission::SysCacheGet,
             ObjectType::Calendar => Permission::SysCalendarGet,
             ObjectType::CalendarAlarm => Permission::SysCalendarAlarmGet,
             ObjectType::CalendarScheduling => Permission::SysCalendarSchedulingGet,
+            ObjectType::CalendarSettings => Permission::SysCalendarSettingsGet,
             ObjectType::Certificate => Permission::SysCertificateGet,
             ObjectType::ClusterNode => Permission::SysClusterNodeGet,
             ObjectType::ClusterRole => Permission::SysClusterRoleGet,
@@ -6133,6 +6398,7 @@ impl ObjectType {
             ObjectType::Enterprise => Permission::SysEnterpriseGet,
             // SPDX-SnippetEnd
             ObjectType::EventTracingLevel => Permission::SysEventTracingLevelGet,
+            ObjectType::Exchange => Permission::SysExchangeGet,
             ObjectType::ExternalPublicKey => Permission::SysExternalPublicKeyGet,
             ObjectType::FileStorage => Permission::SysFileStorageGet,
             ObjectType::Http => Permission::SysHttpGet,
@@ -6143,6 +6409,7 @@ impl ObjectType {
             ObjectType::IndexQueueStatus => Permission::SysIndexQueueStatusGet,
             ObjectType::Jmap => Permission::SysJmapGet,
             ObjectType::Log => Permission::SysLogGet,
+            ObjectType::MailRule => Permission::SysMailRuleGet,
             ObjectType::MailingList => Permission::SysMailingListGet,
             ObjectType::MaskedEmail => Permission::SysMaskedEmailGet,
             ObjectType::MemoryLookupKey => Permission::SysMemoryLookupKeyGet,
@@ -6190,6 +6457,7 @@ impl ObjectType {
             ObjectType::QueuedMessage => Permission::SysQueuedMessageGet,
             ObjectType::ReportSettings => Permission::SysReportSettingsGet,
             ObjectType::Role => Permission::SysRoleGet,
+            ObjectType::SafeSender => Permission::SysSafeSenderGet,
             ObjectType::Search => Permission::SysSearchGet,
             ObjectType::SearchStore => Permission::SysSearchStoreGet,
             ObjectType::Security => Permission::SysSecurityGet,
@@ -6272,6 +6540,7 @@ impl ObjectType {
             // SPDX-SnippetEnd
             ObjectType::ArfExternalReport => Permission::SysArfExternalReportQuery,
             ObjectType::BlockedIp => Permission::SysBlockedIpQuery,
+            ObjectType::BlockedSender => Permission::SysBlockedSenderQuery,
             ObjectType::Certificate => Permission::SysCertificateQuery,
             ObjectType::ClusterNode => Permission::SysClusterNodeQuery,
             ObjectType::ClusterRole => Permission::SysClusterRoleQuery,
@@ -6286,6 +6555,7 @@ impl ObjectType {
             ObjectType::HttpLookup => Permission::SysHttpLookupQuery,
             ObjectType::IndexQueueStatus => Permission::SysIndexQueueStatusQuery,
             ObjectType::Log => Permission::SysLogQuery,
+            ObjectType::MailRule => Permission::SysMailRuleQuery,
             ObjectType::MailingList => Permission::SysMailingListQuery,
             ObjectType::MaskedEmail => Permission::SysMaskedEmailQuery,
             ObjectType::MemoryLookupKey => Permission::SysMemoryLookupKeyQuery,
@@ -6313,6 +6583,7 @@ impl ObjectType {
             ObjectType::PublicKey => Permission::SysPublicKeyQuery,
             ObjectType::QueuedMessage => Permission::SysQueuedMessageQuery,
             ObjectType::Role => Permission::SysRoleQuery,
+            ObjectType::SafeSender => Permission::SysSafeSenderQuery,
             ObjectType::SieveSystemScript => Permission::SysSieveSystemScriptQuery,
             ObjectType::SieveUserScript => Permission::SysSieveUserScriptQuery,
             ObjectType::SmimeTrustAnchor => Permission::SysSmimeTrustAnchorQuery,
@@ -6375,11 +6646,13 @@ impl ObjectType {
             ObjectType::Authentication => Permission::SysAuthenticationUpdate,
             ObjectType::BlobStore => Permission::SysBlobStoreUpdate,
             ObjectType::BlockedIp => Permission::SysBlockedIpCreate,
+            ObjectType::BlockedSender => Permission::SysBlockedSenderCreate,
             ObjectType::Bootstrap => Permission::SysBootstrapUpdate,
             ObjectType::Cache => Permission::SysCacheUpdate,
             ObjectType::Calendar => Permission::SysCalendarUpdate,
             ObjectType::CalendarAlarm => Permission::SysCalendarAlarmUpdate,
             ObjectType::CalendarScheduling => Permission::SysCalendarSchedulingUpdate,
+            ObjectType::CalendarSettings => Permission::SysCalendarSettingsUpdate,
             ObjectType::Certificate => Permission::SysCertificateCreate,
             ObjectType::ClusterNode => unreachable!(),
             ObjectType::ClusterRole => Permission::SysClusterRoleCreate,
@@ -6405,6 +6678,7 @@ impl ObjectType {
             ObjectType::Enterprise => Permission::SysEnterpriseUpdate,
             // SPDX-SnippetEnd
             ObjectType::EventTracingLevel => Permission::SysEventTracingLevelCreate,
+            ObjectType::Exchange => Permission::SysExchangeUpdate,
             ObjectType::ExternalPublicKey => Permission::SysExternalPublicKeyCreate,
             ObjectType::FileStorage => Permission::SysFileStorageUpdate,
             ObjectType::Http => Permission::SysHttpUpdate,
@@ -6415,6 +6689,7 @@ impl ObjectType {
             ObjectType::IndexQueueStatus => unreachable!(),
             ObjectType::Jmap => Permission::SysJmapUpdate,
             ObjectType::Log => unreachable!(),
+            ObjectType::MailRule => Permission::SysMailRuleCreate,
             ObjectType::MailingList => Permission::SysMailingListCreate,
             ObjectType::MaskedEmail => Permission::SysMaskedEmailCreate,
             ObjectType::MemoryLookupKey => Permission::SysMemoryLookupKeyCreate,
@@ -6462,6 +6737,7 @@ impl ObjectType {
             ObjectType::QueuedMessage => unreachable!(),
             ObjectType::ReportSettings => Permission::SysReportSettingsUpdate,
             ObjectType::Role => Permission::SysRoleCreate,
+            ObjectType::SafeSender => Permission::SysSafeSenderCreate,
             ObjectType::Search => Permission::SysSearchUpdate,
             ObjectType::SearchStore => Permission::SysSearchStoreUpdate,
             ObjectType::Security => Permission::SysSecurityUpdate,
@@ -6551,11 +6827,13 @@ impl ObjectType {
             ObjectType::Authentication => Permission::SysAuthenticationUpdate,
             ObjectType::BlobStore => Permission::SysBlobStoreUpdate,
             ObjectType::BlockedIp => Permission::SysBlockedIpUpdate,
+            ObjectType::BlockedSender => unreachable!(),
             ObjectType::Bootstrap => Permission::SysBootstrapUpdate,
             ObjectType::Cache => Permission::SysCacheUpdate,
             ObjectType::Calendar => Permission::SysCalendarUpdate,
             ObjectType::CalendarAlarm => Permission::SysCalendarAlarmUpdate,
             ObjectType::CalendarScheduling => Permission::SysCalendarSchedulingUpdate,
+            ObjectType::CalendarSettings => Permission::SysCalendarSettingsUpdate,
             ObjectType::Certificate => Permission::SysCertificateUpdate,
             ObjectType::ClusterNode => unreachable!(),
             ObjectType::ClusterRole => Permission::SysClusterRoleUpdate,
@@ -6581,6 +6859,7 @@ impl ObjectType {
             ObjectType::Enterprise => Permission::SysEnterpriseUpdate,
             // SPDX-SnippetEnd
             ObjectType::EventTracingLevel => Permission::SysEventTracingLevelUpdate,
+            ObjectType::Exchange => Permission::SysExchangeUpdate,
             ObjectType::ExternalPublicKey => Permission::SysExternalPublicKeyUpdate,
             ObjectType::FileStorage => Permission::SysFileStorageUpdate,
             ObjectType::Http => Permission::SysHttpUpdate,
@@ -6591,6 +6870,7 @@ impl ObjectType {
             ObjectType::IndexQueueStatus => Permission::SysIndexQueueStatusUpdate,
             ObjectType::Jmap => Permission::SysJmapUpdate,
             ObjectType::Log => unreachable!(),
+            ObjectType::MailRule => Permission::SysMailRuleUpdate,
             ObjectType::MailingList => Permission::SysMailingListUpdate,
             ObjectType::MaskedEmail => Permission::SysMaskedEmailUpdate,
             ObjectType::MemoryLookupKey => Permission::SysMemoryLookupKeyUpdate,
@@ -6638,6 +6918,7 @@ impl ObjectType {
             ObjectType::QueuedMessage => Permission::SysQueuedMessageUpdate,
             ObjectType::ReportSettings => Permission::SysReportSettingsUpdate,
             ObjectType::Role => Permission::SysRoleUpdate,
+            ObjectType::SafeSender => unreachable!(),
             ObjectType::Search => Permission::SysSearchUpdate,
             ObjectType::SearchStore => Permission::SysSearchStoreUpdate,
             ObjectType::Security => Permission::SysSecurityUpdate,
@@ -6727,11 +7008,13 @@ impl ObjectType {
             ObjectType::Authentication => Permission::SysAuthenticationUpdate,
             ObjectType::BlobStore => Permission::SysBlobStoreUpdate,
             ObjectType::BlockedIp => Permission::SysBlockedIpDestroy,
+            ObjectType::BlockedSender => Permission::SysBlockedSenderDestroy,
             ObjectType::Bootstrap => Permission::SysBootstrapUpdate,
             ObjectType::Cache => Permission::SysCacheUpdate,
             ObjectType::Calendar => Permission::SysCalendarUpdate,
             ObjectType::CalendarAlarm => Permission::SysCalendarAlarmUpdate,
             ObjectType::CalendarScheduling => Permission::SysCalendarSchedulingUpdate,
+            ObjectType::CalendarSettings => Permission::SysCalendarSettingsUpdate,
             ObjectType::Certificate => Permission::SysCertificateDestroy,
             ObjectType::ClusterNode => unreachable!(),
             ObjectType::ClusterRole => Permission::SysClusterRoleDestroy,
@@ -6757,6 +7040,7 @@ impl ObjectType {
             ObjectType::Enterprise => Permission::SysEnterpriseUpdate,
             // SPDX-SnippetEnd
             ObjectType::EventTracingLevel => Permission::SysEventTracingLevelDestroy,
+            ObjectType::Exchange => Permission::SysExchangeUpdate,
             ObjectType::ExternalPublicKey => Permission::SysExternalPublicKeyDestroy,
             ObjectType::FileStorage => Permission::SysFileStorageUpdate,
             ObjectType::Http => Permission::SysHttpUpdate,
@@ -6767,6 +7051,7 @@ impl ObjectType {
             ObjectType::IndexQueueStatus => unreachable!(),
             ObjectType::Jmap => Permission::SysJmapUpdate,
             ObjectType::Log => unreachable!(),
+            ObjectType::MailRule => Permission::SysMailRuleDestroy,
             ObjectType::MailingList => Permission::SysMailingListDestroy,
             ObjectType::MaskedEmail => Permission::SysMaskedEmailDestroy,
             ObjectType::MemoryLookupKey => Permission::SysMemoryLookupKeyDestroy,
@@ -6814,6 +7099,7 @@ impl ObjectType {
             ObjectType::QueuedMessage => Permission::SysQueuedMessageDestroy,
             ObjectType::ReportSettings => Permission::SysReportSettingsUpdate,
             ObjectType::Role => Permission::SysRoleDestroy,
+            ObjectType::SafeSender => Permission::SysSafeSenderDestroy,
             ObjectType::Search => Permission::SysSearchUpdate,
             ObjectType::SearchStore => Permission::SysSearchStoreUpdate,
             ObjectType::Security => Permission::SysSecurityUpdate,
@@ -6883,6 +7169,7 @@ impl ObjectInner {
             ObjectInner::Account(inner) => match inner.as_ref() {
                 Account::User(obj) => obj.member_tenant_id,
                 Account::Group(obj) => obj.member_tenant_id,
+                Account::Resource(obj) => obj.member_tenant_id,
             },
             ObjectInner::AcmeProvider(obj) => obj.member_tenant_id,
             ObjectInner::ArfExternalReport(obj) => obj.member_tenant_id,
@@ -6986,6 +7273,7 @@ impl ObjectInner {
             ObjectInner::Account(inner) => match inner.as_mut() {
                 Account::User(obj) => obj.member_tenant_id = Some(id),
                 Account::Group(obj) => obj.member_tenant_id = Some(id),
+                Account::Resource(obj) => obj.member_tenant_id = Some(id),
             },
             ObjectInner::AcmeProvider(obj) => obj.member_tenant_id = Some(id),
             ObjectInner::ArfExternalReport(obj) => obj.member_tenant_id = Some(id),
@@ -7191,11 +7479,13 @@ impl ObjectInner {
             ObjectInner::Authentication(obj) => obj.to_pickled_vec(),
             ObjectInner::BlobStore(obj) => obj.to_pickled_vec(),
             ObjectInner::BlockedIp(obj) => obj.to_pickled_vec(),
+            ObjectInner::BlockedSender(_) => unimplemented!("BlockedSender is not stored"),
             ObjectInner::Bootstrap(_) => unimplemented!("Bootstrap is not stored"),
             ObjectInner::Cache(obj) => obj.to_pickled_vec(),
             ObjectInner::Calendar(obj) => obj.to_pickled_vec(),
             ObjectInner::CalendarAlarm(obj) => obj.to_pickled_vec(),
             ObjectInner::CalendarScheduling(obj) => obj.to_pickled_vec(),
+            ObjectInner::CalendarSettings(obj) => obj.to_pickled_vec(),
             ObjectInner::Certificate(obj) => obj.to_pickled_vec(),
             ObjectInner::ClusterNode(_) => unimplemented!("ClusterNode is not stored"),
             ObjectInner::ClusterRole(obj) => obj.to_pickled_vec(),
@@ -7221,6 +7511,7 @@ impl ObjectInner {
             ObjectInner::Enterprise(obj) => obj.to_pickled_vec(),
             // SPDX-SnippetEnd
             ObjectInner::EventTracingLevel(obj) => obj.to_pickled_vec(),
+            ObjectInner::Exchange(obj) => obj.to_pickled_vec(),
             ObjectInner::ExternalPublicKey(obj) => obj.to_pickled_vec(),
             ObjectInner::FileStorage(obj) => obj.to_pickled_vec(),
             ObjectInner::Http(obj) => obj.to_pickled_vec(),
@@ -7231,6 +7522,7 @@ impl ObjectInner {
             ObjectInner::IndexQueueStatus(_) => unimplemented!("IndexQueueStatus is not stored"),
             ObjectInner::Jmap(obj) => obj.to_pickled_vec(),
             ObjectInner::Log(_) => unimplemented!("Log is not stored"),
+            ObjectInner::MailRule(_) => unimplemented!("MailRule is not stored"),
             ObjectInner::MailingList(obj) => obj.to_pickled_vec(),
             ObjectInner::MaskedEmail(obj) => obj.to_pickled_vec(),
             ObjectInner::MemoryLookupKey(obj) => obj.to_pickled_vec(),
@@ -7278,6 +7570,7 @@ impl ObjectInner {
             ObjectInner::QueuedMessage(_) => unimplemented!("QueuedMessage is not stored"),
             ObjectInner::ReportSettings(obj) => obj.to_pickled_vec(),
             ObjectInner::Role(obj) => obj.to_pickled_vec(),
+            ObjectInner::SafeSender(_) => unimplemented!("SafeSender is not stored"),
             ObjectInner::Search(obj) => obj.to_pickled_vec(),
             ObjectInner::SearchStore(obj) => obj.to_pickled_vec(),
             ObjectInner::Security(obj) => obj.to_pickled_vec(),
@@ -7394,6 +7687,7 @@ impl ObjectInner {
             ObjectType::BlockedIp => {
                 Pickle::unpickle(stream).map(|obj| ObjectInner::BlockedIp(Box::new(obj)))
             }
+            ObjectType::BlockedSender => unimplemented!("BlockedSender is not stored"),
             ObjectType::Bootstrap => unimplemented!("Bootstrap is not stored"),
             ObjectType::Cache => {
                 Pickle::unpickle(stream).map(|obj| ObjectInner::Cache(Box::new(obj)))
@@ -7406,6 +7700,9 @@ impl ObjectInner {
             }
             ObjectType::CalendarScheduling => {
                 Pickle::unpickle(stream).map(|obj| ObjectInner::CalendarScheduling(Box::new(obj)))
+            }
+            ObjectType::CalendarSettings => {
+                Pickle::unpickle(stream).map(|obj| ObjectInner::CalendarSettings(Box::new(obj)))
             }
             ObjectType::Certificate => {
                 Pickle::unpickle(stream).map(|obj| ObjectInner::Certificate(Box::new(obj)))
@@ -7468,6 +7765,9 @@ impl ObjectInner {
             ObjectType::EventTracingLevel => {
                 Pickle::unpickle(stream).map(|obj| ObjectInner::EventTracingLevel(Box::new(obj)))
             }
+            ObjectType::Exchange => {
+                Pickle::unpickle(stream).map(|obj| ObjectInner::Exchange(Box::new(obj)))
+            }
             ObjectType::ExternalPublicKey => {
                 Pickle::unpickle(stream).map(|obj| ObjectInner::ExternalPublicKey(Box::new(obj)))
             }
@@ -7494,6 +7794,7 @@ impl ObjectInner {
                 Pickle::unpickle(stream).map(|obj| ObjectInner::Jmap(Box::new(obj)))
             }
             ObjectType::Log => unimplemented!("Log is not stored"),
+            ObjectType::MailRule => unimplemented!("MailRule is not stored"),
             ObjectType::MailingList => {
                 Pickle::unpickle(stream).map(|obj| ObjectInner::MailingList(Box::new(obj)))
             }
@@ -7610,6 +7911,7 @@ impl ObjectInner {
             ObjectType::Role => {
                 Pickle::unpickle(stream).map(|obj| ObjectInner::Role(Box::new(obj)))
             }
+            ObjectType::SafeSender => unimplemented!("SafeSender is not stored"),
             ObjectType::Search => {
                 Pickle::unpickle(stream).map(|obj| ObjectInner::Search(Box::new(obj)))
             }
@@ -7795,6 +8097,8 @@ impl ObjectInner {
                 .map(|obj| ObjectInner::BlobStore(Box::new(obj))),
             ObjectType::BlockedIp => BlockedIp::deserialize(deserializer)
                 .map(|obj| ObjectInner::BlockedIp(Box::new(obj))),
+            ObjectType::BlockedSender => BlockedSender::deserialize(deserializer)
+                .map(|obj| ObjectInner::BlockedSender(Box::new(obj))),
             ObjectType::Bootstrap => Bootstrap::deserialize(deserializer)
                 .map(|obj| ObjectInner::Bootstrap(Box::new(obj))),
             ObjectType::Cache => {
@@ -7807,6 +8111,8 @@ impl ObjectInner {
                 .map(|obj| ObjectInner::CalendarAlarm(Box::new(obj))),
             ObjectType::CalendarScheduling => CalendarScheduling::deserialize(deserializer)
                 .map(|obj| ObjectInner::CalendarScheduling(Box::new(obj))),
+            ObjectType::CalendarSettings => CalendarSettings::deserialize(deserializer)
+                .map(|obj| ObjectInner::CalendarSettings(Box::new(obj))),
             ObjectType::Certificate => Certificate::deserialize(deserializer)
                 .map(|obj| ObjectInner::Certificate(Box::new(obj))),
             ObjectType::ClusterNode => ClusterNode::deserialize(deserializer)
@@ -7854,6 +8160,9 @@ impl ObjectInner {
             // SPDX-SnippetEnd
             ObjectType::EventTracingLevel => EventTracingLevel::deserialize(deserializer)
                 .map(|obj| ObjectInner::EventTracingLevel(Box::new(obj))),
+            ObjectType::Exchange => {
+                Exchange::deserialize(deserializer).map(|obj| ObjectInner::Exchange(Box::new(obj)))
+            }
             ObjectType::ExternalPublicKey => ExternalPublicKey::deserialize(deserializer)
                 .map(|obj| ObjectInner::ExternalPublicKey(Box::new(obj))),
             ObjectType::FileStorage => FileStorage::deserialize(deserializer)
@@ -7878,6 +8187,9 @@ impl ObjectInner {
             }
             ObjectType::Log => {
                 Log::deserialize(deserializer).map(|obj| ObjectInner::Log(Box::new(obj)))
+            }
+            ObjectType::MailRule => {
+                MailRule::deserialize(deserializer).map(|obj| ObjectInner::MailRule(Box::new(obj)))
             }
             ObjectType::MailingList => MailingList::deserialize(deserializer)
                 .map(|obj| ObjectInner::MailingList(Box::new(obj))),
@@ -7971,6 +8283,8 @@ impl ObjectInner {
             ObjectType::Role => {
                 Role::deserialize(deserializer).map(|obj| ObjectInner::Role(Box::new(obj)))
             }
+            ObjectType::SafeSender => SafeSender::deserialize(deserializer)
+                .map(|obj| ObjectInner::SafeSender(Box::new(obj))),
             ObjectType::Search => {
                 Search::deserialize(deserializer).map(|obj| ObjectInner::Search(Box::new(obj)))
             }
@@ -8154,11 +8468,13 @@ impl Object {
             ObjectInner::Authentication(_) => Authentication::FLAGS,
             ObjectInner::BlobStore(_) => BlobStore::FLAGS,
             ObjectInner::BlockedIp(_) => BlockedIp::FLAGS,
+            ObjectInner::BlockedSender(_) => BlockedSender::FLAGS,
             ObjectInner::Bootstrap(_) => Bootstrap::FLAGS,
             ObjectInner::Cache(_) => Cache::FLAGS,
             ObjectInner::Calendar(_) => Calendar::FLAGS,
             ObjectInner::CalendarAlarm(_) => CalendarAlarm::FLAGS,
             ObjectInner::CalendarScheduling(_) => CalendarScheduling::FLAGS,
+            ObjectInner::CalendarSettings(_) => CalendarSettings::FLAGS,
             ObjectInner::Certificate(_) => Certificate::FLAGS,
             ObjectInner::ClusterNode(_) => ClusterNode::FLAGS,
             ObjectInner::ClusterRole(_) => ClusterRole::FLAGS,
@@ -8184,6 +8500,7 @@ impl Object {
             ObjectInner::Enterprise(_) => Enterprise::FLAGS,
             // SPDX-SnippetEnd
             ObjectInner::EventTracingLevel(_) => EventTracingLevel::FLAGS,
+            ObjectInner::Exchange(_) => Exchange::FLAGS,
             ObjectInner::ExternalPublicKey(_) => ExternalPublicKey::FLAGS,
             ObjectInner::FileStorage(_) => FileStorage::FLAGS,
             ObjectInner::Http(_) => Http::FLAGS,
@@ -8194,6 +8511,7 @@ impl Object {
             ObjectInner::IndexQueueStatus(_) => IndexQueueStatus::FLAGS,
             ObjectInner::Jmap(_) => Jmap::FLAGS,
             ObjectInner::Log(_) => Log::FLAGS,
+            ObjectInner::MailRule(_) => MailRule::FLAGS,
             ObjectInner::MailingList(_) => MailingList::FLAGS,
             ObjectInner::MaskedEmail(_) => MaskedEmail::FLAGS,
             ObjectInner::MemoryLookupKey(_) => MemoryLookupKey::FLAGS,
@@ -8241,6 +8559,7 @@ impl Object {
             ObjectInner::QueuedMessage(_) => QueuedMessage::FLAGS,
             ObjectInner::ReportSettings(_) => ReportSettings::FLAGS,
             ObjectInner::Role(_) => Role::FLAGS,
+            ObjectInner::SafeSender(_) => SafeSender::FLAGS,
             ObjectInner::Search(_) => Search::FLAGS,
             ObjectInner::SearchStore(_) => SearchStore::FLAGS,
             ObjectInner::Security(_) => Security::FLAGS,
@@ -8330,11 +8649,13 @@ impl Object {
             ObjectInner::Authentication(_) => ObjectType::Authentication,
             ObjectInner::BlobStore(_) => ObjectType::BlobStore,
             ObjectInner::BlockedIp(_) => ObjectType::BlockedIp,
+            ObjectInner::BlockedSender(_) => ObjectType::BlockedSender,
             ObjectInner::Bootstrap(_) => ObjectType::Bootstrap,
             ObjectInner::Cache(_) => ObjectType::Cache,
             ObjectInner::Calendar(_) => ObjectType::Calendar,
             ObjectInner::CalendarAlarm(_) => ObjectType::CalendarAlarm,
             ObjectInner::CalendarScheduling(_) => ObjectType::CalendarScheduling,
+            ObjectInner::CalendarSettings(_) => ObjectType::CalendarSettings,
             ObjectInner::Certificate(_) => ObjectType::Certificate,
             ObjectInner::ClusterNode(_) => ObjectType::ClusterNode,
             ObjectInner::ClusterRole(_) => ObjectType::ClusterRole,
@@ -8360,6 +8681,7 @@ impl Object {
             ObjectInner::Enterprise(_) => ObjectType::Enterprise,
             // SPDX-SnippetEnd
             ObjectInner::EventTracingLevel(_) => ObjectType::EventTracingLevel,
+            ObjectInner::Exchange(_) => ObjectType::Exchange,
             ObjectInner::ExternalPublicKey(_) => ObjectType::ExternalPublicKey,
             ObjectInner::FileStorage(_) => ObjectType::FileStorage,
             ObjectInner::Http(_) => ObjectType::Http,
@@ -8370,6 +8692,7 @@ impl Object {
             ObjectInner::IndexQueueStatus(_) => ObjectType::IndexQueueStatus,
             ObjectInner::Jmap(_) => ObjectType::Jmap,
             ObjectInner::Log(_) => ObjectType::Log,
+            ObjectInner::MailRule(_) => ObjectType::MailRule,
             ObjectInner::MailingList(_) => ObjectType::MailingList,
             ObjectInner::MaskedEmail(_) => ObjectType::MaskedEmail,
             ObjectInner::MemoryLookupKey(_) => ObjectType::MemoryLookupKey,
@@ -8417,6 +8740,7 @@ impl Object {
             ObjectInner::QueuedMessage(_) => ObjectType::QueuedMessage,
             ObjectInner::ReportSettings(_) => ObjectType::ReportSettings,
             ObjectInner::Role(_) => ObjectType::Role,
+            ObjectInner::SafeSender(_) => ObjectType::SafeSender,
             ObjectInner::Search(_) => ObjectType::Search,
             ObjectInner::SearchStore(_) => ObjectType::SearchStore,
             ObjectInner::Security(_) => ObjectType::Security,
@@ -8558,11 +8882,13 @@ impl Object {
             ObjectInner::Authentication(obj) => obj.validate(errors),
             ObjectInner::BlobStore(obj) => obj.validate(errors),
             ObjectInner::BlockedIp(obj) => obj.validate(errors),
+            ObjectInner::BlockedSender(obj) => obj.validate(errors),
             ObjectInner::Bootstrap(obj) => obj.validate(errors),
             ObjectInner::Cache(obj) => obj.validate(errors),
             ObjectInner::Calendar(obj) => obj.validate(errors),
             ObjectInner::CalendarAlarm(obj) => obj.validate(errors),
             ObjectInner::CalendarScheduling(obj) => obj.validate(errors),
+            ObjectInner::CalendarSettings(obj) => obj.validate(errors),
             ObjectInner::Certificate(obj) => obj.validate(errors),
             ObjectInner::ClusterNode(obj) => obj.validate(errors),
             ObjectInner::ClusterRole(obj) => obj.validate(errors),
@@ -8588,6 +8914,7 @@ impl Object {
             ObjectInner::Enterprise(obj) => obj.validate(errors),
             // SPDX-SnippetEnd
             ObjectInner::EventTracingLevel(obj) => obj.validate(errors),
+            ObjectInner::Exchange(obj) => obj.validate(errors),
             ObjectInner::ExternalPublicKey(obj) => obj.validate(errors),
             ObjectInner::FileStorage(obj) => obj.validate(errors),
             ObjectInner::Http(obj) => obj.validate(errors),
@@ -8598,6 +8925,7 @@ impl Object {
             ObjectInner::IndexQueueStatus(obj) => obj.validate(errors),
             ObjectInner::Jmap(obj) => obj.validate(errors),
             ObjectInner::Log(obj) => obj.validate(errors),
+            ObjectInner::MailRule(obj) => obj.validate(errors),
             ObjectInner::MailingList(obj) => obj.validate(errors),
             ObjectInner::MaskedEmail(obj) => obj.validate(errors),
             ObjectInner::MemoryLookupKey(obj) => obj.validate(errors),
@@ -8645,6 +8973,7 @@ impl Object {
             ObjectInner::QueuedMessage(obj) => obj.validate(errors),
             ObjectInner::ReportSettings(obj) => obj.validate(errors),
             ObjectInner::Role(obj) => obj.validate(errors),
+            ObjectInner::SafeSender(obj) => obj.validate(errors),
             ObjectInner::Search(obj) => obj.validate(errors),
             ObjectInner::SearchStore(obj) => obj.validate(errors),
             ObjectInner::Security(obj) => obj.validate(errors),
@@ -8771,11 +9100,13 @@ impl Object {
             ObjectInner::Authentication(obj) => obj.index(i),
             ObjectInner::BlobStore(obj) => obj.index(i),
             ObjectInner::BlockedIp(obj) => obj.index(i),
+            ObjectInner::BlockedSender(obj) => obj.index(i),
             ObjectInner::Bootstrap(obj) => obj.index(i),
             ObjectInner::Cache(obj) => obj.index(i),
             ObjectInner::Calendar(obj) => obj.index(i),
             ObjectInner::CalendarAlarm(obj) => obj.index(i),
             ObjectInner::CalendarScheduling(obj) => obj.index(i),
+            ObjectInner::CalendarSettings(obj) => obj.index(i),
             ObjectInner::Certificate(obj) => obj.index(i),
             ObjectInner::ClusterNode(obj) => obj.index(i),
             ObjectInner::ClusterRole(obj) => obj.index(i),
@@ -8801,6 +9132,7 @@ impl Object {
             ObjectInner::Enterprise(obj) => obj.index(i),
             // SPDX-SnippetEnd
             ObjectInner::EventTracingLevel(obj) => obj.index(i),
+            ObjectInner::Exchange(obj) => obj.index(i),
             ObjectInner::ExternalPublicKey(obj) => obj.index(i),
             ObjectInner::FileStorage(obj) => obj.index(i),
             ObjectInner::Http(obj) => obj.index(i),
@@ -8811,6 +9143,7 @@ impl Object {
             ObjectInner::IndexQueueStatus(obj) => obj.index(i),
             ObjectInner::Jmap(obj) => obj.index(i),
             ObjectInner::Log(obj) => obj.index(i),
+            ObjectInner::MailRule(obj) => obj.index(i),
             ObjectInner::MailingList(obj) => obj.index(i),
             ObjectInner::MaskedEmail(obj) => obj.index(i),
             ObjectInner::MemoryLookupKey(obj) => obj.index(i),
@@ -8858,6 +9191,7 @@ impl Object {
             ObjectInner::QueuedMessage(obj) => obj.index(i),
             ObjectInner::ReportSettings(obj) => obj.index(i),
             ObjectInner::Role(obj) => obj.index(i),
+            ObjectInner::SafeSender(obj) => obj.index(i),
             ObjectInner::Search(obj) => obj.index(i),
             ObjectInner::SearchStore(obj) => obj.index(i),
             ObjectInner::Security(obj) => obj.index(i),
@@ -8951,11 +9285,13 @@ impl Object {
             ObjectInner::Authentication(obj) => obj.patch(pointer, value),
             ObjectInner::BlobStore(obj) => obj.patch(pointer, value),
             ObjectInner::BlockedIp(obj) => obj.patch(pointer, value),
+            ObjectInner::BlockedSender(obj) => obj.patch(pointer, value),
             ObjectInner::Bootstrap(obj) => obj.patch(pointer, value),
             ObjectInner::Cache(obj) => obj.patch(pointer, value),
             ObjectInner::Calendar(obj) => obj.patch(pointer, value),
             ObjectInner::CalendarAlarm(obj) => obj.patch(pointer, value),
             ObjectInner::CalendarScheduling(obj) => obj.patch(pointer, value),
+            ObjectInner::CalendarSettings(obj) => obj.patch(pointer, value),
             ObjectInner::Certificate(obj) => obj.patch(pointer, value),
             ObjectInner::ClusterNode(obj) => obj.patch(pointer, value),
             ObjectInner::ClusterRole(obj) => obj.patch(pointer, value),
@@ -8981,6 +9317,7 @@ impl Object {
             ObjectInner::Enterprise(obj) => obj.patch(pointer, value),
             // SPDX-SnippetEnd
             ObjectInner::EventTracingLevel(obj) => obj.patch(pointer, value),
+            ObjectInner::Exchange(obj) => obj.patch(pointer, value),
             ObjectInner::ExternalPublicKey(obj) => obj.patch(pointer, value),
             ObjectInner::FileStorage(obj) => obj.patch(pointer, value),
             ObjectInner::Http(obj) => obj.patch(pointer, value),
@@ -8991,6 +9328,7 @@ impl Object {
             ObjectInner::IndexQueueStatus(obj) => obj.patch(pointer, value),
             ObjectInner::Jmap(obj) => obj.patch(pointer, value),
             ObjectInner::Log(obj) => obj.patch(pointer, value),
+            ObjectInner::MailRule(obj) => obj.patch(pointer, value),
             ObjectInner::MailingList(obj) => obj.patch(pointer, value),
             ObjectInner::MaskedEmail(obj) => obj.patch(pointer, value),
             ObjectInner::MemoryLookupKey(obj) => obj.patch(pointer, value),
@@ -9038,6 +9376,7 @@ impl Object {
             ObjectInner::QueuedMessage(obj) => obj.patch(pointer, value),
             ObjectInner::ReportSettings(obj) => obj.patch(pointer, value),
             ObjectInner::Role(obj) => obj.patch(pointer, value),
+            ObjectInner::SafeSender(obj) => obj.patch(pointer, value),
             ObjectInner::Search(obj) => obj.patch(pointer, value),
             ObjectInner::SearchStore(obj) => obj.patch(pointer, value),
             ObjectInner::Security(obj) => obj.patch(pointer, value),
@@ -9133,11 +9472,13 @@ impl IntoValue for Object {
             ObjectInner::Authentication(obj) => (*obj).into_value_with(opts),
             ObjectInner::BlobStore(obj) => (*obj).into_value_with(opts),
             ObjectInner::BlockedIp(obj) => (*obj).into_value_with(opts),
+            ObjectInner::BlockedSender(obj) => (*obj).into_value_with(opts),
             ObjectInner::Bootstrap(obj) => (*obj).into_value_with(opts),
             ObjectInner::Cache(obj) => (*obj).into_value_with(opts),
             ObjectInner::Calendar(obj) => (*obj).into_value_with(opts),
             ObjectInner::CalendarAlarm(obj) => (*obj).into_value_with(opts),
             ObjectInner::CalendarScheduling(obj) => (*obj).into_value_with(opts),
+            ObjectInner::CalendarSettings(obj) => (*obj).into_value_with(opts),
             ObjectInner::Certificate(obj) => (*obj).into_value_with(opts),
             ObjectInner::ClusterNode(obj) => (*obj).into_value_with(opts),
             ObjectInner::ClusterRole(obj) => (*obj).into_value_with(opts),
@@ -9163,6 +9504,7 @@ impl IntoValue for Object {
             ObjectInner::Enterprise(obj) => (*obj).into_value_with(opts),
             // SPDX-SnippetEnd
             ObjectInner::EventTracingLevel(obj) => (*obj).into_value_with(opts),
+            ObjectInner::Exchange(obj) => (*obj).into_value_with(opts),
             ObjectInner::ExternalPublicKey(obj) => (*obj).into_value_with(opts),
             ObjectInner::FileStorage(obj) => (*obj).into_value_with(opts),
             ObjectInner::Http(obj) => (*obj).into_value_with(opts),
@@ -9173,6 +9515,7 @@ impl IntoValue for Object {
             ObjectInner::IndexQueueStatus(obj) => (*obj).into_value_with(opts),
             ObjectInner::Jmap(obj) => (*obj).into_value_with(opts),
             ObjectInner::Log(obj) => (*obj).into_value_with(opts),
+            ObjectInner::MailRule(obj) => (*obj).into_value_with(opts),
             ObjectInner::MailingList(obj) => (*obj).into_value_with(opts),
             ObjectInner::MaskedEmail(obj) => (*obj).into_value_with(opts),
             ObjectInner::MemoryLookupKey(obj) => (*obj).into_value_with(opts),
@@ -9220,6 +9563,7 @@ impl IntoValue for Object {
             ObjectInner::QueuedMessage(obj) => (*obj).into_value_with(opts),
             ObjectInner::ReportSettings(obj) => (*obj).into_value_with(opts),
             ObjectInner::Role(obj) => (*obj).into_value_with(opts),
+            ObjectInner::SafeSender(obj) => (*obj).into_value_with(opts),
             ObjectInner::Search(obj) => (*obj).into_value_with(opts),
             ObjectInner::SearchStore(obj) => (*obj).into_value_with(opts),
             ObjectInner::Security(obj) => (*obj).into_value_with(opts),
@@ -9311,11 +9655,13 @@ impl From<ObjectType> for ObjectInner {
             ObjectType::Authentication => ObjectInner::Authentication(Box::default()),
             ObjectType::BlobStore => ObjectInner::BlobStore(Box::default()),
             ObjectType::BlockedIp => ObjectInner::BlockedIp(Box::default()),
+            ObjectType::BlockedSender => ObjectInner::BlockedSender(Box::default()),
             ObjectType::Bootstrap => ObjectInner::Bootstrap(Box::default()),
             ObjectType::Cache => ObjectInner::Cache(Box::default()),
             ObjectType::Calendar => ObjectInner::Calendar(Box::default()),
             ObjectType::CalendarAlarm => ObjectInner::CalendarAlarm(Box::default()),
             ObjectType::CalendarScheduling => ObjectInner::CalendarScheduling(Box::default()),
+            ObjectType::CalendarSettings => ObjectInner::CalendarSettings(Box::default()),
             ObjectType::Certificate => ObjectInner::Certificate(Box::default()),
             ObjectType::ClusterNode => ObjectInner::ClusterNode(Box::default()),
             ObjectType::ClusterRole => ObjectInner::ClusterRole(Box::default()),
@@ -9341,6 +9687,7 @@ impl From<ObjectType> for ObjectInner {
             ObjectType::Enterprise => ObjectInner::Enterprise(Box::default()),
             // SPDX-SnippetEnd
             ObjectType::EventTracingLevel => ObjectInner::EventTracingLevel(Box::default()),
+            ObjectType::Exchange => ObjectInner::Exchange(Box::default()),
             ObjectType::ExternalPublicKey => ObjectInner::ExternalPublicKey(Box::default()),
             ObjectType::FileStorage => ObjectInner::FileStorage(Box::default()),
             ObjectType::Http => ObjectInner::Http(Box::default()),
@@ -9351,6 +9698,7 @@ impl From<ObjectType> for ObjectInner {
             ObjectType::IndexQueueStatus => ObjectInner::IndexQueueStatus(Box::default()),
             ObjectType::Jmap => ObjectInner::Jmap(Box::default()),
             ObjectType::Log => ObjectInner::Log(Box::default()),
+            ObjectType::MailRule => ObjectInner::MailRule(Box::default()),
             ObjectType::MailingList => ObjectInner::MailingList(Box::default()),
             ObjectType::MaskedEmail => ObjectInner::MaskedEmail(Box::default()),
             ObjectType::MemoryLookupKey => ObjectInner::MemoryLookupKey(Box::default()),
@@ -9398,6 +9746,7 @@ impl From<ObjectType> for ObjectInner {
             ObjectType::QueuedMessage => ObjectInner::QueuedMessage(Box::default()),
             ObjectType::ReportSettings => ObjectInner::ReportSettings(Box::default()),
             ObjectType::Role => ObjectInner::Role(Box::default()),
+            ObjectType::SafeSender => ObjectInner::SafeSender(Box::default()),
             ObjectType::Search => ObjectInner::Search(Box::default()),
             ObjectType::SearchStore => ObjectInner::SearchStore(Box::default()),
             ObjectType::Security => ObjectInner::Security(Box::default()),
@@ -9743,6 +10092,21 @@ impl From<Object> for BlockedIp {
     }
 }
 
+impl From<BlockedSender> for ObjectInner {
+    fn from(value: BlockedSender) -> Self {
+        ObjectInner::BlockedSender(Box::new(value))
+    }
+}
+
+impl From<Object> for BlockedSender {
+    fn from(obj: Object) -> Self {
+        match obj.inner {
+            ObjectInner::BlockedSender(obj) => *obj,
+            _ => unreachable!(),
+        }
+    }
+}
+
 impl From<Bootstrap> for ObjectInner {
     fn from(value: Bootstrap) -> Self {
         ObjectInner::Bootstrap(Box::new(value))
@@ -9813,6 +10177,21 @@ impl From<Object> for CalendarScheduling {
     fn from(obj: Object) -> Self {
         match obj.inner {
             ObjectInner::CalendarScheduling(obj) => *obj,
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl From<CalendarSettings> for ObjectInner {
+    fn from(value: CalendarSettings) -> Self {
+        ObjectInner::CalendarSettings(Box::new(value))
+    }
+}
+
+impl From<Object> for CalendarSettings {
+    fn from(obj: Object) -> Self {
+        match obj.inner {
+            ObjectInner::CalendarSettings(obj) => *obj,
             _ => unreachable!(),
         }
     }
@@ -10124,6 +10503,21 @@ impl From<Object> for EventTracingLevel {
     }
 }
 
+impl From<Exchange> for ObjectInner {
+    fn from(value: Exchange) -> Self {
+        ObjectInner::Exchange(Box::new(value))
+    }
+}
+
+impl From<Object> for Exchange {
+    fn from(obj: Object) -> Self {
+        match obj.inner {
+            ObjectInner::Exchange(obj) => *obj,
+            _ => unreachable!(),
+        }
+    }
+}
+
 impl From<ExternalPublicKey> for ObjectInner {
     fn from(value: ExternalPublicKey) -> Self {
         ObjectInner::ExternalPublicKey(Box::new(value))
@@ -10269,6 +10663,21 @@ impl From<Object> for Log {
     fn from(obj: Object) -> Self {
         match obj.inner {
             ObjectInner::Log(obj) => *obj,
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl From<MailRule> for ObjectInner {
+    fn from(value: MailRule) -> Self {
+        ObjectInner::MailRule(Box::new(value))
+    }
+}
+
+impl From<Object> for MailRule {
+    fn from(obj: Object) -> Self {
+        match obj.inner {
+            ObjectInner::MailRule(obj) => *obj,
             _ => unreachable!(),
         }
     }
@@ -10836,6 +11245,21 @@ impl From<Object> for Role {
     fn from(obj: Object) -> Self {
         match obj.inner {
             ObjectInner::Role(obj) => *obj,
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl From<SafeSender> for ObjectInner {
+    fn from(value: SafeSender) -> Self {
+        ObjectInner::SafeSender(Box::new(value))
+    }
+}
+
+impl From<Object> for SafeSender {
+    fn from(obj: Object) -> Self {
+        match obj.inner {
+            ObjectInner::SafeSender(obj) => *obj,
             _ => unreachable!(),
         }
     }

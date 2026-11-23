@@ -1,0 +1,49 @@
+[package]
+name = "exchange"
+version = "1.2.0"
+edition = "2024"
+
+[dependencies]
+exchange-proto = { path = "../exchange-proto" }
+common = { path = "../common", features = ["exchange"] }
+jmap_proto = { path = "../jmap-proto" }
+store = { path = "../store", features = ["exchange"] }
+nlp = { path = "../nlp" }
+email = { path = "../email" }
+groupware = { path = "../groupware" }
+utils = { path = "../utils" }
+http_proto = { path = "../http-proto" }
+types = { path = "../types" }
+registry = { path = "../registry" }
+trc = { path = "../trc" }
+ahash = { version = "0.8.12" }
+hashify = "0.3"
+hyper = { version = "1.12.0", features = ["server", "http1", "http2"] }
+jiff = "0.2.38"
+rkyv.workspace = true
+smallvec = { version = "1.16", features = ["union"] }
+mail-builder = { version = "2.0" }
+smtp = { path = "../smtp" }
+smtp-proto = { path = "../smtp-proto" }
+tokio = { version = "1.54", features = ["rt", "sync", "time"] }
+http-body-util = "0.1.5"
+async-stream = "0.3.6"
+bytes = "1"
+flate2 = "1.1"
+mail-parser = { version = "1.0", features = ["full_encoding"] }
+futures = "0.3"
+memchr = "2"
+calcard = { path = "../calcard" }
+compact_str = "0.10.0"
+dav-proto = { path = "../dav-proto" }
+sha1 = "0.11"
+serde_json = "1.0"
+
+[dev-dependencies]
+tokio = { version = "1.54", features = ["full"] }
+
+[features]
+enterprise = ["common/enterprise", "smtp/enterprise", "store/enterprise", "email/enterprise", "groupware/enterprise", "utils/enterprise", "http_proto/enterprise", "trc/enterprise", "registry/enterprise"]
+
+[lints]
+workspace = true

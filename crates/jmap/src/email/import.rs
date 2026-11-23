@@ -14,11 +14,7 @@ use crate::{
     },
 };
 use common::storage::blob::FetchedBlob;
-use common::{
-    MAX_RECEIVED_AT, Server,
-    auth::AccessToken,
-    ipc::{EmailPush, PushNotification},
-};
+use common::{MAX_RECEIVED_AT, Server, auth::AccessToken, ipc::PushNotification};
 use email::{
     cache::{MessageCacheFetch, mailbox::MailboxCacheAccess},
     mailbox::JUNK_ID,
@@ -34,7 +30,12 @@ use jmap_proto::{
 };
 use mail_parser::MessageParser;
 use std::future::Future;
-use types::{acl::Acl, id::Id, keyword::Keyword};
+use types::{
+    acl::Acl,
+    id::Id,
+    keyword::Keyword,
+    type_state::{DataType, StateChange},
+};
 use utils::map::vec_map::VecMap;
 
 pub trait EmailImport: Sync + Send {
@@ -102,7 +103,6 @@ impl EmailImport for Server {
             session.session_id,
         );
         let mut last_change_id = None;
-        let mut delivered = Vec::with_capacity(request.emails.len());
         let mut recheck = ThreadRecheck::default();
         let grouping = request.emails.len() > 1;
         'outer: for (id, email) in request.emails {
@@ -221,7 +221,6 @@ impl EmailImport for Server {
                     &mut response,
                     &mut recheck,
                     &mut last_change_id,
-                    &mut delivered,
                     account_id,
                 )
                 .await
@@ -251,7 +250,6 @@ impl EmailImport for Server {
                 &mut response,
                 &mut recheck,
                 &mut last_change_id,
-                &mut delivered,
                 account_id,
             ) {
                 recheck.finish(self, session.session_id).await;
@@ -265,7 +263,6 @@ impl EmailImport for Server {
             &mut response,
             &mut recheck,
             &mut last_change_id,
-            &mut delivered,
             account_id,
         )
         .await;
@@ -274,14 +271,14 @@ impl EmailImport for Server {
 
         // Update state
         if let Some(change_id) = last_change_id {
-            for email_id in delivered {
-                self.broadcast_push_notification(PushNotification::EmailPush(EmailPush {
-                    account_id,
-                    email_id,
-                    change_id,
-                }))
-                .await;
-            }
+            self.broadcast_push_notification(PushNotification::StateChange(
+                StateChange::new(account_id)
+                    .with_change_id(change_id)
+                    .with_change(DataType::Email)
+                    .with_change(DataType::Mailbox)
+                    .with_change(DataType::Thread),
+            ))
+            .await;
 
             response.new_state = metadata
                 .viewer_change_id(self, account_id)
@@ -299,18 +296,10 @@ async fn flush(
     response: &mut ImportEmailResponse,
     recheck: &mut ThreadRecheck,
     last_change_id: &mut Option<u64>,
-    delivered: &mut Vec<u32>,
     account_id: u32,
 ) -> trc::Result<()> {
     grouped.flush(server).await?;
-    record(
-        grouped,
-        response,
-        recheck,
-        last_change_id,
-        delivered,
-        account_id,
-    )
+    record(grouped, response, recheck, last_change_id, account_id)
 }
 
 fn record(
@@ -318,7 +307,6 @@ fn record(
     response: &mut ImportEmailResponse,
     recheck: &mut ThreadRecheck,
     last_change_id: &mut Option<u64>,
-    delivered: &mut Vec<u32>,
     account_id: u32,
 ) -> trc::Result<()> {
     for (id, result) in grouped.results.drain(..) {
@@ -326,7 +314,6 @@ fn record(
             Ok(mut email) => {
                 recheck.push(account_id, &mut email);
                 *last_change_id = Some(email.change_id);
-                delivered.push(email.document_id);
                 response
                     .created
                     .append(id, ingested_into_object(email).into());

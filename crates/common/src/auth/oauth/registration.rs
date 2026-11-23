@@ -412,16 +412,6 @@ pub fn validate_public_client_metadata(
             ));
         }
     }
-    if request
-        .grant_types
-        .iter()
-        .any(|grant| grant == GRANT_TYPE_DEVICE_CODE)
-    {
-        return Err(ClientRegistrationError::invalid_client_metadata(
-            "The device_code grant is not available to dynamically registered clients.",
-        ));
-    }
-
     Ok(())
 }
 

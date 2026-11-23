@@ -68,6 +68,8 @@ impl<T: SessionStream> Session<T> {
         let is_uidonly = self.is_uidonly;
         let is_objectid = self.is_objectid;
         let use_vanished = self.is_qresync || is_uidonly;
+        let is_condstore =
+            self.is_condstore || mailbox.as_ref().is_some_and(|mailbox| mailbox.is_condstore);
 
         // Register with push manager
         let primary_id = mailbox
@@ -92,6 +94,11 @@ impl<T: SessionStream> Session<T> {
         // Send continuation response
         self.write_bytes(b"+ Idling, send 'DONE' to stop.\r\n".to_vec())
             .await?;
+        if let Some(mailbox) = &mailbox {
+            data.flush_view(mailbox, use_vanished)
+                .await
+                .imap_ctx(&request.tag, trc::location!())?;
+        }
 
         trc::event!(
             Imap(trc::ImapEvent::IdleStart),
@@ -119,7 +126,7 @@ impl<T: SessionStream> Session<T> {
                             window[3] = byte[0];
                             if &window == b"DONE" {
                                 if schedule.is_deferred()
-                                    && let Err(err) = data.write_changes(mailbox.as_ref(), true, ViewSync::Skip, use_vanished, is_uidonly, is_rev2, is_utf8, is_objectid).await
+                                    && let Err(err) = data.write_changes(mailbox.as_ref(), true, ViewSync::Skip, use_vanished, is_condstore, is_uidonly, is_rev2, is_utf8, is_objectid).await
                                 {
                                     trc::error!(err.span_id(self.session_id));
                                 }
@@ -149,6 +156,9 @@ impl<T: SessionStream> Session<T> {
                 Wake::Due => true,
                 Wake::Closed => return Err(self.idle_closed(request.tag).await),
             };
+            data.assert_session_access()
+                .await
+                .map_err(|err| err.id(request.tag.clone()))?;
             let mut changes = IdleChanges::default();
             for notification in notifications.drain(..) {
                 changes.add(&notification);
@@ -173,6 +183,7 @@ impl<T: SessionStream> Session<T> {
                     check_mailboxes,
                     view,
                     use_vanished,
+                    is_condstore,
                     is_uidonly,
                     is_rev2,
                     is_utf8,
@@ -334,6 +345,7 @@ impl<T: SessionStream> SessionData<T> {
         check_mailboxes: bool,
         view: ViewSync,
         use_vanished: bool,
+        is_condstore: bool,
         is_uidonly: bool,
         is_rev2: bool,
         is_utf8: bool,
@@ -419,18 +431,29 @@ impl<T: SessionStream> SessionData<T> {
                 .serialize(&mut buf, is_rev2, is_utf8, false);
             }
             // Obtain status of changed mailboxes
+            let status_items: &[Status] = if is_condstore {
+                &[
+                    Status::Messages,
+                    Status::Unseen,
+                    Status::UidNext,
+                    Status::UidValidity,
+                    Status::HighestModSeq,
+                ]
+            } else {
+                &[
+                    Status::Messages,
+                    Status::Unseen,
+                    Status::UidNext,
+                    Status::UidValidity,
+                ]
+            };
             for mailbox_name in changes.changed {
                 if let Ok(status) = self
                     .status(
                         &mut caches,
                         &access_token,
                         mailbox_name.into(),
-                        &[
-                            Status::Messages,
-                            Status::Unseen,
-                            Status::UidNext,
-                            Status::UidValidity,
-                        ],
+                        status_items,
                     )
                     .await
                 {

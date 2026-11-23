@@ -7,7 +7,7 @@ homepage = "https://stalw.art/smtp"
 keywords = ["smtp", "email", "mail", "server"]
 categories = ["email"]
 license = "AGPL-3.0-only OR LicenseRef-SEL"
-version = "1.1.1"
+version = "1.2.0"
 edition = "2024"
 
 [dependencies]
@@ -20,7 +20,7 @@ email = { path =  "../email" }
 registry = { path =  "../registry" }
 spam-filter = { path =  "../spam-filter" }
 trc = { path = "../trc" }
-mail-auth = { version = "0.15.1" }
+mail-auth = { version = "0.16.0" }
 smtp-report = { path = "../smtp-report" }
 mail-parser = { version = "1.0", features = ["full_encoding"] } 
 mail-builder = { version = "2.0" } 
@@ -48,10 +48,10 @@ encodify = "1.0"
 memchr = "2.8"
 
 [target.'cfg(stalwart_tests)'.dependencies]
-mail-auth = { version = "0.15.1", features = ["test"] }
+mail-auth = { version = "0.16.0", features = ["test"] }
 
 [dev-dependencies]
-mail-auth = { version = "0.15.1", features = ["test"] }
+mail-auth = { version = "0.16.0", features = ["test"] }
 
 [features]
 enterprise = ["store/enterprise", "utils/enterprise", "directory/enterprise", "common/enterprise", "email/enterprise", "registry/enterprise", "spam-filter/enterprise", "trc/enterprise"]

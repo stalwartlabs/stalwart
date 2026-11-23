@@ -72,10 +72,12 @@ impl JmapAccount for Server {
                     || !matches!(
                         capability,
                         Capability::Submission
+                            | Capability::Mdn
                             | Capability::VacationResponse
                             | Capability::Sieve
                             | Capability::Quota
                             | Capability::EmailPush
+                            | Capability::Stalwart
                     )
             })
             .collect::<CapabilityIds>();
@@ -189,7 +191,9 @@ impl AccountCapabilities for AccessToken {
                     Capability::Mail | Capability::MailShare | Capability::EmailPush => {
                         Permission::JmapEmailGet
                     }
-                    Capability::Submission => Permission::JmapEmailSubmissionCreate,
+                    Capability::Submission | Capability::Mdn => {
+                        Permission::JmapEmailSubmissionCreate
+                    }
                     Capability::VacationResponse => Permission::JmapVacationResponseGet,
                     Capability::Contacts => Permission::JmapContactCardGet,
                     Capability::ContactsParse => Permission::JmapContactCardParse,
@@ -239,7 +243,8 @@ pub fn capability_scopes(capability: Capability) -> OAuthScopes {
         | Capability::VacationResponse
         | Capability::Sieve
         | Capability::MailShare
-        | Capability::EmailPush => OAuthScopes::MAIL,
+        | Capability::EmailPush
+        | Capability::Mdn => OAuthScopes::MAIL,
         Capability::Contacts | Capability::ContactsParse => OAuthScopes::CONTACTS,
         Capability::Calendars | Capability::CalendarsParse | Capability::PrincipalsAvailability => {
             OAuthScopes::CALENDARS

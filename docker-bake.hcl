@@ -17,8 +17,7 @@ target "docker-metadata-action" {}
 target "build" {
   secret = [
     "type=env,id=ACTIONS_RESULTS_URL",
-    "type=env,id=ACTIONS_RUNTIME_TOKEN",
-    "type=env,id=GITHUB_TOKEN"
+    "type=env,id=ACTIONS_RUNTIME_TOKEN"
   ]
   args = {
     TARGET = "${TARGET}"

@@ -28,6 +28,7 @@ impl<T: SessionStream> Session<T> {
                 false,
                 ViewSync::Sync,
                 self.is_qresync || self.is_uidonly,
+                self.is_condstore || mailbox.is_condstore,
                 self.is_uidonly,
                 self.version.is_rev2(),
                 self.is_utf8,

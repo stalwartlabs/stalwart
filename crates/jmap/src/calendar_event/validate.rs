@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use calcard::jscalendar::{JSCALENDAR_VERSION, JSCalendarProperty, JSCalendarValue};
+use calcard::{
+    common::timezone::Tz,
+    jscalendar::{JSCALENDAR_VERSION, JSCalendarProperty, JSCalendarValue},
+};
 use common::DavName;
 use groupware::calendar::{
     EVENT_DRAFT, EVENT_HIDE_ATTENDEES, EVENT_INVITE_OTHERS, EVENT_INVITE_SELF,
@@ -23,6 +26,8 @@ pub(super) trait EventProperty {
     fn is_event_metadata(&self) -> bool;
 
     fn is_series_property(&self) -> bool;
+
+    fn is_time_zone_id(&self) -> bool;
 }
 
 impl EventProperty for JSCalendarProperty<Id> {
@@ -60,6 +65,66 @@ impl EventProperty for JSCalendarProperty<Id> {
                 | JSCalendarProperty::RecurrenceOverrides
                 | JSCalendarProperty::RecurrenceRule
         )
+    }
+
+    fn is_time_zone_id(&self) -> bool {
+        matches!(
+            self,
+            JSCalendarProperty::TimeZone
+                | JSCalendarProperty::EndTimeZone
+                | JSCalendarProperty::RecurrenceIdTimeZone
+        )
+    }
+}
+
+pub(super) fn validate_time_zones(entries: &EventMap<'_>) -> Result<(), EventError> {
+    for (key, value) in entries.iter() {
+        match key {
+            Key::Property(property) if property.is_time_zone_id() => {
+                if !is_iana_time_zone(value) {
+                    return Err(invalid_time_zone(property.clone()));
+                }
+            }
+            Key::Property(JSCalendarProperty::RecurrenceOverrides) => {
+                let has_invalid = value
+                    .as_object()
+                    .into_iter()
+                    .flat_map(|overrides| overrides.values())
+                    .filter_map(Value::as_object)
+                    .flat_map(|patch| patch.iter())
+                    .any(|(key, value)| {
+                        let is_time_zone = match key {
+                            Key::Property(JSCalendarProperty::Pointer(pointer)) => matches!(
+                                pointer.last(),
+                                Some(JsonPointerItem::Key(Key::Property(property)))
+                                    if property.is_time_zone_id()
+                            ),
+                            Key::Property(property) => property.is_time_zone_id(),
+                            _ => false,
+                        };
+                        is_time_zone && !is_iana_time_zone(value)
+                    });
+                if has_invalid {
+                    return Err(invalid_time_zone(JSCalendarProperty::RecurrenceOverrides));
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn invalid_time_zone(property: JSCalendarProperty<Id>) -> EventError {
+    SetError::invalid_properties()
+        .with_property(property)
+        .with_description("Time zones must be names from the IANA Time Zone Database.")
+}
+
+fn is_iana_time_zone(value: &EventValue<'_>) -> bool {
+    match value {
+        Value::Null => true,
+        Value::Str(name) => Tz::iana(name).is_some(),
+        _ => false,
     }
 }
 

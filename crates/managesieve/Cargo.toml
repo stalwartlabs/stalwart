@@ -1,11 +1,10 @@
 [package]
 name = "managesieve"
-version = "1.1.1"
+version = "1.2.0"
 edition = "2024"
 
 [dependencies]
 imap_proto = { path = "../imap-proto" }
-imap = { path = "../imap" }
 types = { path = "../types" }
 jmap_proto = { path = "../jmap-proto" }
 directory = { path = "../directory" }
@@ -21,7 +20,7 @@ tokio-rustls = { version = "0.26", default-features = false, features = ["aws_lc
 compact_str = "0.10.0"
 
 [features]
-enterprise = ["imap/enterprise", "jmap_proto/enterprise", "directory/enterprise", "common/enterprise", "store/enterprise", "email/enterprise", "trc/enterprise", "registry/enterprise"]
+enterprise = ["jmap_proto/enterprise", "directory/enterprise", "common/enterprise", "store/enterprise", "email/enterprise", "trc/enterprise", "registry/enterprise"]
 
 [lints]
 workspace = true

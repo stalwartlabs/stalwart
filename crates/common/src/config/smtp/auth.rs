@@ -212,7 +212,8 @@ impl DkimSigners {
             None => (
                 Dkim2Signer::from_key(key)
                     .domain(domain)
-                    .selector(signature.selector),
+                    .selector(signature.selector)
+                    .allow_from_subdomain(),
                 Vec::with_capacity(2),
             ),
             Some(signers) => (

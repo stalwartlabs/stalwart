@@ -95,6 +95,10 @@ fn extend_wide(text: &str, from: usize) -> WideStop {
     }
 }
 
+pub fn has_alnum_run(text: &str) -> bool {
+    next_alnum_run(text, 0).is_some()
+}
+
 #[inline(always)]
 pub(super) fn next_alnum_run(text: &str, from: usize) -> Option<AlnumRun> {
     let bytes = text.as_bytes();

@@ -12,6 +12,7 @@ use crate::schema::prelude::*;
 pub enum Account {
     User(UserAccount),
     Group(GroupAccount),
+    Resource(ResourceAccount),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -618,6 +619,21 @@ pub struct Authentication {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AutomaticBooking {
+    #[serde(rename = "allowConflicts")]
+    pub allow_conflicts: bool,
+    #[serde(rename = "allowRecurring")]
+    pub allow_recurring: bool,
+    #[serde(rename = "allowExternal")]
+    pub allow_external: bool,
+    #[serde(rename = "bookingWindow")]
+    pub booking_window: Option<Duration>,
+    #[serde(rename = "maxDuration")]
+    pub max_duration: Option<Duration>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "@type")]
 pub enum AzureAuth {
     SharedKey(AzureAuthSharedKey),
@@ -759,6 +775,12 @@ pub struct BlockedIp {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
+pub struct BlockedSender {
+    pub address: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Bootstrap {
     #[serde(rename = "defaultHostname")]
     pub default_hostname: String,
@@ -807,6 +829,7 @@ pub struct Cache {
     pub events: u64,
     pub scheduling: u64,
     pub files: u64,
+    pub exchange: u64,
     #[serde(rename = "httpAuth")]
     pub http_auth: u64,
     pub messages: u64,
@@ -890,6 +913,8 @@ pub struct Calendar {
     pub availability_rate_limit: Option<Rate>,
     #[serde(rename = "maxAttachmentsSize")]
     pub max_attachments_size: u64,
+    #[serde(rename = "shareFreeBusy")]
+    pub share_free_busy: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -938,6 +963,13 @@ pub struct CalendarScheduling {
     #[serde(rename = "httpRsvpTemplate")]
     pub http_rsvp_template: Option<String>,
     // SPDX-SnippetEnd
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CalendarSettings {
+    #[serde(rename = "workingHours")]
+    pub working_hours: WorkingHours,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1539,6 +1571,8 @@ pub struct DnsManagementProperties {
     pub origin: Option<String>,
     #[serde(rename = "publishRecords")]
     pub publish_records: Map<DnsRecordType>,
+    #[serde(rename = "allowSubdomainSigning")]
+    pub allow_subdomain_signing: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -3174,6 +3208,22 @@ pub struct EventTracingLevel {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
+pub struct Exchange {
+    pub enable: bool,
+    #[serde(rename = "ewsVersion")]
+    pub ews_version: EwsVersion,
+    #[serde(rename = "maxRequestSize")]
+    pub max_request_size: u64,
+    #[serde(rename = "maxDevices")]
+    pub max_devices: u64,
+    #[serde(rename = "maxHeartbeat")]
+    pub max_heartbeat: Duration,
+    #[serde(rename = "maxObjectSize")]
+    pub max_object_size: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Expression {
     #[serde(rename = "match")]
     pub match_: List<ExpressionMatch>,
@@ -3260,10 +3310,32 @@ pub struct FileSystemStore {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "@type")]
+pub enum FoundationDbCluster {
+    File(FoundationDbClusterFile),
+    Manual(FoundationDbClusterManual),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FoundationDbClusterFile {
+    pub path: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FoundationDbClusterManual {
+    pub description: String,
+    pub id: String,
+    pub coordinators: Map<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct FoundationDbStore {
-    #[serde(rename = "clusterFile")]
-    pub cluster_file: Option<String>,
+    pub cluster: FoundationDbCluster,
+    pub tls: FoundationDbTls,
+    pub protocol: FoundationDbProtocol,
     #[serde(rename = "datacenterId")]
     pub datacenter_id: Option<String>,
     #[serde(rename = "machineId")]
@@ -3274,6 +3346,29 @@ pub struct FoundationDbStore {
     pub transaction_retry_limit: Option<u64>,
     #[serde(rename = "transactionTimeout")]
     pub transaction_timeout: Option<Duration>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "@type")]
+pub enum FoundationDbTls {
+    Default,
+    Manual(FoundationDbTlsManual),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FoundationDbTlsManual {
+    pub certificate: PublicTextOptional,
+    #[serde(rename = "privateKey")]
+    pub private_key: SecretTextOptional,
+    #[serde(rename = "privateKeyPassword")]
+    pub private_key_password: SecretKeyOptional,
+    #[serde(rename = "caCertificate")]
+    pub ca_certificate: PublicTextOptional,
+    #[serde(rename = "verifyPeers")]
+    pub verify_peers: Map<String>,
+    #[serde(rename = "disablePlaintextConnection")]
+    pub disable_plaintext_connection: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -3839,6 +3934,195 @@ pub enum LookupStore {
 pub struct MailExchanger {
     pub hostname: Option<String>,
     pub priority: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MailRule {
+    pub name: String,
+    #[serde(rename = "isEnabled")]
+    pub is_enabled: bool,
+    pub position: u64,
+    pub conditions: MailRuleConditions,
+    pub actions: MailRuleActions,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MailRuleActions {
+    #[serde(rename = "addKeywords")]
+    pub add_keywords: Map<String>,
+    #[serde(rename = "removeKeywords")]
+    pub remove_keywords: Map<String>,
+    #[serde(rename = "clearKeywords")]
+    pub clear_keywords: bool,
+    #[serde(rename = "setImportance")]
+    pub set_importance: Option<MailRuleImportanceLevel>,
+    pub redirect: Option<MailRuleRedirect>,
+    pub reply: Option<MailRuleReply>,
+    #[serde(rename = "copyTo")]
+    pub copy_to: Map<Id>,
+    #[serde(rename = "moveTo")]
+    pub move_to: Map<Id>,
+    pub discard: bool,
+    pub reject: Option<MailRuleReject>,
+    #[serde(rename = "stopProcessing")]
+    pub stop_processing: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MailRuleAddressTest {
+    pub operator: MailRuleAddressOperator,
+    pub values: Map<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "@type")]
+pub enum MailRuleCondition {
+    From(MailRuleAddressTest),
+    To(MailRuleAddressTest),
+    Cc(MailRuleAddressTest),
+    ToOrCc(MailRuleAddressTest),
+    SentToMe(MailRuleSentToMe),
+    Subject(MailRuleTextTest),
+    Body(MailRuleTextTest),
+    Header(MailRuleHeaderTest),
+    SizeOver(MailRuleSize),
+    SizeUnder(MailRuleSize),
+    HasAttachment,
+    Importance(MailRuleImportance),
+    Sensitivity(MailRuleSensitivity),
+    MessageType(MailRuleMessageType),
+    HeaderExists(MailRuleHeaderName),
+    AttachmentName(MailRuleTextTest),
+    AttachmentType(MailRuleTextTest),
+    MailingList,
+    RecipientAddress(MailRuleAddressTest),
+    RecipientDetail(MailRuleTextTest),
+    SpamScore(MailRuleSpamScore),
+    SubjectOrBody(MailRuleTextTest),
+    ReceivedAfter(MailRuleDate),
+    ReceivedBefore(MailRuleDate),
+    Schedule(MailRuleSchedule),
+    PrivateEvent,
+    Keyword(MailRuleKeywordTest),
+    AnyKeyword,
+    Flagged,
+    IsAway,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MailRuleConditions {
+    #[serde(rename = "matchAll")]
+    pub match_all: List<MailRuleCondition>,
+    #[serde(rename = "matchAny")]
+    pub match_any: List<MailRuleCondition>,
+    #[serde(rename = "matchNone")]
+    pub match_none: List<MailRuleCondition>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MailRuleDate {
+    pub date: UTCDateTime,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MailRuleHeaderName {
+    pub header: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MailRuleHeaderTest {
+    pub header: String,
+    pub operator: MailRuleTextOperator,
+    pub values: Map<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MailRuleImportance {
+    pub level: MailRuleImportanceLevel,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MailRuleKeywordTest {
+    pub keywords: Map<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MailRuleMessageType {
+    pub kind: MailRuleMessageKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MailRuleRedirect {
+    pub addresses: Map<String>,
+    #[serde(rename = "keepCopy")]
+    pub keep_copy: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MailRuleReject {
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MailRuleReply {
+    pub subject: Option<String>,
+    #[serde(rename = "textBody")]
+    pub text_body: String,
+    #[serde(rename = "htmlBody")]
+    pub html_body: Option<String>,
+    pub days: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MailRuleSchedule {
+    pub slots: List<WorkingHoursSlot>,
+    #[serde(rename = "timeZone")]
+    pub time_zone: Option<TimeZone>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MailRuleSensitivity {
+    pub level: MailRuleSensitivityLevel,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MailRuleSentToMe {
+    pub placement: MailRuleSentToMePlacement,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MailRuleSize {
+    pub kilobytes: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MailRuleSpamScore {
+    pub percent: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MailRuleTextTest {
+    pub operator: MailRuleTextOperator,
+    pub values: Map<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -4846,6 +5130,15 @@ pub enum PublicText {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "@type")]
+pub enum PublicTextOptional {
+    None,
+    Text(PublicTextValue),
+    EnvironmentVariable(SecretKeyEnvironmentVariable),
+    File(SecretKeyFile),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PublicTextValue {
     pub value: String,
@@ -5035,6 +5328,51 @@ pub struct ReportSettings {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
+pub struct ResourceAccount {
+    pub name: String,
+    #[serde(rename = "domainId")]
+    pub domain_id: Id,
+    pub description: Option<String>,
+    pub kind: ResourceKind,
+    pub capacity: Option<u64>,
+    pub location: Option<String>,
+    pub booking: ResourceBooking,
+    #[serde(rename = "delegateIds")]
+    pub delegate_ids: Map<Id>,
+    #[serde(rename = "createdAt")]
+    pub created_at: UTCDateTime,
+    // SPDX-SnippetBegin
+    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+    // SPDX-License-Identifier: LicenseRef-SEL
+    #[cfg(feature = "enterprise")]
+    #[serde(rename = "memberTenantId")]
+    pub member_tenant_id: Option<Id>,
+    // SPDX-SnippetEnd
+    pub roles: Roles,
+    pub quotas: VecMap<StorageQuota, u64>,
+    pub permissions: Permissions,
+    pub aliases: List<EmailAlias>,
+    pub locale: Locale,
+    #[serde(rename = "timeZone")]
+    pub time_zone: Option<TimeZone>,
+    // SPDX-SnippetBegin
+    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+    // SPDX-License-Identifier: LicenseRef-SEL
+    #[cfg(feature = "enterprise")]
+    #[serde(rename = "externalId")]
+    pub external_id: Option<String>,
+    // SPDX-SnippetEnd
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "@type")]
+pub enum ResourceBooking {
+    Automatic(AutomaticBooking),
+    Manual,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct RocksDbStore {
     pub path: String,
     #[serde(rename = "blobSize")]
@@ -5149,6 +5487,12 @@ pub enum S3StoreRegion {
     WaApSoutheast1,
     WaApSoutheast2,
     Custom(S3StoreCustomRegion),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SafeSender {
+    pub address: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -6900,6 +7244,23 @@ pub struct WebHook {
     pub events: Map<trc::EventType>,
     #[serde(rename = "eventsPolicy")]
     pub events_policy: EventPolicy,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WorkingHours {
+    pub enable: bool,
+    #[serde(rename = "timeZone")]
+    pub time_zone: Option<TimeZone>,
+    pub slots: List<WorkingHoursSlot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WorkingHoursSlot {
+    pub days: Map<Weekday>,
+    pub start: LocalTime,
+    pub end: LocalTime,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

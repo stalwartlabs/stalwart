@@ -53,13 +53,9 @@ main() {
     esac
 
     # Parse arguments
-    local _component="stalwart"
     local _prefix=""
     while [ $# -gt 0 ]; do
         case "$1" in
-            --fdb)
-                _component="stalwart-foundationdb"
-                ;;
             -h|--help)
                 print_usage
                 exit 0
@@ -118,17 +114,13 @@ main() {
     ensure mkdir -p "$_bin_dir" "$_conf_dir" "$_log_dir" "$_data_dir"
 
     # Download and install the binary
-    say "⏳ Downloading ${_component} for ${_arch}..."
-    local _tmp _tar _src_name
+    say "⏳ Downloading stalwart for ${_arch}..."
+    local _tmp _tar
     _tmp="$(mktemp -d)"
     _tar="${_tmp}/stalwart.tar.gz"
-    ensure downloader "${BASE_URL}/${_component}-${_arch}.tar.gz" "$_tar" "$_arch"
+    ensure downloader "${BASE_URL}/stalwart-${_arch}.tar.gz" "$_tar" "$_arch"
     ensure tar zxf "$_tar" -C "$_tmp"
-    _src_name="stalwart"
-    if [ "$_component" = "stalwart-foundationdb" ]; then
-        _src_name="stalwart-foundationdb"
-    fi
-    ensure cp "${_tmp}/${_src_name}" "${_bin_file}.new"
+    ensure cp "${_tmp}/stalwart" "${_bin_file}.new"
     ensure chmod 0755 "${_bin_file}.new"
     ensure mv -f "${_bin_file}.new" "$_bin_file"
     ensure rm -rf "$_tmp"
@@ -211,12 +203,11 @@ main() {
 
 print_usage() {
     cat <<'EOF'
-Usage: install.sh [--fdb] [PREFIX]
+Usage: install.sh [PREFIX]
 
 Install Stalwart into standard FHS paths or under a custom prefix.
 
 Options:
-  --fdb       Install the FoundationDB build.
   -h, --help  Show this help.
 
 With no PREFIX, Stalwart is installed under standard FHS paths:

@@ -10,6 +10,7 @@ use dav_proto::schema::{
     property::{CardDavProperty, DavProperty, WebDavProperty},
     response::CardCondition,
 };
+use groupware::contact::write::{CardWriteError, assert_unique_uid};
 use hyper::StatusCode;
 
 pub mod copy_move;
@@ -78,44 +79,26 @@ pub(crate) fn assert_is_unique_uid(
     addressbook_id: u32,
     uid: Option<&str>,
 ) -> crate::Result<()> {
-    let Some(uid) = uid else {
-        return Ok(());
-    };
+    assert_unique_uid(resources, addressbook_id, uid).map_err(Into::into)
+}
 
-    if let Some(path) = resources.children_with_uid(addressbook_id, uid).next() {
-        return Err(DavError::Condition(DavErrorCondition::new(
-            StatusCode::FORBIDDEN,
-            CardCondition::NoUidConflict(resources.format_resource(path).into()),
-        )));
+impl From<CardWriteError> for DavError {
+    fn from(err: CardWriteError) -> Self {
+        match err {
+            CardWriteError::NotFound => DavError::Code(StatusCode::NOT_FOUND),
+            CardWriteError::Forbidden | CardWriteError::UidChanged(None) => {
+                DavError::Code(StatusCode::FORBIDDEN)
+            }
+            CardWriteError::UidChanged(Some(path))
+            | CardWriteError::UidConflict { href: path, .. } => {
+                DavError::Condition(DavErrorCondition::new(
+                    StatusCode::FORBIDDEN,
+                    CardCondition::NoUidConflict(path.into()),
+                ))
+            }
+            CardWriteError::Store(err) => DavError::Internal(err),
+        }
     }
-
-    Ok(())
-}
-
-const URN_UUID_PREFIX: &str = "urn:uuid:";
-const UUID_GROUP_LENGTHS: [usize; 5] = [8, 4, 4, 4, 12];
-
-pub(crate) fn is_same_uid(uid: &str, other: &str) -> bool {
-    uid == other
-        || matches!(
-            (uuid_of(uid), uuid_of(other)),
-            (Some(uuid), Some(other_uuid)) if uuid.eq_ignore_ascii_case(other_uuid)
-        )
-}
-
-fn uuid_of(uid: &str) -> Option<&str> {
-    let uuid = uid
-        .split_at_checked(URN_UUID_PREFIX.len())
-        .filter(|(prefix, _)| prefix.eq_ignore_ascii_case(URN_UUID_PREFIX))
-        .map_or(uid, |(_, uuid)| uuid);
-    let mut groups = uuid.split('-');
-
-    (UUID_GROUP_LENGTHS.iter().all(|&len| {
-        groups
-            .next()
-            .is_some_and(|group| group.len() == len && group.bytes().all(|b| b.is_ascii_hexdigit()))
-    }) && groups.next().is_none())
-    .then_some(uuid)
 }
 
 #[cfg(all(test, stalwart_tests))]

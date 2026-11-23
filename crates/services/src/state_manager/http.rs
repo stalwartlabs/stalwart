@@ -9,7 +9,7 @@ use super::{
     ece::{ECE_WEBPUSH_MAX_PLAINTEXT_SIZE, WEBPUSH_MAX_BODY_SIZE, ece_encrypt},
     email_push::build_email_push_object,
 };
-use crate::state_manager::{PushBatch, PushRegistration};
+use crate::state_manager::{PushBatch, PushRegistration, push::destroy_push_subscription};
 use calcard::jscalendar::JSCalendarDateTime;
 use common::{Server, ipc::PushNotification, network::webpush::Vapid};
 use compact_str::CompactString;
@@ -21,7 +21,7 @@ use jmap_proto::{
 };
 use jmap_tools::Value;
 use reqwest::{
-    Method,
+    Method, StatusCode,
     header::{AUTHORIZATION, CONTENT_ENCODING, CONTENT_TYPE},
 };
 use std::time::{Duration, Instant};
@@ -30,7 +30,7 @@ use tokio::sync::mpsc;
 use trc::PushSubscriptionEvent;
 use types::id::Id;
 use utils::{
-    error_chain,
+    HttpLimitResponse, error_chain,
     map::vec_map::VecMap,
     outbound::{OutboundClient, OutboundPolicy, Redirects},
 };
@@ -38,6 +38,12 @@ use utils::{
 const MAX_ERROR_RESPONSE_LEN: usize = 1024;
 const MAX_REDIRECTS: usize = 4;
 const PUSH_OBJECT_OVERHEAD: usize = 128;
+
+pub(crate) enum PushOutcome {
+    Done,
+    Retry,
+    Gone,
+}
 
 #[derive(Default)]
 struct EmailPushObject {
@@ -70,6 +76,7 @@ impl PushRegistration {
             let mut failed = PushBatch::default();
             let mut failed_email_pushes = Vec::new();
             let mut failed_calendar_alerts = Vec::new();
+            let mut is_gone = false;
 
             for notification in &batch.notifications {
                 match notification {
@@ -84,7 +91,7 @@ impl PushRegistration {
                             }),
                             alert_id: calendar_alert.alert_id.clone(),
                         };
-                        if !post_object(
+                        match post_object(
                             &push_client,
                             &subscription,
                             &payload,
@@ -94,8 +101,10 @@ impl PushRegistration {
                         )
                         .await
                         {
-                            failed_calendar_alerts
-                                .push((calendar_alert.account_id, calendar_alert.event_id));
+                            PushOutcome::Done => {}
+                            PushOutcome::Retry => failed_calendar_alerts
+                                .push((calendar_alert.account_id, calendar_alert.event_id)),
+                            PushOutcome::Gone => is_gone = true,
                         }
                     }
                     PushNotification::EmailPush(email_push) => {
@@ -157,7 +166,7 @@ impl PushRegistration {
                 let payload = PushObject::StateChange {
                     changed: batch.state_changes,
                 };
-                if !post_object(
+                match post_object(
                     &push_client,
                     &subscription,
                     &payload,
@@ -166,9 +175,14 @@ impl PushRegistration {
                     Urgency::Normal,
                 )
                 .await
-                    && let PushObject::StateChange { changed } = payload
                 {
-                    failed.state_changes = changed;
+                    PushOutcome::Done => {}
+                    PushOutcome::Retry => {
+                        if let PushObject::StateChange { changed } = payload {
+                            failed.state_changes = changed;
+                        }
+                    }
+                    PushOutcome::Gone => is_gone = true,
                 }
             }
 
@@ -183,7 +197,7 @@ impl PushRegistration {
                     state: email_push.change_id.map(State::Exact),
                 };
 
-                if !post_object(
+                match post_object(
                     &push_client,
                     &subscription,
                     &payload,
@@ -193,11 +207,20 @@ impl PushRegistration {
                 )
                 .await
                 {
-                    failed_email_pushes.push(account_id.document_id());
+                    PushOutcome::Done => {}
+                    PushOutcome::Retry => failed_email_pushes.push(account_id.document_id()),
+                    PushOutcome::Gone => is_gone = true,
                 }
             }
 
-            let result = if failed.state_changes.is_empty()
+            let result = if is_gone {
+                if let Err(err) =
+                    destroy_push_subscription(&server, id.document_id(), subscription.id).await
+                {
+                    trc::error!(err.caused_by(trc::location!()));
+                }
+                Event::DeliveryGone { id }
+            } else if failed.state_changes.is_empty()
                 && failed_email_pushes.is_empty()
                 && failed_calendar_alerts.is_empty()
             {
@@ -232,7 +255,7 @@ async fn post_object(
     push_timeout: Duration,
     vapid: Option<&Vapid>,
     urgency: Urgency,
-) -> bool {
+) -> PushOutcome {
     match serde_json::to_vec(object) {
         Ok(body) => {
             http_request(
@@ -252,7 +275,7 @@ async fn post_object(
                 Url = subscription.url.to_string(),
                 Reason = err.to_string()
             );
-            true
+            PushOutcome::Done
         }
     }
 }
@@ -272,7 +295,7 @@ pub(crate) async fn http_request(
     push_timeout: Duration,
     vapid: Option<&Vapid>,
     urgency: Urgency,
-) -> bool {
+) -> PushOutcome {
     let mut client = match push_client.request(Method::POST, &details.url) {
         Ok(client) => client,
         Err(err) => {
@@ -282,7 +305,7 @@ pub(crate) async fn http_request(
                 Url = CompactString::from(&details.url),
                 Reason = err.as_str()
             );
-            return true;
+            return PushOutcome::Done;
         }
     }
     .timeout(push_timeout)
@@ -310,7 +333,7 @@ pub(crate) async fn http_request(
                     Url = CompactString::from(&details.url),
                     Reason = err
                 );
-                return true;
+                return PushOutcome::Done;
             }
         }
     }
@@ -330,10 +353,13 @@ pub(crate) async fn http_request(
                     Url = CompactString::from(&details.url)
                 );
 
-                true
+                PushOutcome::Done
             } else {
-                let mut reason = response.text().await.unwrap_or_default();
-                reason.truncate(reason.ceil_char_boundary(MAX_ERROR_RESPONSE_LEN));
+                let reason = response
+                    .bytes_prefix(MAX_ERROR_RESPONSE_LEN)
+                    .await
+                    .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+                    .unwrap_or_default();
 
                 trc::event!(
                     PushSubscription(PushSubscriptionEvent::Error),
@@ -343,7 +369,11 @@ pub(crate) async fn http_request(
                     Reason = reason,
                 );
 
-                false
+                if matches!(status, StatusCode::NOT_FOUND | StatusCode::GONE) {
+                    PushOutcome::Gone
+                } else {
+                    PushOutcome::Retry
+                }
             }
         }
         Err(err) => {
@@ -354,7 +384,7 @@ pub(crate) async fn http_request(
                 Reason = error_chain(&err)
             );
 
-            false
+            PushOutcome::Retry
         }
     }
 }

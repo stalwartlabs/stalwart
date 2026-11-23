@@ -15,6 +15,13 @@ impl DnsManagement {
     pub fn publishes(&self, record: DnsRecordType) -> bool {
         matches!(self, DnsManagement::Automatic(props) if props.publish_records.contains(&record))
     }
+
+    pub fn allows_subdomain_signing(&self) -> bool {
+        match self {
+            DnsManagement::Automatic(props) => props.allow_subdomain_signing,
+            DnsManagement::Manual => true,
+        }
+    }
 }
 
 impl DkimSignature {

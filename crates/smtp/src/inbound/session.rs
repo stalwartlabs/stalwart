@@ -12,6 +12,7 @@ use common::{
     network::{
         SessionStream,
         memory::{MEMORY_STEP, MemoryClass},
+        ready_or_timeout,
     },
 };
 use compact_str::{CompactString, ToCompactString, format_compact};
@@ -143,6 +144,16 @@ impl<T: SessionStream> Session<T> {
                                     );
 
                                     self.write(b"503 5.5.1 Already authenticated.\r\n").await?;
+                                } else if self.data.mail_from.is_some() {
+                                    trc::event!(
+                                        Smtp(SmtpEvent::AuthNotAllowed),
+                                        SpanId = self.data.session_id,
+                                    );
+
+                                    self.write(
+                                        b"503 5.5.1 AUTH not permitted during a mail transaction.\r\n",
+                                    )
+                                    .await?;
                                 } else if let Some(mut token) =
                                     SaslToken::from_mechanism(mechanism & auth)
                                 {
@@ -598,37 +609,49 @@ impl<T: AsyncWrite + AsyncRead + Unpin> Session<T> {
 
     #[inline(always)]
     pub async fn write(&mut self, bytes: &[u8]) -> Result<(), ()> {
-        match self.stream.write_all(bytes).await {
-            Ok(_) => match self.stream.flush().await {
-                Ok(_) => {
-                    trc::event!(
-                        Smtp(SmtpEvent::RawOutput),
-                        SpanId = self.data.session_id,
-                        Size = bytes.len(),
-                        Contents = trc::Value::from_maybe_string(bytes),
-                    );
+        let result = ready_or_timeout(self.params.timeout, async {
+            match self.stream.write_all(bytes).await {
+                Ok(_) => match self.stream.flush().await {
+                    Ok(_) => {
+                        trc::event!(
+                            Smtp(SmtpEvent::RawOutput),
+                            SpanId = self.data.session_id,
+                            Size = bytes.len(),
+                            Contents = trc::Value::from_maybe_string(bytes),
+                        );
 
-                    Ok(())
-                }
+                        Ok(())
+                    }
+                    Err(err) => {
+                        trc::event!(
+                            Network(NetworkEvent::FlushError),
+                            SpanId = self.data.session_id,
+                            Reason = err.to_compact_string(),
+                        );
+                        Err(())
+                    }
+                },
                 Err(err) => {
                     trc::event!(
-                        Network(NetworkEvent::FlushError),
+                        Network(NetworkEvent::WriteError),
                         SpanId = self.data.session_id,
                         Reason = err.to_compact_string(),
                     );
+
                     Err(())
                 }
-            },
-            Err(err) => {
-                trc::event!(
-                    Network(NetworkEvent::WriteError),
-                    SpanId = self.data.session_id,
-                    Reason = err.to_compact_string(),
-                );
-
-                Err(())
             }
-        }
+        })
+        .await;
+
+        result.unwrap_or_else(|| {
+            trc::event!(
+                Network(NetworkEvent::Timeout),
+                SpanId = self.data.session_id,
+                CausedBy = trc::location!()
+            );
+            Err(())
+        })
     }
 
     #[inline(always)]

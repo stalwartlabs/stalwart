@@ -21,9 +21,9 @@ use std::{
     time::{Duration, Instant},
 };
 use store::{
-    ValueKey,
+    Serialize, ValueKey,
     ahash::{AHashMap, AHashSet},
-    write::{Archive, ArchiveBytes, now},
+    write::{Archive, ArchiveBytes, Archiver, BatchBuilder, now},
 };
 use tokio::sync::mpsc;
 use trc::{AddContext, PushSubscriptionEvent, ServerEvent};
@@ -458,6 +458,10 @@ pub fn spawn_push_manager(inner: Arc<Inner>) -> mpsc::Sender<Event> {
                             }
                         }
                     }
+                    Event::DeliveryGone { id } => {
+                        push_servers.remove(&id);
+                        retry_ids.remove(&id);
+                    }
                     Event::DeliveryFailure { id, failed } => {
                         if let Some(subscription) = push_servers.get_mut(&id) {
                             subscription.last_request = Instant::now();
@@ -559,6 +563,90 @@ fn send_verification(
         )
         .await;
     });
+}
+
+pub(crate) async fn destroy_push_subscription(
+    server: &Server,
+    account_id: u32,
+    subscription_id: u32,
+) -> trc::Result<()> {
+    let Some(archive) = server
+        .store()
+        .get_value::<Archive<ArchiveBytes>>(ValueKey::property(
+            account_id,
+            Collection::Principal,
+            0,
+            PrincipalField::PushSubscriptions,
+        ))
+        .await?
+    else {
+        return Ok(());
+    };
+    let mut subscriptions = archive
+        .deserialize::<PushSubscriptions>()
+        .caused_by(trc::location!())?;
+    let num_subscriptions = subscriptions.subscriptions.len();
+    subscriptions
+        .subscriptions
+        .retain(|subscription| subscription.id != subscription_id);
+    if subscriptions.subscriptions.len() == num_subscriptions {
+        return Ok(());
+    }
+
+    let mut batch = BatchBuilder::new();
+    if subscriptions.subscriptions.is_empty() {
+        batch
+            .with_account_id(u32::MAX)
+            .with_collection(Collection::Principal)
+            .with_document(account_id)
+            .untag(PrincipalField::PushSubscriptions);
+    }
+    batch
+        .with_account_id(account_id)
+        .with_collection(Collection::Principal)
+        .with_document(0)
+        .assert_value(PrincipalField::PushSubscriptions, archive);
+    if subscriptions.subscriptions.is_empty() {
+        batch.clear(PrincipalField::PushSubscriptions);
+    } else {
+        batch.set(
+            PrincipalField::PushSubscriptions,
+            Archiver::new(subscriptions)
+                .serialize()
+                .caused_by(trc::location!())?,
+        );
+    }
+    server
+        .commit_batch(batch)
+        .await
+        .caused_by(trc::location!())?;
+
+    trc::event!(
+        PushSubscription(PushSubscriptionEvent::Error),
+        Details = "Push subscription destroyed",
+        AccountId = account_id,
+        Reason = "Push endpoint reported the subscription as gone"
+    );
+
+    if server
+        .inner
+        .ipc
+        .push_tx
+        .send(PushEvent::PushServerUpdate {
+            account_id,
+            broadcast: true,
+        })
+        .await
+        .is_err()
+    {
+        trc::event!(
+            Server(ServerEvent::ThreadError),
+            Details = "Error sending push updates.",
+            CausedBy = trc::location!()
+        );
+    }
+
+    Ok(())
 }
 
 async fn load_push_subscriptions(

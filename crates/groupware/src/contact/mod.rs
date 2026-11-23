@@ -6,6 +6,7 @@
 
 pub mod index;
 pub mod storage;
+pub mod write;
 
 use crate::metadata::tracked_kinds;
 use calcard::vcard::VCard;

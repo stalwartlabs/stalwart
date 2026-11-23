@@ -249,6 +249,7 @@ impl JmapAuthorization for AccessToken {
                 | MethodObject::SearchSnippet
                 | MethodObject::VacationResponse
                 | MethodObject::SieveScript
+                | MethodObject::Mdn
                 | MethodObject::Registry(_) => Permission::JmapEmailChanges,
             },
             RequestMethod::Copy(m) => match &m {
@@ -259,6 +260,8 @@ impl JmapAuthorization for AccessToken {
                 CopyRequestMethod::FileNode(_) => Permission::JmapFileNodeCopy,
             },
             RequestMethod::ImportEmail(_) => Permission::JmapEmailImport,
+            RequestMethod::MdnSend(_) => Permission::JmapEmailSubmissionCreate,
+            RequestMethod::MdnParse(_) => Permission::JmapEmailParse,
             RequestMethod::Parse(m) => match &m {
                 ParseRequestMethod::Email(_) => Permission::JmapEmailParse,
                 ParseRequestMethod::ContactCard(_) => Permission::JmapContactCardParse,

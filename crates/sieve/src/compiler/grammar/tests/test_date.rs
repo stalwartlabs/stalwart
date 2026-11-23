@@ -7,8 +7,9 @@
 use crate::compiler::{
     CompileError, ErrorType, Number, Value,
     grammar::{Capability, Comparator, instruction::CompilerState},
-    lexer::{StringConstant, Token, word::Word},
+    lexer::{StringConstant, Token, tokenizer::TokenInfo, word::Word},
 };
+use calcard::common::timezone::Tz;
 
 use crate::compiler::grammar::{MatchType, test::Test};
 
@@ -35,7 +36,7 @@ pub(crate) struct TestDate {
     derive(serde::Serialize, serde::Deserialize)
 )]
 pub(crate) struct TestCurrentDate {
-    pub zone: Option<i64>,
+    pub zone: Zone,
     pub match_type: MatchType,
     pub comparator: Comparator,
     pub date_part: DatePart,
@@ -53,6 +54,7 @@ pub(crate) enum Zone {
     Time(i64) = 0,
     Original = 1,
     Local = 2,
+    Named(u16) = 3,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,7 +63,7 @@ pub(crate) enum Zone {
     derive(serde::Serialize, serde::Deserialize)
 )]
 #[repr(u8)]
-pub(crate) enum DatePart {
+pub enum DatePart {
     Year = 0,
     Month = 1,
     Day = 2,
@@ -163,7 +165,7 @@ impl CompilerState<'_> {
                 }
                 Token::Tag(Word::Zone) => {
                     self.validate_argument(7, None, token_info.line_num, token_info.line_pos)?;
-                    zone = Zone::Time(self.parse_timezone()?);
+                    zone = self.parse_timezone()?;
                 }
                 _ => {
                     if header_name.is_none() {
@@ -216,7 +218,7 @@ impl CompilerState<'_> {
         let mut match_type = MatchType::Is;
         let mut comparator = Comparator::AsciiCaseMap;
         let key_list;
-        let mut zone = None;
+        let mut zone = Zone::Local;
         let mut date_part = None;
 
         loop {
@@ -251,7 +253,7 @@ impl CompilerState<'_> {
                 }
                 Token::Tag(Word::Zone) => {
                     self.validate_argument(3, None, token_info.line_num, token_info.line_pos)?;
-                    zone = self.parse_timezone()?.into();
+                    zone = self.parse_timezone()?;
                 }
                 _ => {
                     if date_part.is_none() {
@@ -282,22 +284,37 @@ impl CompilerState<'_> {
         })))
     }
 
-    pub(crate) fn parse_timezone(&mut self) -> Result<i64, CompileError> {
+    pub(crate) fn parse_timezone(&mut self) -> Result<Zone, CompileError> {
         let token_info = self.tokens.unwrap_next()?;
-        if let Token::StringConstant(value) = &token_info.token {
-            let timezone = match value {
-                StringConstant::String(value) => value.parse::<i64>().unwrap_or(i64::MAX),
-                StringConstant::Number(Number::Integer(n)) => *n,
-                StringConstant::Number(Number::Float(n)) => *n as i64,
-            };
-
-            return match timezone {
-                0..=1400 => Ok((timezone / 100 * 3600) + (timezone % 100 * 60)),
-                -1200..=-1 => Ok((timezone / 100 * 3600) - (-timezone % 100 * 60)),
-                _ => Err(token_info.expected("invalid timezone")),
-            };
+        if let Token::StringConstant(StringConstant::String(name)) = &token_info.token
+            && name.parse::<i64>().is_err()
+        {
+            return Tz::iana(name)
+                .map(|tz| Zone::Named(tz.as_id()))
+                .ok_or_else(|| token_info.expected("invalid timezone"));
         }
-        Err(token_info.expected("string containing time zone"))
+        zone_offset(token_info).map(Zone::Time)
+    }
+
+    pub(crate) fn parse_timezone_offset(&mut self) -> Result<i64, CompileError> {
+        let token_info = self.tokens.unwrap_next()?;
+        zone_offset(token_info)
+    }
+}
+
+fn zone_offset(token_info: TokenInfo) -> Result<i64, CompileError> {
+    let Token::StringConstant(value) = &token_info.token else {
+        return Err(token_info.expected("string containing time zone"));
+    };
+    let timezone = match value {
+        StringConstant::String(value) => value.parse::<i64>().unwrap_or(i64::MAX),
+        StringConstant::Number(Number::Integer(n)) => *n,
+        StringConstant::Number(Number::Float(n)) => *n as i64,
+    };
+    match timezone {
+        0..=1400 => Ok((timezone / 100 * 3600) + (timezone % 100 * 60)),
+        -1200..=-1 => Ok((timezone / 100 * 3600) - (-timezone % 100 * 60)),
+        _ => Err(token_info.expected("invalid timezone")),
     }
 }
 

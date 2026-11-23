@@ -39,6 +39,19 @@ pub trait MessageCacheFetch: Sync + Send {
 
     fn fresh_messages(&self, account_id: u32) -> Option<Arc<MessageStoreCache>>;
 
+    fn get_current_messages(
+        &self,
+        account_id: u32,
+    ) -> impl Future<Output = trc::Result<Arc<MessageStoreCache>>> + Send;
+
+    fn refresh_messages(
+        &self,
+        account_id: u32,
+        cache: Arc<MessageStoreCache>,
+        start_time: Instant,
+        verified_after: Option<u64>,
+    ) -> impl Future<Output = trc::Result<Arc<MessageStoreCache>>> + Send;
+
     fn apply_keyword_writes(
         &self,
         account_id: u32,
@@ -65,6 +78,173 @@ impl MessageCacheFetch for Server {
             },
         };
         revalidate_messages(self, account_id, cache).await
+    }
+
+    async fn get_current_messages(&self, account_id: u32) -> trc::Result<Arc<MessageStoreCache>> {
+        let cache = match self.inner.cache.resident_messages(account_id) {
+            Some(cache) => cache,
+            None => match load_cache(self, account_id).await? {
+                LoadedCache::Resident(cache) => cache,
+                LoadedCache::Built(cache) => return Ok(cache),
+            },
+        };
+        let verified_after = self.inner.cache.revalidate.now();
+        self.refresh_messages(account_id, cache, Instant::now(), Some(verified_after))
+            .await
+    }
+
+    async fn refresh_messages(
+        &self,
+        account_id: u32,
+        cache: Arc<MessageStoreCache>,
+        start_time: Instant,
+        verified_after: Option<u64>,
+    ) -> trc::Result<Arc<MessageStoreCache>> {
+        let caches = &self.inner.cache;
+        let revalidate = &caches.revalidate;
+        let lock = cache.update_lock.clone();
+        let entry_epoch = lock.epoch();
+        let (_permit, cache) = match lock.try_update() {
+            Some(permit) => (permit, cache),
+            None => loop {
+                let released = lock.released();
+                let permit = lock.try_update();
+                if permit.is_none() {
+                    released.await;
+                }
+                match (caches.peek_messages(account_id), permit) {
+                    (Some(current), _)
+                        if (current.is_fresh(revalidate)
+                            || (Arc::ptr_eq(&current.update_lock, &lock)
+                                && current
+                                    .verification
+                                    .is_verified_since(entry_epoch, revalidate)))
+                            && verified_after.is_none_or(|after| {
+                                current.verification.is_verified_after(after)
+                            }) =>
+                    {
+                        trc::event!(
+                            Cache(CacheEvent::Hit),
+                            AccountId = account_id,
+                            Collection = SyncCollection::Email.as_str(),
+                            ChangeId = current.last_change_id,
+                            Elapsed = start_time.elapsed(),
+                        );
+                        return Ok(current);
+                    }
+                    (current, Some(permit)) => break (permit, current.unwrap_or(cache)),
+                    _ => {}
+                }
+            },
+        };
+
+        // Obtain current state
+        let verification = Verification::capture(revalidate, &cache.update_lock);
+        let changes = self
+            .core
+            .storage
+            .data
+            .changes(
+                account_id,
+                SyncCollection::Email.into(),
+                Query::Since(cache.last_change_id),
+            )
+            .await
+            .caused_by(trc::location!())?;
+
+        // Regenerate cache if the change log has been truncated
+        if changes.needs_full_rebuild(cache.last_change_id) {
+            let mut cache =
+                full_cache_build(self, account_id, cache.update_lock.clone(), verification).await?;
+            if !is_resident_lock(self, account_id, &cache.update_lock)
+                && let Some(cache) = Arc::get_mut(&mut cache)
+            {
+                cache.verification = Verification::default();
+            }
+            caches.publish_messages(
+                account_id,
+                &cache,
+                Some(SwapChanges::rebuilt(
+                    cache.last_change_id,
+                    cache.emails.len(),
+                )),
+            );
+
+            trc::event!(
+                Cache(CacheEvent::Stale),
+                AccountId = account_id,
+                Collection = SyncCollection::Email.as_str(),
+                ChangeId = cache.last_change_id,
+                Total = vec![cache.emails.len(), cache.mailboxes.items.len()],
+                Elapsed = start_time.elapsed(),
+            );
+
+            return Ok(cache);
+        }
+
+        // Verify changes
+        if changes.changes.is_empty() {
+            let is_current = verification.is_current(&cache.update_lock);
+            let is_advanced = changes.to_change_id > cache.last_change_id;
+            let cache = if is_current || is_advanced {
+                let mut verified = cache.as_ref().clone();
+                if is_current && is_resident_lock(self, account_id, &verified.update_lock) {
+                    verified.verification = verification;
+                }
+                if is_advanced {
+                    verified.last_change_id = changes.to_change_id;
+                    if changes.item_change_id.is_some() {
+                        verified.refresh = Arc::new(verified.refresh.with_new_uid_next());
+                    }
+                }
+                let verified = Arc::new(verified);
+                caches.publish_messages(account_id, &verified, None);
+                verified
+            } else {
+                cache
+            };
+
+            trc::event!(
+                Cache(CacheEvent::Hit),
+                AccountId = account_id,
+                Collection = SyncCollection::Email.as_str(),
+                ChangeId = cache.last_change_id,
+                Elapsed = start_time.elapsed(),
+            );
+
+            return Ok(cache);
+        }
+
+        let change_set = ChangeSet::classify(changes);
+        let base_change_id = cache.last_change_id;
+        let mut cache = change_set.apply(self, account_id, cache.as_ref()).await?;
+        if is_resident_lock(self, account_id, &cache.update_lock) {
+            cache.verification = verification;
+        }
+
+        let cache = Arc::new(cache);
+        caches.publish_messages(
+            account_id,
+            &cache,
+            Some(SwapChanges::applied(
+                change_set.items.len(),
+                base_change_id,
+                cache.last_change_id,
+                cache.emails.len(),
+            )),
+        );
+
+        trc::event!(
+            Cache(CacheEvent::Update),
+            AccountId = account_id,
+            Collection = SyncCollection::Email.as_str(),
+            ChangeId = cache.last_change_id,
+            Details = vec![change_set.items.len(), change_set.containers.len()],
+            Total = vec![cache.emails.len(), cache.mailboxes.items.len()],
+            Elapsed = start_time.elapsed(),
+        );
+
+        Ok(cache)
     }
 
     async fn get_resident_messages(
@@ -205,12 +385,9 @@ async fn revalidate_messages(
     account_id: u32,
     cache: Arc<MessageStoreCache>,
 ) -> trc::Result<Arc<MessageStoreCache>> {
-    let caches = &server.inner.cache;
-
     // Serve the snapshot without revalidating while it is within the freshness window
     let start_time = Instant::now();
-    let revalidate = &caches.revalidate;
-    let served = |cache: Arc<MessageStoreCache>| {
+    if cache.is_fresh(&server.inner.cache.revalidate) {
         trc::event!(
             Cache(CacheEvent::Hit),
             AccountId = account_id,
@@ -218,145 +395,11 @@ async fn revalidate_messages(
             ChangeId = cache.last_change_id,
             Elapsed = start_time.elapsed(),
         );
-        Ok(cache)
-    };
-    if cache.is_fresh(revalidate) {
-        return served(cache);
+        return Ok(cache);
     }
-
-    let lock = cache.update_lock.clone();
-    let entry_epoch = lock.epoch();
-    let (_permit, cache) = match lock.try_update() {
-        Some(permit) => (permit, cache),
-        None => loop {
-            let released = lock.released();
-            let permit = lock.try_update();
-            if permit.is_none() {
-                released.await;
-            }
-            match (caches.peek_messages(account_id), permit) {
-                (Some(current), _)
-                    if current.is_fresh(revalidate)
-                        || (Arc::ptr_eq(&current.update_lock, &lock)
-                            && current
-                                .verification
-                                .is_verified_since(entry_epoch, revalidate)) =>
-                {
-                    return served(current);
-                }
-                (current, Some(permit)) => break (permit, current.unwrap_or(cache)),
-                _ => {}
-            }
-        },
-    };
-
-    // Obtain current state
-    let verification = Verification::capture(revalidate, &cache.update_lock);
-    let changes = server
-        .core
-        .storage
-        .data
-        .changes(
-            account_id,
-            SyncCollection::Email.into(),
-            Query::Since(cache.last_change_id),
-        )
+    server
+        .refresh_messages(account_id, cache, start_time, None)
         .await
-        .caused_by(trc::location!())?;
-
-    // Regenerate cache if the change log has been truncated
-    if changes.needs_full_rebuild(cache.last_change_id) {
-        let mut cache =
-            full_cache_build(server, account_id, cache.update_lock.clone(), verification).await?;
-        if !is_resident_lock(server, account_id, &cache.update_lock)
-            && let Some(cache) = Arc::get_mut(&mut cache)
-        {
-            cache.verification = Verification::default();
-        }
-        caches.publish_messages(
-            account_id,
-            &cache,
-            Some(SwapChanges::rebuilt(
-                cache.last_change_id,
-                cache.emails.len(),
-            )),
-        );
-
-        trc::event!(
-            Cache(CacheEvent::Stale),
-            AccountId = account_id,
-            Collection = SyncCollection::Email.as_str(),
-            ChangeId = cache.last_change_id,
-            Total = vec![cache.emails.len(), cache.mailboxes.items.len()],
-            Elapsed = start_time.elapsed(),
-        );
-
-        return Ok(cache);
-    }
-
-    // Verify changes
-    if changes.changes.is_empty() {
-        let is_current = verification.is_current(&cache.update_lock);
-        let is_advanced = changes.to_change_id > cache.last_change_id;
-        let cache = if is_current || is_advanced {
-            let mut verified = cache.as_ref().clone();
-            if is_current && is_resident_lock(server, account_id, &verified.update_lock) {
-                verified.verification = verification;
-            }
-            if is_advanced {
-                verified.last_change_id = changes.to_change_id;
-                if changes.item_change_id.is_some() {
-                    verified.refresh = Arc::new(verified.refresh.with_new_uid_next());
-                }
-            }
-            let verified = Arc::new(verified);
-            caches.publish_messages(account_id, &verified, None);
-            verified
-        } else {
-            cache
-        };
-
-        trc::event!(
-            Cache(CacheEvent::Hit),
-            AccountId = account_id,
-            Collection = SyncCollection::Email.as_str(),
-            ChangeId = cache.last_change_id,
-            Elapsed = start_time.elapsed(),
-        );
-
-        return Ok(cache);
-    }
-
-    let change_set = ChangeSet::classify(changes);
-    let base_change_id = cache.last_change_id;
-    let mut cache = change_set.apply(server, account_id, cache.as_ref()).await?;
-    if is_resident_lock(server, account_id, &cache.update_lock) {
-        cache.verification = verification;
-    }
-
-    let cache = Arc::new(cache);
-    caches.publish_messages(
-        account_id,
-        &cache,
-        Some(SwapChanges::applied(
-            change_set.items.len(),
-            base_change_id,
-            cache.last_change_id,
-            cache.emails.len(),
-        )),
-    );
-
-    trc::event!(
-        Cache(CacheEvent::Update),
-        AccountId = account_id,
-        Collection = SyncCollection::Email.as_str(),
-        ChangeId = cache.last_change_id,
-        Details = vec![change_set.items.len(), change_set.containers.len()],
-        Total = vec![cache.emails.len(), cache.mailboxes.items.len()],
-        Elapsed = start_time.elapsed(),
-    );
-
-    Ok(cache)
 }
 
 struct ChangeSet {

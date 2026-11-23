@@ -177,12 +177,16 @@ fn digest_matches(digest: &[u8], encoded: &str) -> bool {
 
 const MAX_ENCODED_DIGEST_LEN: usize = STANDARD.encoded_len(64);
 
+const MAX_SECRET_LEN: usize = 1024;
+
 pub async fn verify_secret_hash(
     verifier: &PasswordVerifier,
     hashed_secret: &str,
     secret: &[u8],
 ) -> trc::Result<bool> {
-    if hashed_secret.starts_with('$') {
+    if secret.len() > MAX_SECRET_LEN {
+        Ok(false)
+    } else if hashed_secret.starts_with('$') {
         verify_hash_prefix(verifier, hashed_secret, secret).await
     } else if hashed_secret.starts_with('_') {
         CryptScheme::BsdiCrypt

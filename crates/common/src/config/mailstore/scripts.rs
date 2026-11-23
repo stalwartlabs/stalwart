@@ -81,7 +81,7 @@ impl Scripting {
             .with_cpu_limit(untrusted.max_cpu_cycles as usize)
             .with_max_variable_size(untrusted.max_var_size as usize)
             .with_max_redirects(untrusted.max_redirects as usize)
-            .with_max_received_headers(usize::MAX) // This is set to usize::MAX here, but the actual limit is enforced during ingestion.
+            .with_max_received_headers(untrusted.max_received_headers as usize)
             .with_max_header_size(untrusted.max_header_size as usize)
             .with_max_out_messages(untrusted.max_out_messages as usize)
             .with_max_header_count(limits.header_count)

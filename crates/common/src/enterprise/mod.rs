@@ -27,12 +27,26 @@ use license::LicenseKey;
 use logo::{LogoLoadError, LogoSource};
 use mail_parser::DateTime;
 use registry::{
-    schema::structs::{Domain, Tenant},
-    types::id::ObjectId,
+    schema::{
+        enums::{AccountType, TenantStorageQuota},
+        prelude::{ObjectType, Property},
+        structs::{Domain, Tenant},
+    },
+    types::{EnumImpl, id::ObjectId},
 };
 use std::{sync::Arc, time::Duration};
+use store::{
+    registry::{RegistryObjectCounter, RegistryQuery},
+    roaring::RoaringBitmap,
+};
 use trc::{AddContext, MetricType};
 use utils::{cron::SimpleCron, outbound::OutboundPolicy, template::Template};
+
+#[derive(Debug, Clone, Copy)]
+pub struct TenantQuotaReached {
+    pub limit: u32,
+    pub objects: &'static str,
+}
 
 #[derive(Clone)]
 pub struct Enterprise {
@@ -294,6 +308,75 @@ impl Server {
         }
 
         Ok(true)
+    }
+
+    pub async fn tenant_quota_reached(
+        &self,
+        tenant_id: u32,
+        quota: TenantStorageQuota,
+    ) -> trc::Result<Option<TenantQuotaReached>> {
+        let (object_type, type_filter, objects) = match quota {
+            TenantStorageQuota::MaxAccounts => (
+                ObjectType::Account,
+                &[AccountType::User, AccountType::Resource][..],
+                "accounts",
+            ),
+            TenantStorageQuota::MaxGroups => {
+                (ObjectType::Account, &[AccountType::Group][..], "groups")
+            }
+            TenantStorageQuota::MaxDomains => (ObjectType::Domain, &[][..], "domains"),
+            TenantStorageQuota::MaxMailingLists => {
+                (ObjectType::MailingList, &[][..], "mailing lists")
+            }
+            TenantStorageQuota::MaxRoles => (ObjectType::Role, &[][..], "roles"),
+            TenantStorageQuota::MaxOauthClients => {
+                (ObjectType::OAuthClient, &[][..], "OAuth clients")
+            }
+            TenantStorageQuota::MaxDkimKeys => (ObjectType::DkimSignature, &[][..], "DKIM keys"),
+            TenantStorageQuota::MaxDnsServers => (ObjectType::DnsServer, &[][..], "DNS servers"),
+            TenantStorageQuota::MaxDirectories => (ObjectType::Directory, &[][..], "directories"),
+            TenantStorageQuota::MaxAcmeProviders => {
+                (ObjectType::AcmeProvider, &[][..], "ACME providers")
+            }
+            TenantStorageQuota::MaxDiskQuota => return Ok(None),
+        };
+
+        let tenant = self.tenant(tenant_id).await.caused_by(trc::location!())?;
+        let Some(limit) = tenant
+            .quota_objects
+            .as_ref()
+            .map(|quotas| quotas.get(quota))
+            .filter(|limit| *limit != u32::MAX)
+        else {
+            return Ok(None);
+        };
+
+        let count = if type_filter.is_empty() {
+            self.registry()
+                .query::<RegistryObjectCounter>(
+                    RegistryQuery::new(object_type).with_tenant(tenant_id.into()),
+                )
+                .await
+                .caused_by(trc::location!())?
+                .0 as u64
+        } else {
+            let mut count = 0;
+            for account_type in type_filter {
+                count += self
+                    .registry()
+                    .query::<RoaringBitmap>(
+                        RegistryQuery::new(object_type)
+                            .with_tenant(tenant_id.into())
+                            .equal(Property::Type, account_type.to_id()),
+                    )
+                    .await
+                    .caused_by(trc::location!())?
+                    .len();
+            }
+            count
+        };
+
+        Ok((count >= u64::from(limit)).then_some(TenantQuotaReached { limit, objects }))
     }
 
     pub async fn logo_resource(&self, domain: &str) -> trc::Result<Option<Resource<Bytes>>> {

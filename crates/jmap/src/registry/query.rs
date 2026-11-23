@@ -18,6 +18,7 @@ use crate::{
 };
 use common::{Server, auth::AccessToken};
 use compact_str::format_compact;
+use email::sieve::rules::SenderListKind;
 use jmap_proto::{
     method::query::{Comparator, Filter, QueryRequest, QueryResponse},
     object::registry::{Registry, RegistryComparator, RegistryFilter, RegistryFilterOperator},
@@ -25,7 +26,7 @@ use jmap_proto::{
 };
 use registry::{
     schema::{
-        enums::{AccountType, ExternalPublicKeyStatus, Permission},
+        enums::{AccountType, ExternalPublicKeyStatus, Permission, ResourceKind},
         prelude::{ObjectType, Property},
     },
     types::{
@@ -177,6 +178,41 @@ impl RegistryQuery for Server {
             .await
             .and_then(|response| response.build()),
 
+            ObjectType::MailRule => {
+                super::mapping::mail_rule::mail_rule_query(RegistryQueryResponse {
+                    server: self,
+                    access_token,
+                    object_type,
+                    request,
+                })
+                .await
+                .and_then(|response| response.build())
+            }
+
+            ObjectType::BlockedSender => super::mapping::sender_list::sender_list_query(
+                RegistryQueryResponse {
+                    server: self,
+                    access_token,
+                    object_type,
+                    request,
+                },
+                SenderListKind::Blocked,
+            )
+            .await
+            .and_then(|response| response.build()),
+
+            ObjectType::SafeSender => super::mapping::sender_list::sender_list_query(
+                RegistryQueryResponse {
+                    server: self,
+                    access_token,
+                    object_type,
+                    request,
+                },
+                SenderListKind::Safe,
+            )
+            .await
+            .and_then(|response| response.build()),
+
             ObjectType::Action => Err(trc::JmapEvent::InvalidArguments
                 .into_err()
                 .details("Actions cannot be queried")),
@@ -226,6 +262,13 @@ impl RegistryQuery for Server {
                                     && object_type == ObjectType::Account) =>
                             {
                                 AccountType::parse(&value)
+                                    .map(|id| RegistryFilterValue::from(id.to_id()))
+                            }
+                            (IndexSchemaValueType::Enum, serde_json::Value::String(value))
+                                if (property == Property::Kind
+                                    && object_type == ObjectType::Account) =>
+                            {
+                                ResourceKind::parse(&value)
                                     .map(|id| RegistryFilterValue::from(id.to_id()))
                             }
                             (IndexSchemaValueType::Enum, serde_json::Value::String(value))

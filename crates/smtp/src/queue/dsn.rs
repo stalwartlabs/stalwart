@@ -25,6 +25,7 @@ use mail_builder::mime::{BodyPart, MimePart, make_boundary};
 use mail_parser::DateTime;
 use smtp_proto::{
     RCPT_NOTIFY_DELAY, RCPT_NOTIFY_FAILURE, RCPT_NOTIFY_NEVER, RCPT_NOTIFY_SUCCESS, Response,
+    xtext::XText,
 };
 use std::borrow::Cow;
 use std::fmt::Write;
@@ -965,7 +966,11 @@ impl Message {
         dsn.push_str("Arrival-Date: ");
         dsn.push_str(&DateTime::from_timestamp(self.created as i64).to_rfc822());
         dsn.push_str("\r\n");
-        if let Some(env_id) = &self.env_id {
+        if let Some(env_id) = self
+            .env_id
+            .as_deref()
+            .filter(|env_id| XText(env_id).is_printable())
+        {
             let _ = write!(dsn, "Original-Envelope-Id: {env_id}\r\n");
         }
         dsn.push_str("\r\n");
@@ -974,7 +979,11 @@ impl Message {
 
 impl Recipient {
     fn write_dsn(&self, dsn: &mut String) {
-        if let Some(orcpt) = &self.orcpt {
+        if let Some(orcpt) = self
+            .orcpt
+            .as_deref()
+            .filter(|orcpt| XText(orcpt).is_printable())
+        {
             let _ = write!(dsn, "Original-Recipient: {ORCPT_ADDR_TYPE}{orcpt}\r\n");
         }
         let _ = write!(dsn, "Final-Recipient: rfc822;{}\r\n", self.address);

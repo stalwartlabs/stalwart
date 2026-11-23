@@ -385,7 +385,7 @@ impl ToManageHttpResponse for &trc::Error {
                 | trc::AuthEvent::Error
                 | trc::AuthEvent::TokenExpired
                 | trc::AuthEvent::CredentialExpired,
-            ) => HttpResponse::unauthorized(challenge, &resource_metadata()),
+            ) => HttpResponse::unauthorized(challenge, resource_metadata),
             _ => self.to_request_error().into_http_response(),
         }
     }
@@ -407,25 +407,41 @@ pub(crate) const BASIC_CHALLENGE: &str = "Basic realm=\"Stalwart Server\"";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuthChallenge {
+    Basic,
     Bearer,
     BearerAndBasic,
 }
 
+#[cfg(feature = "exchange")]
+impl AuthChallenge {
+    pub fn exchange(authorization: Option<(&str, &str)>) -> Self {
+        if authorization.is_some_and(|(mechanism, _)| mechanism.eq_ignore_ascii_case("bearer")) {
+            AuthChallenge::BearerAndBasic
+        } else {
+            AuthChallenge::Basic
+        }
+    }
+}
+
 pub trait UnauthorizedResponse {
-    fn unauthorized(challenge: AuthChallenge, resource_metadata: &str) -> Self;
+    fn unauthorized(challenge: AuthChallenge, resource_metadata: impl FnOnce() -> String) -> Self;
 }
 
 impl UnauthorizedResponse for HttpResponse {
-    fn unauthorized(challenge: AuthChallenge, resource_metadata: &str) -> Self {
-        let response = HttpResponse::new(StatusCode::UNAUTHORIZED).with_header(
-            header::WWW_AUTHENTICATE,
-            format!("Bearer realm=\"Stalwart Server\", resource_metadata=\"{resource_metadata}\""),
-        );
-
-        if challenge == AuthChallenge::BearerAndBasic {
-            response.with_header(header::WWW_AUTHENTICATE, BASIC_CHALLENGE)
-        } else {
-            response
+    fn unauthorized(challenge: AuthChallenge, resource_metadata: impl FnOnce() -> String) -> Self {
+        let response = HttpResponse::new(StatusCode::UNAUTHORIZED);
+        let bearer = || {
+            format!(
+                "Bearer realm=\"Stalwart Server\", resource_metadata=\"{}\"",
+                resource_metadata()
+            )
+        };
+        match challenge {
+            AuthChallenge::Basic => response.with_header(header::WWW_AUTHENTICATE, BASIC_CHALLENGE),
+            AuthChallenge::Bearer => response.with_header(header::WWW_AUTHENTICATE, bearer()),
+            AuthChallenge::BearerAndBasic => response
+                .with_header(header::WWW_AUTHENTICATE, bearer())
+                .with_header(header::WWW_AUTHENTICATE, BASIC_CHALLENGE),
         }
         .with_content_type("application/problem+json")
         .with_text_body(serde_json::to_string(&RequestError::unauthorized()).unwrap_or_default())

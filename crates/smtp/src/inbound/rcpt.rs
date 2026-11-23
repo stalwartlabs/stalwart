@@ -9,6 +9,7 @@ use crate::{
     queue::RCPT_REWRITTEN,
     scripts::ScriptResult,
 };
+use ahash::AHashSet;
 use common::{
     KV_GREYLIST,
     config::smtp::session::Stage,
@@ -18,11 +19,14 @@ use common::{
 use compact_str::CompactString;
 use smtp_proto::{
     RCPT_NOTIFY_DELAY, RCPT_NOTIFY_FAILURE, RCPT_NOTIFY_NEVER, RCPT_NOTIFY_SUCCESS, RcptTo,
+    request::parser::POSTMASTER,
 };
 use std::borrow::Cow;
 use store::dispatch::lookup::KeyValue;
 use trc::{SecurityEvent, SmtpEvent};
 use utils::DomainPart;
+
+const LINEAR_DEDUP_MAX: usize = 16;
 
 impl<T: SessionStream> Session<T> {
     pub async fn handle_rcpt_to(&mut self, to: RcptTo<Cow<'_, str>>) -> Result<(), ()> {
@@ -71,12 +75,28 @@ impl<T: SessionStream> Session<T> {
                 .await;
         }
 
+        if to.address.is_empty() {
+            trc::event!(
+                Smtp(SmtpEvent::InvalidRecipientAddress),
+                SpanId = self.data.session_id,
+            );
+            return self
+                .write(b"501 5.1.3 Bad destination mailbox address syntax.\r\n")
+                .await;
+        }
+
         // Build RCPT
-        let address_lcase = to.address.to_lowercase_address(true);
+        let default_domain = &self.server.core.email.default_domain_name;
+        let address = if to.address.eq_ignore_ascii_case(POSTMASTER) && !default_domain.is_empty() {
+            format!("{POSTMASTER}@{default_domain}")
+        } else {
+            to.address.into_owned()
+        };
+        let address_lcase = address.to_lowercase_address(true);
         let rcpt = SessionAddress {
             domain: address_lcase.domain_part().into(),
             address_lcase,
-            address: to.address.into_owned(),
+            address,
             flags: to.flags,
             dsn_info: to.orcpt.map(|e| e.into_owned()),
         };
@@ -349,6 +369,7 @@ impl<T: SessionStream> Session<T> {
         // Expand list
         if let Some(members) = rcpt_members {
             let list_addr = self.data.rcpt_to.pop().unwrap();
+            let mut expanded = Vec::with_capacity(members.len());
             for member in members.as_ref() {
                 let member_lcase = member.to_lowercase();
                 let is_local = match self
@@ -368,16 +389,16 @@ impl<T: SessionStream> Session<T> {
                     }
                 };
 
-                let address = if is_local {
-                    member.to_string()
+                let rewritten = if is_local {
+                    None
                 } else {
                     match self
                         .server
                         .rcpt_resolve(&member_lcase, false, self.data.session_id)
                         .await
                     {
-                        Ok(RcptResolution::Rewrite(address)) => address,
-                        Ok(_) => member.to_string(),
+                        Ok(RcptResolution::Rewrite(address)) => Some(address),
+                        Ok(_) => None,
                         Err(err) => {
                             trc::error!(
                                 err.span_id(self.data.session_id)
@@ -385,19 +406,64 @@ impl<T: SessionStream> Session<T> {
                                     .details("Failed to resolve mailing list member.")
                                     .ctx(trc::Key::To, CompactString::from(member.as_ref()))
                             );
-                            member.to_string()
+                            None
                         }
                     }
                 };
 
-                let mut member_addr = SessionAddress::new(address);
-                if !self.data.rcpt_to.contains(&member_addr)
-                    && member_addr.address_lcase != list_addr.address_lcase
-                {
-                    member_addr.dsn_info = list_addr.address_lcase.clone().into();
+                let mut member_addr = match rewritten {
+                    Some(address) => SessionAddress::new(address),
+                    None => SessionAddress::with_lcase(member.to_string(), member_lcase),
+                };
+                if member_addr != list_addr {
+                    member_addr.dsn_info = Some(list_addr.address_lcase.clone());
                     member_addr.flags = list_addr.flags;
-                    self.data.rcpt_to.push(member_addr);
+                    expanded.push(member_addr);
                 }
+            }
+
+            if expanded.is_empty() {
+                trc::event!(
+                    Smtp(SmtpEvent::MailboxDoesNotExist),
+                    SpanId = self.data.session_id,
+                    To = list_addr.address_lcase.clone(),
+                );
+
+                return self
+                    .rcpt_error(
+                        b"550 5.1.1 Mailbox does not exist.\r\n",
+                        list_addr.address_lcase,
+                    )
+                    .await;
+            }
+
+            if self.data.rcpt_to.len() + expanded.len() <= LINEAR_DEDUP_MAX {
+                for member_addr in expanded {
+                    if !self.data.rcpt_to.contains(&member_addr) {
+                        self.data.rcpt_to.push(member_addr);
+                    }
+                }
+            } else {
+                let mut envelope: AHashSet<&str> =
+                    AHashSet::with_capacity(self.data.rcpt_to.len() + expanded.len());
+                envelope.extend(
+                    self.data
+                        .rcpt_to
+                        .iter()
+                        .map(|rcpt| rcpt.address_lcase.as_str()),
+                );
+                let mut is_new = Vec::with_capacity(expanded.len());
+                is_new.extend(
+                    expanded
+                        .iter()
+                        .map(|member_addr| envelope.insert(member_addr.address_lcase.as_str())),
+                );
+                self.data.rcpt_to.extend(
+                    expanded
+                        .into_iter()
+                        .zip(is_new)
+                        .filter_map(|(member_addr, is_new)| is_new.then_some(member_addr)),
+                );
             }
         }
 

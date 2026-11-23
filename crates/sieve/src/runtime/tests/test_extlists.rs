@@ -5,23 +5,20 @@
  */
 
 use super::TestResult;
-use crate::{Context, Sieve, bytecode::ops, runtime::RuntimeError};
+use crate::{
+    Context, Sieve,
+    bytecode::ops,
+    runtime::{RuntimeError, handler::Handler},
+};
 
 impl<'x> Context<'x> {
-    pub(crate) fn test_valid_ext_list(
-        &mut self,
+    pub(crate) fn test_valid_ext_list<H: Handler<'x>>(
+        &self,
         script: &'x Sieve<'x>,
         test: &ops::TestValidExtList,
+        handler: &mut H,
     ) -> Result<TestResult, RuntimeError> {
-        let all_valid = self
-            .eval_values(script, test.list_names)?
-            .iter()
-            .all(|list| {
-                self.runtime
-                    .valid_ext_lists
-                    .contains(list.to_string().as_ref())
-            });
-
-        Ok(TestResult::Bool(all_valid ^ test.is_not))
+        let lists = self.eval_strings(script, test.list_names)?;
+        TestResult::from_reply(handler.valid_ext_lists(self, &lists), test.is_not)
     }
 }

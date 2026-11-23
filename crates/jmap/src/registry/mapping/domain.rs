@@ -159,10 +159,23 @@ pub(crate) async fn validate_domain(
         }));
         on_success_renew_certificate
     } else {
+        let mut update_records = Vec::new();
         if will_schedule_dkim {
+            update_records.push(DnsRecordType::Dkim);
+        }
+        if domain.dns_management.publishes(DnsRecordType::Dkim2Policy)
+            && old_domain.is_some_and(|old| {
+                old.dns_management.allows_subdomain_signing()
+                    != domain.dns_management.allows_subdomain_signing()
+                    || !old.dns_management.publishes(DnsRecordType::Dkim2Policy)
+            })
+        {
+            update_records.push(DnsRecordType::Dkim2Policy);
+        }
+        if !update_records.is_empty() {
             tasks.push(Task::DnsManagement(TaskDnsManagement {
                 domain_id: Id::default(),
-                update_records: Map::new(vec![DnsRecordType::Dkim]),
+                update_records: Map::new(update_records),
                 on_success_renew_certificate: false,
                 status: TaskStatus::now(),
             }));

@@ -41,9 +41,13 @@ impl SearchStore {
             }
             #[cfg(feature = "foundation")]
             structs::SearchStore::FoundationDb(foundation_db_store) => {
-                crate::backend::foundationdb::FdbStore::open(foundation_db_store)
-                    .await
-                    .map(SearchStore::Store)
+                crate::backend::foundationdb::FdbStore::open_shared(
+                    foundation_db_store,
+                    bp,
+                    ObjectType::SearchStore.singleton(),
+                )
+                .await
+                .map(SearchStore::Store)
             }
             #[cfg(feature = "postgres")]
             structs::SearchStore::PostgreSql(postgre_sql_store) => {

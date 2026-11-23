@@ -223,7 +223,7 @@ impl EmailSortKeys for Server {
 
 impl MessageSortField {
     #[inline(always)]
-    fn index(&self) -> usize {
+    pub fn index(&self) -> usize {
         match self {
             MessageSortField::From => 0,
             MessageSortField::To => 1,

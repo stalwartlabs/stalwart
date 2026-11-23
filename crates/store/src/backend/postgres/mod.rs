@@ -76,7 +76,10 @@ pub(crate) fn is_timeout_error(err: &tokio_postgres::Error) -> bool {
 fn into_pool_error(err: deadpool::managed::PoolError<trc::Error>) -> trc::Error {
     match err {
         deadpool::managed::PoolError::Backend(err) => err,
-        err => trc::StoreEvent::PostgresqlError.reason(error_chain(&err)),
+        deadpool::managed::PoolError::Timeout(_) => trc::StoreEvent::PoolError
+            .into_err()
+            .details("Timed out waiting for a PostgreSQL connection"),
+        err => trc::StoreEvent::PoolError.reason(error_chain(&err)),
     }
 }
 

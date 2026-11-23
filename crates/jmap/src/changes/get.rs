@@ -731,6 +731,7 @@ impl IntermediateChangesResponse {
             | MethodObject::SieveScript
             | MethodObject::Principal
             | MethodObject::Quota
+            | MethodObject::Mdn
             | MethodObject::Registry(_) => unreachable!(),
         })
     }

@@ -18,6 +18,10 @@ use utils::cache::CacheItemWeight;
 
 pub mod directory;
 pub mod email;
+#[cfg(feature = "exchange")]
+pub mod exchange;
+#[cfg(feature = "exchange")]
+pub mod exchange_sessions;
 pub mod http_auth;
 pub mod invalidate;
 pub mod large;
@@ -121,6 +125,10 @@ impl Verification {
 
     pub fn is_verified_since(&self, epoch: u64, revalidate: &RevalidateInterval) -> bool {
         self.epoch >= epoch && revalidate.is_within(self.verified_at)
+    }
+
+    pub fn is_verified_after(&self, verified_at: u64) -> bool {
+        self.verified_at > verified_at
     }
 }
 

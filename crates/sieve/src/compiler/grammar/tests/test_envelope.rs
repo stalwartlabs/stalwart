@@ -91,7 +91,7 @@ impl CompilerState<'_> {
                         token_info.line_num,
                         token_info.line_pos,
                     )?;
-                    zone = self.parse_timezone()?.into();
+                    zone = self.parse_timezone_offset()?.into();
                 }
                 _ => {
                     if envelope_list.is_none() {

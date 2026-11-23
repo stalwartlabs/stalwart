@@ -12,7 +12,7 @@ use ahash::AHashSet;
 use registry::{
     schema::{
         enums::Permission,
-        structs::{self, Account, PermissionsList, UserRoles},
+        structs::{self, Account, GroupAccount, PermissionsList, ResourceAccount, UserRoles},
     },
     types::EnumImpl,
 };
@@ -136,10 +136,14 @@ impl Server {
                     UserRoles::Custom(custom_roles) => custom_roles.role_ids.as_slice(),
                 },
             ),
-            Account::Group(account) => (
-                &account.permissions,
-                account
-                    .roles
+            Account::Group(GroupAccount {
+                permissions, roles, ..
+            })
+            | Account::Resource(ResourceAccount {
+                permissions, roles, ..
+            }) => (
+                permissions,
+                roles
                     .role_ids()
                     .unwrap_or(self.core.network.security.default_role_ids_group.as_slice()),
             ),
@@ -152,6 +156,7 @@ impl Server {
         let tenant_id = match account {
             Account::User(account) => account.member_tenant_id.map(|t| t.document_id()),
             Account::Group(account) => account.member_tenant_id.map(|t| t.document_id()),
+            Account::Resource(account) => account.member_tenant_id.map(|t| t.document_id()),
         };
         #[cfg(feature = "enterprise")]
         let permissions = self
@@ -332,7 +337,11 @@ impl Default for DefaultPermissions {
                     } else if name.starts_with("sysMaskedEmail")
                         || name.starts_with("sysArchivedItem")
                         || name.starts_with("sysAccountSettings")
+                        || name.starts_with("sysCalendarSettings")
                         || name.starts_with("sysPublicKey")
+                        || name.starts_with("sysMailRule")
+                        || name.starts_with("sysBlockedSender")
+                        || name.starts_with("sysSafeSender")
                         || (name.starts_with("sysSpamTrainingSample") && !name.contains("Create"))
                     {
                         default.user.push(permission);

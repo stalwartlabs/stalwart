@@ -18,6 +18,8 @@ use crate::{
 };
 use arc_swap::ArcSwap;
 use blob::BlobConfig;
+#[cfg(feature = "exchange")]
+use exchange::ExchangeConfig;
 use groupware::GroupwareConfig;
 use hyper::HeaderMap;
 use p256::elliptic_curve::sec1::ToSec1Point;
@@ -32,6 +34,8 @@ use store::registry::bootstrap::Bootstrap;
 use telemetry::Metrics;
 
 pub mod blob;
+#[cfg(feature = "exchange")]
+pub mod exchange;
 pub mod groupware;
 pub mod inner;
 pub mod mailstore;
@@ -130,6 +134,8 @@ impl Core {
             spam: SpamFilterConfig::parse(bp).await,
             email,
             groupware: GroupwareConfig::parse(bp).await,
+            #[cfg(feature = "exchange")]
+            exchange: ExchangeConfig::parse(bp).await,
             metadata,
             blob,
             storage,

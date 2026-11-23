@@ -80,6 +80,7 @@ pub struct SessionData {
     pub remote_port: u16,
     pub asn_geo_data: AsnGeoLookupResult,
     pub helo_domain: String,
+    pub helo_domains: usize,
 
     pub mail_from: Option<SessionAddress>,
     pub rcpt_to: Vec<SessionAddress>,
@@ -163,6 +164,7 @@ impl SessionData {
             remote_port,
             asn_geo_data,
             helo_domain: String::new(),
+            helo_domains: 0,
             mail_from: None,
             rcpt_to: Vec::new(),
             authenticated_as: None,
@@ -300,6 +302,7 @@ impl SessionData {
             session_id,
             asn_geo_data: AsnGeoLookupResult::default(),
             helo_domain: "localhost".into(),
+            helo_domains: 0,
             mail_from,
             rcpt_to,
             rcpt_errors: 0,
@@ -326,6 +329,10 @@ impl SessionData {
 impl SessionAddress {
     pub fn new(address: String) -> Self {
         let address_lcase = address.to_lowercase();
+        Self::with_lcase(address, address_lcase)
+    }
+
+    pub fn with_lcase(address: String, address_lcase: String) -> Self {
         SessionAddress {
             domain: address_lcase.domain_part().into(),
             address_lcase,

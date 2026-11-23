@@ -31,6 +31,18 @@ impl<T: SessionStream> Session<T> {
         request: Request<Command>,
         _permit: Option<OwnedSemaphorePermit>,
     ) -> trc::Result<()> {
+        if self.state.close_mailbox() {
+            self.state = State::Authenticated {
+                data: self.state.session_data(),
+            };
+            self.write_bytes(
+                StatusResponse::ok("Closed previous mailbox")
+                    .with_code(ResponseCode::Closed)
+                    .into_bytes(),
+            )
+            .await?;
+        }
+
         // Validate access
         self.assert_has_permission(if request.command == Command::Select {
             Permission::ImapSelect
@@ -112,8 +124,6 @@ impl<T: SessionStream> Session<T> {
                 .await
                 .imap_ctx(&arguments.tag, trc::location!())?;
 
-            // Synchronize messages
-            let closed_previous = self.state.close_mailbox();
             let is_condstore = self.is_condstore || arguments.condstore;
 
             // Build new state
@@ -169,7 +179,6 @@ impl<T: SessionStream> Session<T> {
                 unseen_seq: 0,
                 uid_validity,
                 uid_next,
-                closed_previous,
                 is_rev2,
                 is_utf8,
                 highest_modseq,

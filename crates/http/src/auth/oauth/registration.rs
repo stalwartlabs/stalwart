@@ -9,7 +9,7 @@ use crate::auth::authenticate::Authenticator;
 use common::{
     Server,
     auth::oauth::{
-        CLIENT_ID_MAX_LEN, SCOPE_FULL,
+        CLIENT_ID_MAX_LEN,
         client::ResolvedClient,
         client_id::{ClientMeta, encode_client_id},
         registration::{
@@ -75,7 +75,7 @@ impl ClientRegistrationHandler for Server {
         session: HttpSessionData,
     ) -> trc::Result<HttpResponse> {
         let body = fetch_body(req, 20 * 1024, session.session_id).await;
-        let mut request = serde_json::from_slice::<ClientRegistrationRequest>(
+        let request = serde_json::from_slice::<ClientRegistrationRequest>(
             body.as_deref().unwrap_or_default(),
         )
         .map_err(|err| {
@@ -107,25 +107,11 @@ impl ClientRegistrationHandler for Server {
                 .await?;
 
             let scopes = OAuthScopes::parse(request.scope.as_deref().unwrap_or_default());
-            if scopes.contains(OAuthScopes::FULL)
-                && let Some(scope) = &mut request.scope
-            {
-                *scope = scope
-                    .split_ascii_whitespace()
-                    .filter(|name| *name != SCOPE_FULL)
-                    .fold(String::with_capacity(scope.len()), |mut out, name| {
-                        if !out.is_empty() {
-                            out.push(' ');
-                        }
-                        out.push_str(name);
-                        out
-                    });
-            }
             let client_id = encode_client_id(
                 self.core.oauth.oauth_key.as_bytes(),
                 &ClientMeta {
                     redirect_uris: request.redirect_uris.clone(),
-                    scopes: scopes.without(OAuthScopes::FULL),
+                    scopes,
                     client_name: request.client_name.clone(),
                 },
             )

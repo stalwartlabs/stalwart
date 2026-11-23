@@ -33,7 +33,7 @@ impl Directories {
             let directory = match result {
                 Ok(directory) => directory,
                 Err(err) => {
-                    bp.build_error(id, err.clone());
+                    bp.build_warning(id, err.clone());
                     Directory::Unavailable(UnavailableDirectory::new(directory_type, err))
                 }
             };

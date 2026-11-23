@@ -128,11 +128,7 @@ impl<T: SessionStream> Session<T> {
             .map(|g| format!("220 {}\r\n", g))
             .unwrap_or_else(|| "220 Stalwart ESMTP at your service.\r\n".to_string());
 
-        if self.write(greeting.as_bytes()).await.is_err() {
-            return false;
-        }
-
-        true
+        self.write(greeting.as_bytes()).await.is_ok()
     }
 
     pub async fn handle_conn(&mut self) -> bool {

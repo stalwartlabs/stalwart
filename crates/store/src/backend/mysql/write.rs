@@ -157,9 +157,7 @@ impl MysqlStore {
             AutocommitOp::AddAndGet(by) => {
                 let s = conn.prep(&*stmts.increment_returning).await?;
                 conn.exec_drop(&s, (key, *by, *by)).await?;
-                result.push_counter_id(
-                    conn.last_insert_id().ok_or_else(missing_last_insert_id)? as i64
-                );
+                result.push_counter_id(conn.last_insert_id().unwrap_or_default() as i64);
             }
             AutocommitOp::Clear => {
                 let s = conn.prep(&*stmts.delete_key).await?;
@@ -306,9 +304,7 @@ impl MysqlStore {
                         ValueOp::AddAndGet(by) => {
                             let s = trx.prep(&*stmts.increment_returning).await?;
                             trx.exec_drop(&s, (key, *by, *by)).await?;
-                            result.push_counter_id(
-                                trx.last_insert_id().ok_or_else(missing_last_insert_id)? as i64,
-                            );
+                            result.push_counter_id(trx.last_insert_id().unwrap_or_default() as i64);
                         }
                         ValueOp::Clear => {
                             let s = trx.prep(&*stmts.delete_key).await?;
@@ -386,7 +382,7 @@ impl MysqlStore {
                 key_buf.clear();
                 bound.serialize_key_into(&mut key_buf, 0);
                 trx.exec_drop(&incr, (&key_buf, bound.by, bound.by)).await?;
-                let value = trx.last_insert_id().ok_or_else(missing_last_insert_id)? as i64;
+                let value = trx.last_insert_id().unwrap_or_default() as i64;
                 if let Err(err) = bound.verify(value) {
                     trx.rollback().await?;
                     return Err(err.into());

@@ -12,6 +12,7 @@ use std::fmt::Display;
 pub mod request;
 pub mod response;
 mod tokens;
+pub mod xtext;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]

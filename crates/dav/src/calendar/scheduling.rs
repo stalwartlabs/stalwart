@@ -33,7 +33,7 @@ use groupware::{
     cache::GroupwareCache,
     calendar::{
         CalendarEventNotification, CalendarEventNotificationContent,
-        availability::AvailabilityCalendars,
+        availability::{AvailabilityCalendars, DefaultFreeBusy},
     },
     strip_mailto_scheme,
 };
@@ -392,26 +392,34 @@ impl CalendarEventNotificationHandler for Server {
         let mut response = ScheduleResponse::default();
 
         for (email, attendee) in attendees {
-            let account_id = match self
+            let target = match self
                 .account_id_from_email(&email, true)
                 .await
                 .caused_by(trc::location!())?
             {
-                Some(account_id)
-                    if access_token.is_member(account_id)
-                        || access_token.has_permission(Permission::SysAccountQuery) =>
-                {
-                    Some(account_id)
-                }
                 Some(account_id) => self
                     .try_account(account_id)
                     .await
                     .caused_by(trc::location!())?
-                    .filter(|account| account.is_same_tenant(access_token))
-                    .map(|_| account_id),
+                    .and_then(|account| {
+                        if access_token.is_member(account_id) {
+                            return Some((account, DefaultFreeBusy::Granted));
+                        }
+                        let same_tenant = account.is_same_tenant(access_token);
+                        (same_tenant || access_token.has_permission(Permission::SysAccountQuery))
+                            .then(|| {
+                                (
+                                    account,
+                                    DefaultFreeBusy::of(
+                                        same_tenant && self.core.groupware.share_free_busy,
+                                    ),
+                                )
+                            })
+                    }),
                 None => None,
             };
-            if let Some(account_id) = account_id {
+            if let Some((account, default)) = target {
+                let account_id = account.account_id();
                 let resources = self
                     .fetch_groupware_resources(
                         access_token.account_id(),
@@ -420,9 +428,16 @@ impl CalendarEventNotificationHandler for Server {
                     )
                     .await
                     .caused_by(trc::location!())?;
-                let Some(calendars) =
-                    AvailabilityCalendars::owner(&resources, account_id, access_token)
-                else {
+                let calendars = if account.resource_kind().is_some() {
+                    Some(AvailabilityCalendars::published(
+                        &resources,
+                        account_id,
+                        access_token,
+                    ))
+                } else {
+                    AvailabilityCalendars::owner(&resources, account_id, access_token, default)
+                };
+                let Some(calendars) = calendars else {
                     response.items.0.push(ScheduleResponseItem {
                         recipient: Href(format!("mailto:{email}")),
                         request_status: "3.8;No authority".into(),

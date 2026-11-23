@@ -15,11 +15,11 @@ use crate::{
 use crate::index_queue::reindex::reindex_telemetry;
 // SPDX-SnippetEnd
 use common::{
-    KV_ACME, KV_GREYLIST, KV_LOCK_DAV, KV_LOCK_QUEUE_MESSAGE, KV_LOCK_TASK, KV_OAUTH,
-    KV_OAUTH_CIMD, KV_QUOTA_BLOB, KV_RATE_LIMIT_AUTH, KV_RATE_LIMIT_CIMD, KV_RATE_LIMIT_CONTACT,
-    KV_RATE_LIMIT_HTTP_ANONYMOUS, KV_RATE_LIMIT_HTTP_AUTHENTICATED, KV_RATE_LIMIT_IMAP,
-    KV_RATE_LIMIT_LOITER, KV_RATE_LIMIT_RCPT, KV_RATE_LIMIT_SCAN, KV_RATE_LIMIT_SMTP, Server,
-    storage::index::ObjectIndexBuilder,
+    KV_ACME, KV_GREYLIST, KV_LOCK_CREATE, KV_LOCK_DAV, KV_LOCK_QUEUE_MESSAGE, KV_LOCK_TASK,
+    KV_OAUTH, KV_OAUTH_CIMD, KV_QUOTA_BLOB, KV_RATE_LIMIT_AUTH, KV_RATE_LIMIT_CIMD,
+    KV_RATE_LIMIT_CONTACT, KV_RATE_LIMIT_HTTP_ANONYMOUS, KV_RATE_LIMIT_HTTP_AUTHENTICATED,
+    KV_RATE_LIMIT_IMAP, KV_RATE_LIMIT_LOITER, KV_RATE_LIMIT_RCPT, KV_RATE_LIMIT_SCAN,
+    KV_RATE_LIMIT_SMTP, Server, storage::index::ObjectIndexBuilder,
 };
 use email::{
     cache::MessageCacheFetch,
@@ -29,6 +29,8 @@ use email::{
     },
     sieve::SieveScript,
 };
+#[cfg(feature = "exchange")]
+use exchange::ExchangeCleanup;
 use groupware::{
     calendar::{Calendar, CalendarEvent, CalendarEventNotification},
     contact::{AddressBook, ContactCard},
@@ -382,7 +384,7 @@ async fn store_maintenance(server: &Server, task: &TaskStoreMaintenance) -> trc:
                 TaskStoreMaintenanceType::RemoveGreylist => &[KV_GREYLIST][..],
                 TaskStoreMaintenanceType::RemoveLockQueueMessage => &[KV_LOCK_QUEUE_MESSAGE][..],
                 TaskStoreMaintenanceType::RemoveLockTask => &[KV_LOCK_TASK][..],
-                TaskStoreMaintenanceType::RemoveLockDav => &[KV_LOCK_DAV][..],
+                TaskStoreMaintenanceType::RemoveLockDav => &[KV_LOCK_DAV, KV_LOCK_CREATE][..],
                 TaskStoreMaintenanceType::ResetRateLimiters => &[
                     KV_RATE_LIMIT_RCPT,
                     KV_RATE_LIMIT_SCAN,
@@ -421,6 +423,12 @@ async fn account_maintenance(
     match task.maintenance_type {
         TaskAccountMaintenanceType::Purge => {
             server.purge_account(task.account_id.document_id()).await?;
+            #[cfg(feature = "exchange")]
+            if server.core.exchange.enabled {
+                server
+                    .purge_exchange_account(task.account_id.document_id())
+                    .await?;
+            }
         }
         TaskAccountMaintenanceType::Reindex => {
             reindex_account(server, task.account_id.document_id()).await?;

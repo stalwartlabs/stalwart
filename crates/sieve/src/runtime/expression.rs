@@ -64,7 +64,9 @@ impl<'x> Context<'x> {
                     let left = self.expr_stack.pop().unwrap_or_default();
                     self.expr_stack
                         .push(match BinaryOperator::from_code(rec.b) {
-                            BinaryOperator::Add => left.op_add(right),
+                            BinaryOperator::Add => {
+                                left.op_add(right, self.runtime.max_variable_size)
+                            }
                             BinaryOperator::Subtract => left.op_subtract(right),
                             BinaryOperator::Multiply => left.op_multiply(right),
                             BinaryOperator::Divide => left.op_divide(right),
@@ -154,42 +156,31 @@ impl<'x> Context<'x> {
 }
 
 impl<'x> Variable<'x> {
-    pub fn op_add(self, other: Variable<'x>) -> Variable<'x> {
+    pub fn op_add(self, other: Variable<'x>, max_len: usize) -> Variable<'x> {
         match (self, other) {
             (Variable::Integer(a), Variable::Integer(b)) => Variable::Integer(a.saturating_add(b)),
             (Variable::Float(a), Variable::Float(b)) => Variable::Float(a + b),
             (Variable::Integer(i), Variable::Float(f))
             | (Variable::Float(f), Variable::Integer(i)) => Variable::Float(i as f64 + f),
-            (Variable::Array(a), Variable::Array(b)) => {
-                Variable::Array(Array::Owned(a.iter().chain(b.iter()).cloned().collect()))
+            (Variable::Array(a), Variable::Array(b)) => append_items(a, b.iter().cloned(), max_len),
+            (Variable::Array(a), b) => append_items(a, [b].into_iter(), max_len),
+            (a, Variable::Array(b)) => {
+                concat_items([a].into_iter().chain(b.iter().cloned()), max_len)
             }
-            (Variable::Array(a), b) => {
-                Variable::Array(Array::Owned(a.iter().cloned().chain([b]).collect()))
-            }
-            (a, Variable::Array(b)) => Variable::Array(Array::Owned(
-                [a].into_iter().chain(b.iter().cloned()).collect(),
-            )),
             (Variable::String(a), b) => {
                 if a.is_empty() {
                     b
                 } else if b.is_empty() {
                     Variable::String(a)
                 } else {
-                    let b = b.to_string();
-                    let mut result = a.into_owned();
-                    result.push_str(&b);
-                    Variable::String(Cow::Owned(result))
+                    concat_strings(a, &b.to_string(), max_len)
                 }
             }
             (a, Variable::String(b)) => {
                 if b.is_empty() {
                     a
                 } else {
-                    let a = a.to_string();
-                    let mut result = String::with_capacity(a.len() + b.len());
-                    result.push_str(&a);
-                    result.push_str(&b);
-                    Variable::String(Cow::Owned(result))
+                    concat_strings(a.into_string(), &b, max_len)
                 }
             }
         }
@@ -337,3 +328,80 @@ impl UnaryOperator {
 #[rustfmt::skip]
 #[path = "../../../../../stalwart-tests/unit/sieve/src/runtime/expression/test.rs"]
 mod test;
+
+fn concat_strings<'x>(a: Cow<'x, str>, b: &str, max_len: usize) -> Variable<'x> {
+    let mut result = match a {
+        Cow::Owned(mut a) => {
+            a.truncate(a.floor_char_boundary(max_len));
+            a
+        }
+        Cow::Borrowed(a) => {
+            let mut result = String::with_capacity(a.len().saturating_add(b.len()).min(max_len));
+            push_capped(&mut result, a, max_len);
+            result
+        }
+    };
+    push_capped(&mut result, b, max_len);
+    Variable::String(Cow::Owned(result))
+}
+
+fn push_capped(result: &mut String, text: &str, max_len: usize) {
+    let room = max_len.saturating_sub(result.len());
+    if let Some(text) = text.get(..text.floor_char_boundary(room)) {
+        result.push_str(text);
+    }
+}
+
+fn append_items<'x>(
+    left: Array<'x>,
+    right: impl Iterator<Item = Variable<'x>>,
+    max_len: usize,
+) -> Variable<'x> {
+    let size = left
+        .as_slice()
+        .iter()
+        .fold(0usize, |size, item| item_size(size, item));
+    if size > max_len {
+        return concat_items(left.as_slice().iter().cloned().chain(right), max_len);
+    }
+    let mut items = match left {
+        Array::Owned(items) => items,
+        Array::Borrowed(items) => {
+            let mut owned = Vec::with_capacity(items.len().saturating_add(right.size_hint().0));
+            owned.extend_from_slice(items);
+            owned
+        }
+    };
+    push_items(&mut items, right, size, max_len);
+    Variable::Array(Array::Owned(items))
+}
+
+fn concat_items<'x>(items: impl Iterator<Item = Variable<'x>>, max_len: usize) -> Variable<'x> {
+    let mut result = Vec::with_capacity(items.size_hint().0);
+    push_items(&mut result, items, 0, max_len);
+    Variable::Array(Array::Owned(result))
+}
+
+fn push_items<'x>(
+    result: &mut Vec<Variable<'x>>,
+    items: impl Iterator<Item = Variable<'x>>,
+    mut size: usize,
+    max_len: usize,
+) {
+    for item in items {
+        size = item_size(size, &item);
+        if size > max_len {
+            break;
+        }
+        result.push(item);
+    }
+}
+
+fn item_size(size: usize, item: &Variable<'_>) -> usize {
+    let len = match item {
+        Variable::String(text) => text.len(),
+        Variable::Integer(_) | Variable::Float(_) => 2,
+        Variable::Array(_) => item.len(),
+    };
+    size.saturating_add(len).saturating_add(2)
+}

@@ -7,6 +7,8 @@
 use super::{
     AnyKey, BlobOp, QueueClass, QueueEvent, TaskDue, TaskQueueClass, TelemetryClass, ValueClass,
 };
+#[cfg(feature = "exchange")]
+use crate::write::metadata::ExchangeClass;
 use crate::{
     ChangeLogKey, IndexKey, IndexKeyPrefix, Key, LogKey, PrivateLogKey, Subspace, U16_LEN, U32_LEN,
     U64_LEN, ValueKey, WITH_SUBSPACE,
@@ -606,6 +608,36 @@ impl ValueClass {
                         .write(MetadataClass::OWNER)
                         .write(*owner)
                         .write(collection),
+                    #[cfg(feature = "exchange")]
+                    MetadataClass::Exchange(class) => {
+                        let serializer = serializer
+                            .write(MetadataClass::EXCHANGE)
+                            .write(class.code());
+                        match class {
+                            ExchangeClass::Object | ExchangeClass::Alias => {
+                                serializer.write(collection).write(document_id)
+                            }
+                            ExchangeClass::Account
+                            | ExchangeClass::NamedProperties
+                            | ExchangeClass::Categories
+                            | ExchangeClass::TaskList
+                            | ExchangeClass::Rules => serializer,
+                            ExchangeClass::Device { slot } => serializer.write(*slot),
+                            ExchangeClass::DeviceFolder { slot, folder } => {
+                                serializer.write(*slot).write(folder.kind).write(folder.id)
+                            }
+                            ExchangeClass::Fai { folder, id }
+                            | ExchangeClass::FaiTombstone { folder, id } => {
+                                serializer.write(folder.kind).write(folder.id).write(*id)
+                            }
+                            ExchangeClass::Folder { id }
+                            | ExchangeClass::FolderTombstone { id } => serializer.write(*id),
+                            ExchangeClass::OfflineAddressBook { tenant } => {
+                                serializer.write(*tenant)
+                            }
+                            ExchangeClass::SpecialFolder { code } => serializer.write(*code),
+                        }
+                    }
                 }
             }
         };
@@ -685,6 +717,7 @@ const REG_OAUTH_GRANT: u16 = ObjectType::OAuthGrant as u16;
 const REG_MAILING_LIST: u16 = ObjectType::MailingList as u16;
 const REG_MASKED_EMAIL: u16 = ObjectType::MaskedEmail as u16;
 const REG_PUBLIC_KEY: u16 = ObjectType::PublicKey as u16;
+const REG_CALENDAR_SETTINGS: u16 = ObjectType::CalendarSettings as u16;
 const REPORT_EXTERNAL_ARF: u16 = ObjectType::ArfExternalReport as u16;
 const REPORT_EXTERNAL_DMARC: u16 = ObjectType::DmarcExternalReport as u16;
 const REPORT_EXTERNAL_TLS: u16 = ObjectType::TlsExternalReport as u16;
@@ -771,6 +804,8 @@ impl ValueClass {
                 MetadataClass::Shared
                 | MetadataClass::Viewer { .. }
                 | MetadataClass::Owner { .. } => (U32_LEN * 2) + 3,
+                #[cfg(feature = "exchange")]
+                MetadataClass::Exchange(class) => U32_LEN + 3 + class.key_len(),
             },
         }
     }
@@ -801,8 +836,15 @@ impl ValueClass {
             },
             ValueClass::Registry(registry) => match registry {
                 RegistryClass::Item { object_id, .. } => match *object_id {
-                    REG_ACCOUNT | REG_DOMAIN | REG_ROLE | REG_OAUTH_CLIENT | REG_MAILING_LIST
-                    | REG_PUBLIC_KEY | REG_OAUTH_GRANT | REG_MASKED_EMAIL => Subspace::Directory,
+                    REG_ACCOUNT
+                    | REG_DOMAIN
+                    | REG_ROLE
+                    | REG_OAUTH_CLIENT
+                    | REG_MAILING_LIST
+                    | REG_PUBLIC_KEY
+                    | REG_OAUTH_GRANT
+                    | REG_MASKED_EMAIL
+                    | REG_CALENDAR_SETTINGS => Subspace::Directory,
                     // SPDX-SnippetBegin
                     // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
                     // SPDX-License-Identifier: LicenseRef-SEL
@@ -884,6 +926,8 @@ impl ValueClass {
             | ValueClass::TaskQueue(TaskQueueClass::Task { .. })
             | ValueClass::Telemetry(TelemetryClass::Span(_))
             | ValueClass::Metadata(MetadataClass::Shared | MetadataClass::Private { .. }) => true,
+            #[cfg(feature = "exchange")]
+            ValueClass::Metadata(MetadataClass::Exchange(class)) => class.may_be_chunked(),
             ValueClass::SearchIndex(search) => matches!(
                 search,
                 SearchIndexClass::Document { .. }

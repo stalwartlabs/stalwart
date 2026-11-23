@@ -16,6 +16,7 @@ use crate::{
     },
     icalendar::ICalendarParameterName,
 };
+use ahash::AHashSet;
 use jiff::{
     Timestamp,
     civil::{self, Date, Weekday},
@@ -146,6 +147,7 @@ const TZ_MAX_FUTURE_YEARS: i32 = 100;
 const TZ_RANGE_MARGIN: i64 = 86400;
 const TZ_RULE_ACTIVE_SECONDS: i64 = 366 * 86400;
 const MAX_OBSERVANCES: usize = 4096;
+const MAX_ADDED_TIMEZONES: usize = 32;
 
 impl ICalendar {
     pub fn add_timezone(&mut self, tz_id: &str, from: i64, to: i64) -> Option<u32> {
@@ -202,16 +204,15 @@ impl ICalendar {
     }
 
     pub fn add_missing_timezones(&mut self) -> usize {
-        let mut defined: Vec<&str> = Vec::new();
-        for component in self.timezones() {
-            for entry in &component.entries {
-                if entry.name == ICalendarProperty::Tzid
-                    && let Some(ICalendarValue::Text(tz_id)) = entry.values.first()
-                {
-                    defined.push(tz_id.as_str());
-                }
-            }
-        }
+        let defined: AHashSet<&str> = self
+            .timezones()
+            .flat_map(|component| &component.entries)
+            .filter(|entry| entry.name == ICalendarProperty::Tzid)
+            .filter_map(|entry| match entry.values.first() {
+                Some(ICalendarValue::Text(tz_id)) => Some(tz_id.as_str()),
+                _ => None,
+            })
+            .collect();
 
         let mut referenced: Vec<String> = Vec::new();
         let mut range: Option<(i64, i64)> = None;
@@ -231,8 +232,9 @@ impl ICalendar {
             for entry in &component.entries {
                 for param in &entry.params {
                     if param.name == ICalendarParameterName::Tzid
+                        && referenced.len() < MAX_ADDED_TIMEZONES
                         && let Some(tz_id) = param.value.as_text()
-                        && !defined.contains(&tz_id)
+                        && !defined.contains(tz_id)
                         && !referenced.iter().any(|id| id == tz_id)
                     {
                         referenced.push(tz_id.to_string());

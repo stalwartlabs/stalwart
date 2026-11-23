@@ -43,10 +43,12 @@ pub async fn acme_create_account(
         ));
     }
 
+    let mut contact_urls = Vec::with_capacity(provider.contact.len());
     for contact in provider.contact.iter_mut() {
         let email = sanitize_email(contact.trim().strip_prefix("mailto:").unwrap_or(contact))
             .ok_or_else(|| AcmeError::Invalid(format!("Invalid contact email: {}", contact)))?;
-        *contact = format!("mailto:{}", email);
+        contact_urls.push(format!("mailto:{email}"));
+        *contact = email;
     }
 
     let client = acme_client(provider);
@@ -65,7 +67,7 @@ pub async fn acme_create_account(
 
     let payload = serde_json::to_string(&NewAccountPayload {
         tos_agreed: true,
-        contact: provider.contact.as_slice(),
+        contact: &contact_urls,
         eab,
     })
     .unwrap_or_default();

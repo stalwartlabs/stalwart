@@ -100,6 +100,19 @@ impl Server {
                         record: DnsRecord::TXT("v=spf1 mx -all".to_string()),
                     });
                 }
+                DnsRecordType::Dkim2Policy => {
+                    records.push(NamedDnsRecord {
+                        name: format!("_domainkey.{domain_name}."),
+                        record: DnsRecord::TXT(
+                            if domain.dns_management.allows_subdomain_signing() {
+                                "v=DKIM1"
+                            } else {
+                                "v=DKIM1; f=strict"
+                            }
+                            .to_string(),
+                        ),
+                    });
+                }
                 DnsRecordType::Dmarc => {
                     if let Some(uri) = &domain.report_address_uri {
                         let contents = if uri.starts_with("mailto:") && !uri.contains('@') {
@@ -393,26 +406,16 @@ impl Server {
         domain_id: Id,
         domain: &Domain,
     ) -> trc::Result<String> {
-        self.build_dns_records(
-            domain_id,
-            domain,
-            &[
-                DnsRecordType::Dkim,
-                DnsRecordType::Tlsa,
-                DnsRecordType::Spf,
-                DnsRecordType::Mx,
-                DnsRecordType::Dmarc,
-                DnsRecordType::Srv,
-                DnsRecordType::MtaSts,
-                DnsRecordType::TlsRpt,
-                DnsRecordType::Caa,
-                DnsRecordType::AutoConfig,
-                DnsRecordType::AutoConfigLegacy,
-                DnsRecordType::AutoDiscover,
-            ],
-        )
-        .await
-        .map(|records| BindSerializer::serialize(&records))
+        let record_types = if domain.dns_management.allows_subdomain_signing() {
+            BIND_RECORD_TYPES
+                .split_last()
+                .map_or(BIND_RECORD_TYPES, |(_, rest)| rest)
+        } else {
+            BIND_RECORD_TYPES
+        };
+        self.build_dns_records(domain_id, domain, record_types)
+            .await
+            .map(|records| BindSerializer::serialize(&records))
     }
 
     pub async fn get_pacc_for_domain(&self, domain_name: &str) -> trc::Result<String> {
@@ -453,3 +456,19 @@ impl Pacc {
 fn provider_domain(url: &Url) -> Option<&str> {
     url.host_str().and_then(psl::domain_str)
 }
+
+const BIND_RECORD_TYPES: &[DnsRecordType] = &[
+    DnsRecordType::Dkim,
+    DnsRecordType::Tlsa,
+    DnsRecordType::Spf,
+    DnsRecordType::Mx,
+    DnsRecordType::Dmarc,
+    DnsRecordType::Srv,
+    DnsRecordType::MtaSts,
+    DnsRecordType::TlsRpt,
+    DnsRecordType::Caa,
+    DnsRecordType::AutoConfig,
+    DnsRecordType::AutoConfigLegacy,
+    DnsRecordType::AutoDiscover,
+    DnsRecordType::Dkim2Policy,
+];

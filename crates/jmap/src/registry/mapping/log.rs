@@ -11,6 +11,7 @@ use crate::{
         query::RegistryQueryFilters,
     },
 };
+use common::config::telemetry::LogFiles;
 use jiff::Timestamp;
 use jmap_proto::types::state::State;
 use memchr::{memmem, memrchr};
@@ -21,10 +22,9 @@ use registry::{
 };
 use std::{
     borrow::Cow,
-    fs::{self, File},
+    fs::File,
     io::{self, BufRead, BufReader, Read, Seek, SeekFrom},
     mem,
-    path::Path,
 };
 use store::ahash::AHashMap;
 use tokio::sync::oneshot;
@@ -34,7 +34,7 @@ use types::id::Id;
 pub(crate) async fn log_get(
     mut get: RegistryGetResponse<'_>,
 ) -> trc::Result<RegistryGetResponse<'_>> {
-    let Some(path) = get.server.core.metrics.log_path.clone() else {
+    let Some(files) = get.server.core.metrics.log_files.clone() else {
         return Err(trc::JmapEvent::InvalidArguments
             .into_err()
             .details("No log tracers configured on the server"));
@@ -47,7 +47,7 @@ pub(crate) async fn log_get(
         let limit = get.server.core.jmap.get_max_objects;
         let (tx, rx) = oneshot::channel();
         tokio::task::spawn_blocking(move || {
-            let _ = tx.send(read_log_entries(path, ids, limit));
+            let _ = tx.send(read_log_entries(&files, ids, limit));
         });
 
         rx.await
@@ -74,7 +74,7 @@ pub(crate) async fn log_get(
 pub(crate) async fn log_query(
     mut req: RegistryQueryResponse<'_>,
 ) -> trc::Result<QueryResponseBuilder> {
-    let Some(path) = req.server.core.metrics.log_path.clone() else {
+    let Some(files) = req.server.core.metrics.log_files.clone() else {
         return Err(trc::JmapEvent::InvalidArguments
             .into_err()
             .details("No log tracers configured on the server"));
@@ -120,7 +120,7 @@ pub(crate) async fn log_query(
     let (tx, rx) = oneshot::channel();
 
     tokio::task::spawn_blocking(move || {
-        let _ = tx.send(read_log_offsets(path, filter.as_deref(), anchor, limit));
+        let _ = tx.send(read_log_offsets(&files, filter.as_deref(), anchor, limit));
     });
 
     // Build response
@@ -150,31 +150,25 @@ pub(crate) async fn log_query(
 }
 
 fn read_log_offsets(
-    path: impl AsRef<Path>,
+    files: &LogFiles,
     filter: Option<&str>,
     anchor: u64,
     limit: usize,
 ) -> io::Result<Vec<Id>> {
-    let mut logs = fs::read_dir(path)?.collect::<Result<Vec<_>, _>>()?;
-    logs.sort_by_key(|b| std::cmp::Reverse(b.file_name()));
-
+    let logs = files.newest_first()?;
     let mut entries = Vec::with_capacity(limit);
     let finder = filter.map(memmem::Finder::new);
     let mut file_number = 0u64;
     let mut found_anchor = anchor == 0;
     let file_anchor = anchor >> 48;
 
-    'outer: for log in logs.into_iter() {
-        if !log.file_type()?.is_file() {
-            continue;
-        }
-
+    'outer: for log in logs {
         if !found_anchor && file_anchor != file_number {
             file_number += 1;
             continue;
         }
 
-        let file = File::open(log.path())?;
+        let file = File::open(log)?;
         let file_size = file.metadata()?.len();
         let mut rev_lines = RawRevLines::new(file);
         rev_lines.init_reader()?;
@@ -218,22 +212,18 @@ fn read_log_offsets(
 }
 
 fn read_log_entries(
-    path: impl AsRef<Path>,
+    files: &LogFiles,
     ids: Option<Vec<Id>>,
     limit: usize,
 ) -> io::Result<Vec<(Id, Log)>> {
-    let path = path.as_ref();
     let ids = if let Some(mut ids) = ids {
         ids.truncate(limit);
         ids
     } else {
-        read_log_offsets(path, None, 0, limit)?
+        read_log_offsets(files, None, 0, limit)?
     };
 
-    let mut logs = fs::read_dir(path)?.collect::<Result<Vec<_>, _>>()?;
-
-    // Sort the entries by file name in reverse order.
-    logs.sort_by_key(|b| std::cmp::Reverse(b.file_name()));
+    let logs = files.newest_first()?;
 
     let mut entries = Vec::with_capacity(ids.len());
 
@@ -249,17 +239,12 @@ fn read_log_entries(
             .push(offset);
     }
 
-    let mut file_number = 0u64;
     let mut line = String::with_capacity(256);
     let mut continuation = Vec::with_capacity(256);
 
-    'outer: for log in logs.into_iter() {
-        if !log.file_type()?.is_file() {
-            continue;
-        }
-
+    'outer: for (file_number, log) in (0u64..).zip(logs) {
         if let Some(offsets) = offset_map.get(&file_number) {
-            let mut reader = BufReader::new(File::open(log.path())?);
+            let mut reader = BufReader::new(File::open(log)?);
 
             for offset in offsets {
                 // seek to the offset and read the line
@@ -289,8 +274,6 @@ fn read_log_entries(
                 }
             }
         }
-
-        file_number += 1;
     }
 
     Ok(entries)

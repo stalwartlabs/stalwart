@@ -14,9 +14,13 @@ impl BlobStore {
             structs::BlobStore::Default => return Some(BlobStore::Store(bp.data_store.clone())),
             #[cfg(feature = "foundation")]
             structs::BlobStore::FoundationDb(foundation_db_store) => {
-                crate::backend::foundationdb::FdbStore::open(foundation_db_store)
-                    .await
-                    .map(BlobStore::Store)
+                crate::backend::foundationdb::FdbStore::open_shared(
+                    foundation_db_store,
+                    bp,
+                    ObjectType::BlobStore.singleton(),
+                )
+                .await
+                .map(BlobStore::Store)
             }
             #[cfg(feature = "postgres")]
             structs::BlobStore::PostgreSql(postgre_sql_store) => {
@@ -44,7 +48,7 @@ impl BlobStore {
             // SPDX-License-Identifier: LicenseRef-SEL
             #[cfg(feature = "enterprise")]
             structs::BlobStore::Sharded(store) => {
-                crate::backend::composite::sharded_blob::ShardedBlob::open(store).await
+                crate::backend::composite::sharded_blob::ShardedBlob::open(store, bp).await
             } // SPDX-SnippetEnd
             _ => Err("Binary was not compiled with the selected blob store backend".to_string()),
         };

@@ -11,6 +11,7 @@ use crate::registry::{
         account::account_set,
         action::action_set,
         bootstrap::bootstrap_set,
+        calendar_settings::calendar_settings_set,
         cluster::{validate_coordinator, validate_in_memory_store},
         dkim::validate_dkim_signature,
         domain::{validate_dns_server, validate_domain},
@@ -20,8 +21,8 @@ use crate::registry::{
         masked_email::validate_masked_email,
         oauth_client::validate_oauth_client_object,
         principal::{
-            AccountUpdate, schedule_account_destruction, validate_account, validate_account_access,
-            validate_role,
+            AccountUpdate, ResourceDelegates, apply_resource_delegates,
+            schedule_account_destruction, validate_account, validate_account_access, validate_role,
         },
         public_key::PublicKeyManagement,
         queued_message::queued_message_set,
@@ -40,6 +41,7 @@ use common::{
     expr::if_block::BootstrapExprExt,
     manager::{app_client::validate_url_prefix, application::WebApplicationManager},
 };
+use email::sieve::rules::SenderListKind;
 use http_proto::HttpSessionData;
 use jmap_proto::{
     error::set::{SetError, SetErrorType},
@@ -196,6 +198,7 @@ async fn registry_object_set(
 
     // Process modifications
     let mut cache_invalidator = CacheInvalidationBuilder::default();
+    let mut resource_delegates = Vec::new();
     'outer: for (modification, mut value, mut new_object) in modifications {
         // Initial validations
         let is_create = matches!(modification, Modification::Create { .. });
@@ -376,7 +379,7 @@ async fn registry_object_set(
                 }
             }
             ObjectInner::Role(role) => {
-                validate_role(access_token, role, modification.as_role()).await?
+                validate_role(server, access_token, role, modification.as_role()).await?
             }
             ObjectInner::MaskedEmail(masked_email) => {
                 validate_masked_email(&set, masked_email, is_create, unpatched_properties).await?
@@ -571,6 +574,11 @@ async fn registry_object_set(
         let object_id = match (modification, result) {
             (Modification::Update { id, object }, RegistryWriteResult::Success(_)) => {
                 cache_invalidator.process_update(id, &object, &new_object);
+                if let ObjectInner::Account(updated) = &new_object.inner
+                    && let Some(delegates) = ResourceDelegates::reconcile(id, updated)
+                {
+                    resource_delegates.push(delegates);
+                }
                 if let (ObjectInner::Application(previous), ObjectInner::Application(updated)) =
                     (&object.inner, &new_object.inner)
                     && previous.resource_url != updated.resource_url
@@ -590,6 +598,11 @@ async fn registry_object_set(
             }
             (Modification::Create { client_id, .. }, RegistryWriteResult::Success(id)) => {
                 cache_invalidator.process_create(&new_object);
+                if let ObjectInner::Account(created) = &new_object.inner
+                    && let Some(delegates) = ResourceDelegates::reconcile(id, created)
+                {
+                    resource_delegates.push(delegates);
+                }
                 response.object.insert(Property::Id, RegistryValue::Id(id));
                 set.response
                     .created
@@ -711,6 +724,16 @@ async fn registry_object_set(
 
     // Finalize cache invalidation
     server.invalidate_caches(cache_invalidator).await?;
+
+    for delegates in &resource_delegates {
+        if let Err(err) = apply_resource_delegates(server, access_token, delegates).await {
+            trc::error!(
+                err.account_id(delegates.resource_id())
+                    .details("Failed to apply resource delegates")
+                    .caused_by(trc::location!())
+            );
+        }
+    }
 
     Ok(set.into_response())
 }
@@ -867,6 +890,7 @@ impl RegistrySet for Server {
             | ObjectType::TaskManager
             | ObjectType::TlsReportSettings
             | ObjectType::WebDav
+            | ObjectType::Exchange
             | ObjectType::DsnReportSettings
             | ObjectType::AcmeProvider
             | ObjectType::AllowedIp
@@ -940,6 +964,10 @@ impl RegistrySet for Server {
                 spam_sample_set(set).await.map(|set| set.into_response())
             }
 
+            ObjectType::CalendarSettings => calendar_settings_set(set)
+                .await
+                .map(|set| set.into_response()),
+
             ObjectType::AccountSettings
             | ObjectType::ApiKey
             | ObjectType::AccountPassword
@@ -955,6 +983,22 @@ impl RegistrySet for Server {
                 .map(|set| set.into_response()),
 
             ObjectType::Task => task_set(set).await.map(|set| set.into_response()),
+
+            ObjectType::MailRule => super::mapping::mail_rule::mail_rule_set(set)
+                .await
+                .map(|set| set.into_response()),
+
+            ObjectType::BlockedSender => {
+                super::mapping::sender_list::sender_list_set(set, SenderListKind::Blocked)
+                    .await
+                    .map(|set| set.into_response())
+            }
+
+            ObjectType::SafeSender => {
+                super::mapping::sender_list::sender_list_set(set, SenderListKind::Safe)
+                    .await
+                    .map(|set| set.into_response())
+            }
 
             ObjectType::Action => action_set(set).await.map(|set| set.into_response()),
 
@@ -1062,7 +1106,7 @@ impl Modification {
             Modification::Update { object, .. } => match &object.inner {
                 ObjectInner::Account(account) => match account.as_ref() {
                     Account::User(account) => Some(account),
-                    Account::Group(_) => None,
+                    Account::Group(_) | Account::Resource(_) => None,
                 },
                 _ => None,
             },

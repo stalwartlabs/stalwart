@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{assert_is_unique_uid, is_same_uid};
 use crate::{
     DavError, DavErrorCondition, DavMethod,
     common::{
@@ -14,35 +13,20 @@ use crate::{
     },
     file::DavFileResource,
 };
-use calcard::{
-    Entry, Parser,
-    vcard::{VCardProperty, VCardValue},
-};
-use common::{DavName, Server, auth::AccessToken};
+use calcard::{Entry, Parser};
+use common::{Server, auth::AccessToken};
 use dav_proto::{
     RequestHeaders, Return,
     schema::{property::Rfc1123DateTime, response::CardCondition},
 };
-// SPDX-SnippetBegin
-// SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-// SPDX-License-Identifier: LicenseRef-SEL
-#[cfg(feature = "enterprise")]
-use groupware::SizeWriter;
-// SPDX-SnippetEnd
 use groupware::{
     cache::GroupwareCache,
-    contact::{ContactCard, ContactCardContent},
+    contact::write::{CardCreate, CardWriter},
 };
 use http_proto::HttpResponse;
 use hyper::StatusCode;
-use registry::schema::enums::StorageQuota;
-use store::write::BatchBuilder;
 use trc::AddContext;
-use types::{
-    acl::Acl,
-    collection::{Collection, SyncCollection},
-    field::ContactField,
-};
+use types::collection::{Collection, SyncCollection};
 
 pub(crate) trait CardUpdateRequestHandler: Sync + Send {
     fn handle_card_update_request(
@@ -96,7 +80,7 @@ impl CardUpdateRequestHandler for Server {
             )
         })?;
 
-        let mut vcard = match Parser::new(vcard_raw).strict().entry() {
+        let vcard = match Parser::new(vcard_raw).strict().entry() {
             Entry::VCard(vcard) => vcard,
             _ => {
                 return Err(DavError::Condition(
@@ -124,40 +108,23 @@ impl CardUpdateRequestHandler for Server {
             ));
         }
 
+        let writer = CardWriter {
+            server: self,
+            access_token,
+            account_id,
+            resources: &resources,
+        };
+
         if let Some(resource) = resources.by_path(resource_name) {
             if resource.is_container() {
                 return Err(DavError::Code(StatusCode::METHOD_NOT_ALLOWED));
             }
 
-            // Validate ACL
-            let parent_id = resource.parent_id().unwrap();
-            let document_id = resource.document_id();
-            if !access_token.is_member(account_id)
-                && !resources.has_access_to_container(access_token, parent_id, Acl::ModifyItems)
-            {
-                return Err(DavError::Code(StatusCode::FORBIDDEN));
-            }
+            let stored = writer
+                .prepare_update(resource.parent_id().unwrap(), resource.document_id())
+                .await?;
+            let card = stored.card().caused_by(trc::location!())?;
 
-            // Update
-            let (card_, content_) = self
-                .archive_and_field(
-                    account_id,
-                    Collection::ContactCard,
-                    document_id,
-                    ContactField::Content.field(),
-                )
-                .await
-                .caused_by(trc::location!())?;
-            let card_ = card_.ok_or(DavError::Code(StatusCode::NOT_FOUND))?;
-            let card = card_
-                .to_unarchived::<ContactCard>()
-                .caused_by(trc::location!())?;
-            let content_ = content_.ok_or(DavError::Code(StatusCode::NOT_FOUND))?;
-            let content = content_
-                .to_unarchived::<ContactCardContent>()
-                .caused_by(trc::location!())?;
-
-            // Validate headers
             match self
                 .validate_headers(
                     access_token,
@@ -165,7 +132,7 @@ impl CardUpdateRequestHandler for Server {
                     vec![ResourceState {
                         account_id,
                         collection: Collection::ContactCard,
-                        document_id: Some(document_id),
+                        document_id: Some(stored.document_id()),
                         etag: format!("\"{}\"", card.inner.etag.to_native()).into(),
                         path: resource_name,
                         ..Default::default()
@@ -179,6 +146,7 @@ impl CardUpdateRequestHandler for Server {
                 Err(DavError::Code(StatusCode::PRECONDITION_FAILED))
                     if headers.ret == Return::Representation =>
                 {
+                    let content = stored.content().caused_by(trc::location!())?;
                     let mut vcard = String::with_capacity(u32::from(card.inner.size) as usize);
                     let _ = content.inner.card.write_to(
                         &mut vcard,
@@ -199,95 +167,17 @@ impl CardUpdateRequestHandler for Server {
                 Err(e) => return Err(e),
             }
 
-            // Validate UID
-            let restored_uid = match (
-                content.inner.card.uid().filter(|uid| !uid.is_empty()),
-                vcard.uid().filter(|uid| !uid.is_empty()),
-            ) {
-                (Some(stored_uid), Some(uid)) if is_same_uid(stored_uid, uid) => {
-                    (stored_uid != uid).then_some(stored_uid)
-                }
-                (None, uid) => {
-                    assert_is_unique_uid(&resources, parent_id, uid)?;
-                    None
-                }
-                _ => {
-                    return Err(DavError::Condition(DavErrorCondition::new(
-                        StatusCode::FORBIDDEN,
-                        CardCondition::NoUidConflict(resources.format_resource(resource).into()),
-                    )));
-                }
-            };
-            if let Some(stored_uid) = restored_uid
-                && let Some(value) = vcard
-                    .entries
-                    .iter_mut()
-                    .find(|entry| entry.name == VCardProperty::Uid)
-                    .and_then(|entry| entry.values.first_mut())
-            {
-                *value = VCardValue::Text(stored_uid.to_string());
-            }
-
-            // Build node
-            let new_card = card
-                .deserialize::<ContactCard>()
-                .caused_by(trc::location!())?;
-            let new_content = ContactCardContent { card: vcard };
-
-            let account = self.account(account_id).await?;
-            // SPDX-SnippetBegin
-            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-            // SPDX-License-Identifier: LicenseRef-SEL
-            // Validate quota
-            #[cfg(feature = "enterprise")]
-            let extra_bytes =
-                (SizeWriter::vcard(&new_content.card, self.core.groupware.vcard_version) as u64)
-                    .saturating_sub(u32::from(card.inner.size) as u64);
-            #[cfg(feature = "enterprise")]
-            if extra_bytes > 0 {
-                self.has_available_tenant_quota(&account, extra_bytes)
-                    .await?;
-            }
-            // SPDX-SnippetEnd
-
-            // Prepare write batch
-            let mut batch = BatchBuilder::new();
-            batch.with_account_id(account_id);
-            self.limit_disk_quota(&mut batch, &account);
-            let etag = new_card
-                .update_full(
-                    new_content,
-                    self.core.groupware.vcard_version,
-                    access_token.changed_by(),
-                    card,
-                    content.inner,
-                    account_id,
-                    document_id,
-                    None,
-                    &mut batch,
-                )
-                .caused_by(trc::location!())?;
-            self.commit_batch(batch).await.caused_by(trc::location!())?;
+            let written = writer.update(stored, vcard).await?;
 
             Ok(HttpResponse::new(StatusCode::NO_CONTENT)
-                .with_etag_opt(restored_uid.is_none().then_some(etag)))
+                .with_etag_opt(written.serves_submitted.then_some(written.etag)))
         } else if let Some((Some(parent), name)) = resources.map_parent(resource_name) {
             if !parent.is_container() {
                 return Err(DavError::Code(StatusCode::METHOD_NOT_ALLOWED));
             }
 
-            // Validate ACL
-            if !access_token.is_member(account_id)
-                && !resources.has_access_to_container(
-                    access_token,
-                    parent.document_id(),
-                    Acl::AddItems,
-                )
-            {
-                return Err(DavError::Code(StatusCode::FORBIDDEN));
-            }
+            let new = writer.prepare_create(parent.document_id())?;
 
-            // Validate headers
             self.validate_headers(
                 access_token,
                 headers,
@@ -303,52 +193,6 @@ impl CardUpdateRequestHandler for Server {
             )
             .await?;
 
-            // Validate UID
-            assert_is_unique_uid(&resources, parent.document_id(), vcard.uid())?;
-
-            // Validate object quota
-            let account = self.account(account_id).await?;
-            self.assert_object_quota(&account, StorageQuota::MaxContactCards, 1, || {
-                resources.resources.count(false)
-            })?;
-
-            // SPDX-SnippetBegin
-            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-            // SPDX-License-Identifier: LicenseRef-SEL
-            // Validate quota
-            #[cfg(feature = "enterprise")]
-            if !bytes.is_empty() {
-                self.has_available_tenant_quota(&account, bytes.len() as u64)
-                    .await?;
-            }
-            // SPDX-SnippetEnd
-
-            // Build node
-            let card = ContactCard {
-                names: vec![DavName {
-                    name: name.to_string(),
-                    parent_id: parent.document_id(),
-                }],
-                ..Default::default()
-            };
-            let content = ContactCardContent { card: vcard };
-
-            // Prepare write batch
-            let mut batch = BatchBuilder::new();
-            batch.with_account_id(account_id);
-            self.limit_disk_quota(&mut batch, &account);
-            let document_id = batch.reserve_document_id(account_id, Collection::ContactCard);
-            let etag = card
-                .insert(
-                    content,
-                    self.core.groupware.vcard_version,
-                    access_token.changed_by(),
-                    account_id,
-                    document_id,
-                    None,
-                    &mut batch,
-                )
-                .caused_by(trc::location!())?;
             let lock = self
                 .lock_create(
                     access_token,
@@ -358,11 +202,20 @@ impl CardUpdateRequestHandler for Server {
                     headers,
                 )
                 .await?;
-            self.commit_create(lock, batch)
-                .await
-                .caused_by(trc::location!())?;
+            let written = writer
+                .create(
+                    new,
+                    CardCreate {
+                        name: name.to_string(),
+                        vcard,
+                        size: Some(bytes.len()),
+                    },
+                )
+                .await;
+            self.release_create_lock(&lock).await;
+            let written = written?;
 
-            Ok(HttpResponse::new(StatusCode::CREATED).with_etag(etag))
+            Ok(HttpResponse::new(StatusCode::CREATED).with_etag(written.etag))
         } else {
             Err(DavError::Code(StatusCode::CONFLICT))?
         }

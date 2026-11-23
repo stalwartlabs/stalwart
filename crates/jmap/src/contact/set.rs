@@ -12,6 +12,7 @@ use crate::api::pending_creates::PendingCreates;
 use crate::blob::embedded::EmbeddedExport;
 use crate::changes::state::JmapCacheState;
 use crate::contact::{CreatedUids, assert_is_unique_uid};
+use crate::generate_uid;
 use calcard::jscontact::{
     JSCONTACT_VERSION, JSContact, JSContactProperty, JSContactType, JSContactValue,
 };
@@ -159,6 +160,22 @@ impl ContactCardSet for Server {
             let omits_version = object
                 .as_object_and_get(&Key::Property(JSContactProperty::Version))
                 .is_none();
+            let generated_uid = match &mut object {
+                Value::Object(properties)
+                    if matches!(
+                        properties.get(&Key::Property(JSContactProperty::Uid)),
+                        None | Some(Value::Null)
+                    ) =>
+                {
+                    let uid = format!("urn:uuid:{}", generate_uid());
+                    properties.insert(
+                        Key::Property(JSContactProperty::Uid),
+                        Value::Str(uid.clone().into()),
+                    );
+                    Some(uid)
+                }
+                _ => None,
+            };
 
             match self
                 .create_contact_card(
@@ -177,8 +194,13 @@ impl ContactCardSet for Server {
                 .await?
             {
                 Ok(document_id) => {
-                    if omits_type || omits_version {
-                        created_server_set.push((id.clone(), omits_type, omits_version));
+                    if omits_type || omits_version || generated_uid.is_some() {
+                        created_server_set.push((
+                            id.clone(),
+                            omits_type,
+                            omits_version,
+                            generated_uid,
+                        ));
                     }
                     created_slots.push(id, document_id);
                 }
@@ -599,7 +621,7 @@ impl ContactCardSet for Server {
             };
 
             created_slots.resolve(&mut response, &assigned_ids);
-            for (create_id, omits_type, omits_version) in created_server_set {
+            for (create_id, omits_type, omits_version, generated_uid) in created_server_set {
                 response.add_created_properties(
                     &create_id,
                     [
@@ -611,6 +633,7 @@ impl ContactCardSet for Server {
                             JSContactProperty::Version,
                             Value::Str(JSCONTACT_VERSION.into()),
                         )),
+                        generated_uid.map(|uid| (JSContactProperty::Uid, Value::Str(uid.into()))),
                     ]
                     .into_iter()
                     .flatten(),

@@ -252,7 +252,7 @@ impl<'x> RequestError<'x> {
             detail: format!(
                 concat!(
                     "The Request object used capability ",
-                    "'{}', which is not supported",
+                    "'{}', which is not supported ",
                     "by this server."
                 ),
                 capability

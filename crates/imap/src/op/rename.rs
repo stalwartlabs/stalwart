@@ -4,10 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use crate::core::{MailboxId, Session, SessionData};
+use crate::core::{AccountCaches, MailboxId, Session, SessionData};
 use common::{network::SessionStream, sharing::EffectiveAcl, storage::index::ObjectIndexBuilder};
 use compact_str::format_compact;
-use email::cache::mailbox::MailboxCacheAccess;
+use email::{
+    cache::{MessageCacheFetch, mailbox::MailboxCacheAccess},
+    mailbox::manage::MailboxFnc,
+};
 use imap_proto::{
     Command, ResponseCode, StatusResponse, protocol::rename::Arguments, receiver::Request,
 };
@@ -52,13 +55,47 @@ impl<T: SessionStream> SessionData<T> {
         // Refresh mailboxes
         self.expire_folders_of(&arguments.mailbox_name);
         self.expire_folders_of(&arguments.new_mailbox_name);
+        self.synchronize_mailboxes(false)
+            .await
+            .imap_ctx(&arguments.tag, trc::location!())?;
+
+        // Validate mailbox name
+        let account_id = self
+            .validate_mailbox_create(&arguments.new_mailbox_name, None)
+            .await
+            .add_context(|err| err.id(arguments.tag.clone()))?
+            .account_id;
+
+        let lock = self
+            .server
+            .lock_mailbox_names(account_id)
+            .await
+            .imap_ctx(&arguments.tag, trc::location!())?;
+        let result = self
+            .commit_rename(arguments, account_id, is_objectid, op_start)
+            .await;
+        self.server.unlock_mailbox_names(lock).await;
+        result
+    }
+
+    async fn commit_rename(
+        &self,
+        arguments: Arguments,
+        account_id: u32,
+        is_objectid: bool,
+        op_start: Instant,
+    ) -> trc::Result<StatusResponse> {
+        let cache = self
+            .server
+            .get_current_messages(account_id)
+            .await
+            .imap_ctx(&arguments.tag, trc::location!())?;
+        self.expire_folders(account_id);
         let mut caches = self
-            .synchronize_mailboxes(false)
+            .synchronize_mailboxes_using(false, AccountCaches::with(account_id, cache))
             .await
             .imap_ctx(&arguments.tag, trc::location!())?
             .caches;
-
-        // Validate mailbox name
         let mut params = self
             .validate_mailbox_create(&arguments.new_mailbox_name, None)
             .await

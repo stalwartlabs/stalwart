@@ -17,7 +17,7 @@ use directory::Credentials;
 use smtp_proto::{
     EXT_CHUNKING, EXT_DSN, EXT_PIPELINING, EXT_REQUIRE_TLS, EXT_SIZE, EXT_SMTP_UTF8, EhloResponse,
     MAIL_REQUIRETLS, MAIL_RET_FULL, MAIL_RET_HDRS, MAIL_SMTPUTF8, RCPT_NOTIFY_DELAY,
-    RCPT_NOTIFY_FAILURE, RCPT_NOTIFY_NEVER, RCPT_NOTIFY_SUCCESS, Severity,
+    RCPT_NOTIFY_FAILURE, RCPT_NOTIFY_NEVER, RCPT_NOTIFY_SUCCESS, Severity, xtext::XText,
 };
 use std::{fmt::Write, ops::Range, time::Instant};
 use tokio::{
@@ -474,7 +474,7 @@ impl MessageWrapper {
                 mail_from.push_str(" RET=HDRS");
             }
             if let Some(env_id) = &self.message.env_id {
-                let _ = write!(mail_from, " ENVID={env_id}");
+                let _ = write!(mail_from, " ENVID={}", XText(env_id));
             }
         }
 

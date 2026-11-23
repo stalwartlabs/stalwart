@@ -462,13 +462,14 @@ impl OAuthApiHandler for Server {
                 credentials.used_basic,
             ));
         };
+        let origin = request_origin(req, session);
         let client = match self
             .resolve_token_client(
                 &client_id,
                 &credentials,
                 &ResolveContext {
                     mode: ResolveMode::Token,
-                    origin: Some(request_origin(req, session)),
+                    origin: Some(origin),
                     remote_ip: session.remote_ip,
                 },
                 OAuthGrantType::DeviceCode,
@@ -544,7 +545,15 @@ impl OAuthApiHandler for Server {
             .await?;
 
         // Build response
-        let base_url = &self.core.network.http.url_https;
+        let setup_origin =
+            if self.registry().is_bootstrap_mode() || self.registry().is_recovery_mode() {
+                resource_origin(self, origin)
+            } else {
+                None
+            };
+        let base_url = setup_origin
+            .as_deref()
+            .unwrap_or(&self.core.network.http.url_https);
         Ok(JsonResponse::new(DeviceAuthResponse {
             verification_uri: format!("{base_url}/device"),
             verification_uri_complete: format!("{base_url}/device/?code={user_code}"),

@@ -23,6 +23,7 @@ use common::{
 };
 use email::sieve::{
     ArchivedSieveScript, SieveScript, delete::SieveScriptDelete, ingest::SieveScriptIngest,
+    rules::is_managed_script,
 };
 use http_proto::HttpSessionData;
 use jmap_proto::{
@@ -65,7 +66,6 @@ struct PendingSieveScript {
     slot: Slot,
     blob_hash: BlobHash,
     blob_size: usize,
-    is_active: bool,
 }
 
 pub struct SetContext<'x> {
@@ -135,7 +135,7 @@ impl SieveScriptSet for Server {
 
         // Validate active script id
         if let Some(MaybeIdReference::Id(id)) = &request.arguments.on_success_activate_script
-            && !sieve_ids.contains(id.document_id())
+            && (!sieve_ids.contains(id.document_id()) || will_destroy.contains(id))
         {
             request.arguments.on_success_activate_script = None;
         }
@@ -148,10 +148,11 @@ impl SieveScriptSet for Server {
             _ => None,
         };
         let mut pending_creates: Vec<PendingSieveScript> = Vec::new();
+        let max_scripts =
+            self.object_quota(account.object_quotas(), StorageQuota::MaxSieveScripts) as u64;
+        let mut script_count = sieve_ids.len();
         'create: for (id, mut object) in request.unwrap_create() {
-            if sieve_ids.len()
-                < self.object_quota(account.object_quotas(), StorageQuota::MaxSieveScripts) as u64
-            {
+            if script_count < max_scripts {
                 let metadata_patches =
                     match object_metadata.extract(MetadataPatches::for_create(), &mut object) {
                         Ok(patches) => patches,
@@ -227,23 +228,20 @@ impl SieveScriptSet for Server {
                         }
 
                         // Update active script if needed
-                        let is_active = if let Some(MaybeIdReference::Reference(id_ref)) =
+                        if let Some(MaybeIdReference::Reference(id_ref)) =
                             &request.arguments.on_success_activate_script
                             && id_ref == &id
                         {
                             activate_script = Some(PendingId::Slot(slot));
-                            true
-                        } else {
-                            false
-                        };
+                        }
 
                         pending_creates.push(PendingSieveScript {
                             id,
                             slot,
                             blob_hash,
                             blob_size,
-                            is_active,
                         });
+                        script_count += 1;
                     }
                     Err(err) => {
                         ctx.response.not_created.append(id, err);
@@ -305,10 +303,6 @@ impl SieveScriptSet for Server {
                     && object
                         .as_object()
                         .is_some_and(|object| is_empty_update::<Sieve>(object, id));
-                let is_activated = matches!(
-                    &request.arguments.on_success_activate_script,
-                    Some(MaybeIdReference::Id(active_id)) if active_id.document_id() == document_id
-                );
 
                 if is_metadata_only {
                     let metadata_writes = match sieve_metadata_writes(
@@ -342,16 +336,11 @@ impl SieveScriptSet for Server {
                         }
                         batch.commit_point();
                     }
-                    let result = is_activated.then(|| {
-                        Value::Object(
-                            Map::with_capacity(1).with_key_value(SieveProperty::IsActive, true),
-                        )
-                    });
-                    ctx.response.updated.append(id, result);
+                    ctx.response.updated.append(id, None);
                     continue 'update;
                 }
-                if sieve.inner.name.eq_ignore_ascii_case("vacation") {
-                    ctx.response.not_updated.append(id, vacation_forbidden());
+                if is_managed_script(&sieve.inner.name) {
+                    ctx.response.not_updated.append(id, managed_forbidden());
                     continue 'update;
                 }
 
@@ -445,11 +434,6 @@ impl SieveScriptSet for Server {
                             );
                         }
 
-                        // Add active script property if needed
-                        if is_activated {
-                            result.insert_unchecked(SieveProperty::IsActive, true);
-                        }
-
                         // Add result
                         ctx.response.updated.append(
                             id,
@@ -487,7 +471,7 @@ impl SieveScriptSet for Server {
                 } else {
                     ctx.response.not_destroyed.append(
                         id,
-                        SetError::new(SetErrorType::ScriptIsActive)
+                        SetError::new(SetErrorType::SieveIsActive)
                             .with_description("Deactivate Sieve script before deletion."),
                     );
                 }
@@ -521,6 +505,8 @@ impl SieveScriptSet for Server {
 
         // Activate / deactivate scripts
         let mut active_script_changed = false;
+        let mut activated_id = None;
+        let mut deactivated_id = None;
         if ctx.response.not_created.is_empty()
             && ctx.response.not_updated.is_empty()
             && ctx.response.not_destroyed.is_empty()
@@ -534,6 +520,9 @@ impl SieveScriptSet for Server {
                         .with_collection(Collection::Principal)
                         .with_document(0)
                         .set(PrincipalField::ActiveScriptId, document_id);
+                    activated_id = Some(document_id);
+                    deactivated_id = active_script_id
+                        .filter(|active_id| PendingId::Assigned(*active_id) != document_id);
                 }
                 (None, Deactivate::IfActive(document_id)) => {
                     batch
@@ -541,6 +530,7 @@ impl SieveScriptSet for Server {
                         .with_collection(Collection::Principal)
                         .with_document(0)
                         .clear_if_equals(PrincipalField::ActiveScriptId, document_id);
+                    deactivated_id = Some(document_id);
                 }
                 (None, Deactivate::Always) => {
                     batch
@@ -548,8 +538,19 @@ impl SieveScriptSet for Server {
                         .with_collection(Collection::Principal)
                         .with_document(0)
                         .clear(PrincipalField::ActiveScriptId);
+                    deactivated_id = active_script_id;
                 }
                 (None, Deactivate::No) => {}
+            }
+            let newly_activated_id = activated_id
+                .and_then(PendingId::assigned)
+                .filter(|document_id| active_script_id != Some(*document_id));
+            for document_id in [deactivated_id, newly_activated_id].into_iter().flatten() {
+                batch
+                    .with_account_id(account_id)
+                    .with_collection(Collection::SieveScript)
+                    .with_document(document_id)
+                    .log_item_update(SyncCollection::SieveScript, None);
             }
         }
 
@@ -584,10 +585,16 @@ impl SieveScriptSet for Server {
                                     section: BlobSection::new(0, create.blob_size, 0).into(),
                                 }),
                             );
-                        if create.is_active {
+                        if activated_id == Some(PendingId::Slot(create.slot)) {
                             result.insert_unchecked(SieveProperty::IsActive, true);
                         }
                         ctx.response.created.insert(create.id, result.into());
+                    }
+                    if let Some(PendingId::Assigned(document_id)) = activated_id {
+                        report_is_active(&mut ctx.response, document_id, true);
+                    }
+                    if let Some(document_id) = deactivated_id {
+                        report_is_active(&mut ctx.response, document_id, false);
                     }
                 }
                 Err(err) if err.is_assertion_failure() => {
@@ -639,11 +646,11 @@ impl SieveScriptSet for Server {
                         return Ok(Err(SetError::invalid_properties()
                             .with_property(property.into_owned())
                             .with_description("Script name is too long.")));
-                    } else if value.eq_ignore_ascii_case("vacation") {
+                    } else if is_managed_script(&value) {
                         return Ok(Err(SetError::forbidden()
                             .with_property(property.into_owned())
                             .with_description(
-                                "The 'vacation' name is reserved, please use a different name.",
+                                "The 'managed' name is reserved, please use a different name.",
                             )));
                     } else if update
                         .as_ref()
@@ -809,9 +816,25 @@ pub struct SetItemResponse<'x> {
     set_item: Option<bool>,
 }
 
-fn vacation_forbidden() -> SetError<SieveProperty> {
+fn report_is_active(response: &mut SetResponse<Sieve>, document_id: u32, is_active: bool) {
+    match response
+        .updated
+        .get_mut_or_insert_with(Id::from(document_id), || None)
+    {
+        Some(Value::Object(properties)) => {
+            properties.insert(SieveProperty::IsActive, is_active);
+        }
+        entry => {
+            *entry = Some(Value::Object(
+                Map::with_capacity(1).with_key_value(SieveProperty::IsActive, is_active),
+            ));
+        }
+    }
+}
+
+fn managed_forbidden() -> SetError<SieveProperty> {
     SetError::forbidden().with_description(concat!(
-        "The 'vacation' script cannot be modified, ",
-        "use VacationResponse/set instead."
+        "The 'managed' script cannot be modified, ",
+        "use VacationResponse/set or x:MailRule/set instead."
     ))
 }

@@ -10,7 +10,10 @@ use crate::{
     auth::{
         AccessScope, AccessTo, AccessTokenInner, AccountCache, ChangedBy, Permissions,
         RECOVERY_ADMIN_ID, TokenScope,
-        oauth::scope::{OAuthScopes, scope_data_types},
+        oauth::{
+            scope::{OAuthScopes, scope_data_types},
+            token::assert_credential_version,
+        },
         permissions::{BuildPermissions, PermissionsListBuilder},
     },
     network::limiter::{AccountLimit, AccountLimits, AccountRate, LimiterResult, RateCounter},
@@ -20,7 +23,7 @@ use compact_str::format_compact;
 use registry::{
     schema::{
         enums::Permission,
-        structs::{self, Account, Roles, UserRoles},
+        structs::{self, Account, GroupAccount, ResourceAccount, Roles, UserRoles},
     },
     types::{EnumImpl, ipmask::IpAddrOrMask},
 };
@@ -185,25 +188,43 @@ impl Server {
                 }
                 .update_size())
             }
-            Account::Group(account) => {
-                let role_ids = account
-                    .roles
+            Account::Group(GroupAccount {
+                roles,
+                permissions,
+                // SPDX-SnippetBegin
+                // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+                // SPDX-License-Identifier: LicenseRef-SEL
+                #[cfg(feature = "enterprise")]
+                member_tenant_id,
+                // SPDX-SnippetEnd
+                ..
+            })
+            | Account::Resource(ResourceAccount {
+                roles,
+                permissions,
+                // SPDX-SnippetBegin
+                // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+                // SPDX-License-Identifier: LicenseRef-SEL
+                #[cfg(feature = "enterprise")]
+                member_tenant_id,
+                // SPDX-SnippetEnd
+                ..
+            }) => {
+                let role_ids = roles
                     .role_ids()
                     .unwrap_or(self.core.network.security.default_role_ids_group.as_slice());
                 // SPDX-SnippetBegin
                 // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
                 // SPDX-License-Identifier: LicenseRef-SEL
                 #[cfg(feature = "enterprise")]
-                let tenant_id = account.member_tenant_id.map(|t| t.id() as u32);
+                let tenant_id = member_tenant_id.map(|t| t.id() as u32);
                 #[cfg(feature = "enterprise")]
                 let permissions = self
-                    .effective_permissions(&account.permissions, role_ids, tenant_id)
+                    .effective_permissions(&permissions, role_ids, tenant_id)
                     .await?;
                 // SPDX-SnippetEnd
                 #[cfg(not(feature = "enterprise"))]
-                let permissions = self
-                    .effective_permissions(&account.permissions, role_ids)
-                    .await?;
+                let permissions = self.effective_permissions(&permissions, role_ids).await?;
 
                 Ok(AccessTokenInner {
                     limits: self.account_limits(),
@@ -298,6 +319,14 @@ impl Server {
         });
 
         Ok(items)
+    }
+
+    pub fn is_access_token_current(&self, access_token: &AccessToken) -> bool {
+        self.inner
+            .cache
+            .access_tokens
+            .get(&access_token.account_id())
+            .is_some_and(|inner| access_token.is_built_from(&inner))
     }
 
     pub async fn access_token(&self, account_id: u32) -> trc::Result<Arc<AccessTokenInner>> {
@@ -471,6 +500,19 @@ impl AccessToken {
             }
             .assert_is_valid(remote_ip)
         }
+    }
+
+    pub fn renew_session(
+        &self,
+        inner: Arc<AccessTokenInner>,
+        token_scope: Option<TokenScope>,
+        remote_ip: IpAddr,
+    ) -> trc::Result<Self> {
+        if self.scope_idx == 0 {
+            assert_credential_version(self.inner.credential_version, inner.credential_version)?;
+        }
+        Self::renew(inner, self.credential_id(), token_scope, remote_ip)?
+            .assert_has_permission(Permission::Authenticate)
     }
 
     pub fn is_built_from(&self, inner: &Arc<AccessTokenInner>) -> bool {
@@ -1147,20 +1189,41 @@ fn hash_account(account: &Account) -> u64 {
                 group_id.hash(&mut s);
             }
         }
-        Account::Group(account) => {
+        Account::Group(GroupAccount {
+            roles,
+            permissions,
             // SPDX-SnippetBegin
             // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
             // SPDX-License-Identifier: LicenseRef-SEL
             #[cfg(feature = "enterprise")]
-            account.member_tenant_id.hash(&mut s);
+            member_tenant_id,
             // SPDX-SnippetEnd
-            match &account.roles {
+            ..
+        })
+        | Account::Resource(ResourceAccount {
+            roles,
+            permissions,
+            // SPDX-SnippetBegin
+            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+            // SPDX-License-Identifier: LicenseRef-SEL
+            #[cfg(feature = "enterprise")]
+            member_tenant_id,
+            // SPDX-SnippetEnd
+            ..
+        }) => {
+            // SPDX-SnippetBegin
+            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+            // SPDX-License-Identifier: LicenseRef-SEL
+            #[cfg(feature = "enterprise")]
+            member_tenant_id.hash(&mut s);
+            // SPDX-SnippetEnd
+            match roles {
                 Roles::Default => {}
                 Roles::Custom(custom_roles) => {
                     custom_roles.role_ids.as_slice().hash(&mut s);
                 }
             }
-            hash_permissions(&mut s, &account.permissions);
+            hash_permissions(&mut s, permissions);
         }
     }
 

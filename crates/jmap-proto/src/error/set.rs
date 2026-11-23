@@ -108,8 +108,8 @@ pub enum SetErrorType {
     AlreadyExists,
     #[serde(rename = "invalidScript")]
     InvalidScript,
-    #[serde(rename = "scriptIsActive")]
-    ScriptIsActive,
+    #[serde(rename = "sieveIsActive")]
+    SieveIsActive,
     #[serde(rename = "addressBookHasContents")]
     AddressBookHasContents,
     #[serde(rename = "nodeHasChildren")]
@@ -118,6 +118,8 @@ pub enum SetErrorType {
     CalendarHasEvent,
     #[serde(rename = "noSupportedScheduleMethods")]
     NoSupportedScheduleMethods,
+    #[serde(rename = "mdnAlreadySent")]
+    MdnAlreadySent,
     // Stalwart registry errors
     #[serde(rename = "objectIsLinked")]
     ObjectIsLinked,
@@ -156,11 +158,12 @@ impl SetErrorType {
             SetErrorType::CannotUnsend => "cannotUnsend",
             SetErrorType::AlreadyExists => "alreadyExists",
             SetErrorType::InvalidScript => "invalidScript",
-            SetErrorType::ScriptIsActive => "scriptIsActive",
+            SetErrorType::SieveIsActive => "sieveIsActive",
             SetErrorType::AddressBookHasContents => "addressBookHasContents",
             SetErrorType::NodeHasChildren => "nodeHasChildren",
             SetErrorType::CalendarHasEvent => "calendarHasEvent",
             SetErrorType::NoSupportedScheduleMethods => "noSupportedScheduleMethods",
+            SetErrorType::MdnAlreadySent => "mdnAlreadySent",
             SetErrorType::ObjectIsLinked => "objectIsLinked",
             SetErrorType::InvalidForeignKey => "invalidForeignKey",
             SetErrorType::PrimaryKeyViolation => "primaryKeyViolation",

@@ -8,11 +8,12 @@ use crate::auth::oauth::FormData;
 use common::{
     KV_RATE_LIMIT_CONTACT, Server,
     config::network::{ContactForm, FieldOrDefault},
-    network::ip_to_bytes,
+    network::ip_rate_key,
     psl,
 };
 use email::message::delivery::{
-    IngestMessage, IngestRecipient, LocalDeliveryStatus, MailDelivery, SenderAuthentication,
+    IngestMessage, IngestRecipient, LocalDeliveryStatus, MailDelivery, ReturnPathStatus,
+    SenderAuthentication,
 };
 use http_proto::*;
 use hyper::StatusCode;
@@ -55,7 +56,7 @@ impl FormHandler for Server {
                 .in_memory_store()
                 .is_rate_allowed(
                     KV_RATE_LIMIT_CONTACT,
-                    &ip_to_bytes(&session.remote_ip),
+                    &ip_rate_key(&session.remote_ip),
                     rate,
                 )
                 .await
@@ -181,6 +182,7 @@ impl FormHandler for Server {
                 .deliver_message(IngestMessage {
                     sender_address: from_email,
                     sender_authentication: SenderAuthentication::Unauthenticated,
+                    return_path_status: ReturnPathStatus::Unverified,
                     recipients: form
                         .rcpt_to
                         .iter()

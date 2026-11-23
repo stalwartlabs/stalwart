@@ -177,7 +177,7 @@ pub(crate) fn organizer_handle_update(
             };
 
             changed_instances.extend(instance.attendees.iter().filter_map(|attendee| {
-                if attendee.send_invite_messages() {
+                if attendee.send_update_messages() {
                     Some((instance_id, attendee.email.email.as_str(), method))
                 } else {
                     None

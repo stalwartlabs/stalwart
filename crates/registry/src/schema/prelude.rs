@@ -28,6 +28,7 @@ pub use crate::types::index::{
 pub use crate::types::ipaddr::IpAddr;
 pub use crate::types::ipmask::IpAddrOrMask;
 pub use crate::types::list::List;
+pub use crate::types::localtime::{LocalDate, LocalTime};
 pub use crate::types::map::Map;
 pub use crate::types::socketaddr::SocketAddr;
 pub use crate::types::string::StringValidator;

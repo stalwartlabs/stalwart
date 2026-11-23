@@ -5,28 +5,20 @@
  */
 
 use crate::DavError;
-use common::{KV_LOCK_DAV, Server, auth::AccessToken};
+use common::{
+    Server,
+    auth::AccessToken,
+    storage::create_lock::{CREATE_LOCK_ATTEMPTS, CreateLock},
+};
 use dav_proto::{Condition, RequestHeaders};
 use groupware::cache::GroupwareCache;
 use hyper::StatusCode;
-use std::{ops::RangeInclusive, time::Duration};
 use store::{
-    InMemoryStore, U32_LEN, U64_LEN,
-    rand::{self, RngExt},
+    InMemoryStore,
     write::{AssignedIds, BatchBuilder},
-    xxhash_rust::xxh3::xxh3_64,
 };
 use trc::AddContext;
 use types::collection::SyncCollection;
-
-const CREATE_LOCK_EXPIRY_SECS: u64 = 10;
-const CREATE_LOCK_ATTEMPTS: u32 = 3;
-const CREATE_LOCK_RETRY_MS: RangeInclusive<u64> = 500..=1500;
-const CREATE_LOCK_KEY_LEN: usize = U32_LEN + 1 + U64_LEN;
-
-pub(crate) struct CreateLock {
-    key: [u8; CREATE_LOCK_KEY_LEN],
-}
 
 pub(crate) trait CreateLockHandler: Sync + Send {
     fn lock_create(
@@ -43,8 +35,6 @@ pub(crate) trait CreateLockHandler: Sync + Send {
         lock: CreateLock,
         batch: BatchBuilder,
     ) -> impl Future<Output = trc::Result<AssignedIds>> + Send;
-
-    fn release_create_lock(&self, lock: &CreateLock) -> impl Future<Output = ()> + Send;
 }
 
 impl CreateLockHandler for Server {
@@ -56,25 +46,19 @@ impl CreateLockHandler for Server {
         path: &str,
         headers: &RequestHeaders<'_>,
     ) -> crate::Result<CreateLock> {
-        let lock = CreateLock::new(account_id, collection, path);
-        let store = self.in_memory_store();
-        let min_change_id = if matches!(store, InMemoryStore::Local(_)) {
+        let lock = CreateLock::new(account_id, collection.into(), path.as_bytes());
+        let min_change_id = if matches!(self.in_memory_store(), InMemoryStore::Local(_)) {
             0
         } else {
             u64::MAX
         };
         let mut attempts = 1;
-        while !store
-            .try_lock(KV_LOCK_DAV, &lock.key, CREATE_LOCK_EXPIRY_SECS)
-            .await
-            .caused_by(trc::location!())?
-        {
+        while !self.try_create_lock(&lock).await? {
             if attempts == CREATE_LOCK_ATTEMPTS {
                 return Err(DavError::Code(StatusCode::SERVICE_UNAVAILABLE));
             }
             attempts += 1;
-            let backoff = rand::rng().random_range(CREATE_LOCK_RETRY_MS);
-            tokio::time::sleep(Duration::from_millis(backoff)).await;
+            self.create_lock_backoff().await;
             if resource_exists(
                 self,
                 access_token,
@@ -119,35 +103,6 @@ impl CreateLockHandler for Server {
         let result = self.commit_batch(batch).await;
         self.release_create_lock(&lock).await;
         result
-    }
-
-    async fn release_create_lock(&self, lock: &CreateLock) {
-        if let Err(err) = self
-            .in_memory_store()
-            .remove_lock(KV_LOCK_DAV, &lock.key)
-            .await
-        {
-            trc::error!(
-                err.details("Failed to release resource creation lock")
-                    .caused_by(trc::location!())
-            );
-        }
-    }
-}
-
-impl CreateLock {
-    fn new(account_id: u32, collection: SyncCollection, path: &str) -> Self {
-        let mut key = [0u8; CREATE_LOCK_KEY_LEN];
-        for (dst, src) in key.iter_mut().zip(
-            account_id
-                .to_be_bytes()
-                .into_iter()
-                .chain([u8::from(collection)])
-                .chain(xxh3_64(path.as_bytes()).to_be_bytes()),
-        ) {
-            *dst = src;
-        }
-        CreateLock { key }
     }
 }
 

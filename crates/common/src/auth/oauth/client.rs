@@ -429,14 +429,16 @@ impl ResolvedClient {
                 return None;
             }
             ResolvedClient::Stateless(meta) => meta.scopes,
-            ResolvedClient::Registered(client) => OAuthScopes::from_registry(client.scopes.iter()),
-            ResolvedClient::Cimd(Some(client)) => client.scopes,
+            ResolvedClient::Registered(client) => {
+                let scopes = OAuthScopes::from_registry(client.scopes.iter());
+                if self.is_verified() {
+                    scopes
+                } else {
+                    scopes.without(OAuthScopes::FULL)
+                }
+            }
+            ResolvedClient::Cimd(Some(client)) => client.scopes.without(OAuthScopes::FULL),
             ResolvedClient::Cimd(None) => OAuthScopes::NONE,
-        };
-        let scopes = if self.is_verified() {
-            scopes
-        } else {
-            scopes.without(OAuthScopes::FULL)
         };
         Some(scopes | OAuthScopes::ALWAYS_ALLOWED)
     }
@@ -459,9 +461,10 @@ impl ResolvedClient {
             ResolvedClient::Registered(client) | ResolvedClient::RegisteredApplication(client) => {
                 client.grant_types.contains(&grant)
             }
-            ResolvedClient::Stateless(_)
-            | ResolvedClient::Application(_)
-            | ResolvedClient::Cimd(_) => grant != OAuthGrantType::DeviceCode,
+            ResolvedClient::Stateless(_) => true,
+            ResolvedClient::Application(_) | ResolvedClient::Cimd(_) => {
+                grant != OAuthGrantType::DeviceCode
+            }
         }
     }
 }

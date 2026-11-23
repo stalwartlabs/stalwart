@@ -65,7 +65,7 @@ impl<T: SessionStream> Session<T> {
             .get_cached_messages(mailbox.id.account_id)
             .await
             .imap_ctx(&arguments.tag, trc::location!())?;
-        data.sync_and_announce(&mailbox, &cache)
+        data.sync_view(&mailbox, &cache, None)
             .await
             .imap_ctx(&arguments.tag, trc::location!())?;
 
@@ -127,7 +127,8 @@ impl<T: SessionStream> Session<T> {
             Elapsed = op_start.elapsed()
         );
 
-        let response = uidbatches::Response { ranges }.serialize(&arguments.tag);
+        let mut response = uidbatches::Response { ranges }.serialize(&arguments.tag);
+        mailbox.announce_appended(&mut response);
         self.write_bytes(
             StatusResponse::completed(Command::UidBatches)
                 .with_tag(arguments.tag)

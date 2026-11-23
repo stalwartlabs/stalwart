@@ -67,11 +67,7 @@ impl<T: SessionStream> Session<T> {
         loop {
             tokio::select! {
                 result = tokio::time::timeout(
-                    if !matches!(self.state, State::NotAuthenticated {..}) {
-                        self.server.core.imap.timeout_auth
-                    } else {
-                        self.server.core.imap.timeout_unauth
-                    },
+                    self.timeout(),
                     self.read(&mut buf)) => {
                         match result {
                             Ok(Ok(bytes_read)) => {

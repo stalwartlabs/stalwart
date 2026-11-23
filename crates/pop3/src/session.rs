@@ -13,10 +13,10 @@ use crate::{
 };
 use common::{
     BuildServer,
-    network::{SessionData, SessionManager, SessionResult, SessionStream},
+    network::{SessionData, SessionManager, SessionResult, SessionStream, ready_or_timeout},
 };
 use compact_str::ToCompactString;
-use std::borrow::Cow;
+use std::{borrow::Cow, time::Duration};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_rustls::server::TlsStream;
 
@@ -69,11 +69,7 @@ impl<T: SessionStream> Session<T> {
         loop {
             tokio::select! {
                 result = tokio::time::timeout(
-                    if !matches!(self.state, State::NotAuthenticated {..}) {
-                        self.server.core.imap.timeout_auth
-                    } else {
-                        self.server.core.imap.timeout_unauth
-                    },
+                    self.timeout(),
                     self.stream.read(&mut buf)) => {
                     match result {
                         Ok(Ok(bytes_read)) => {
@@ -153,6 +149,14 @@ impl<T: SessionStream> Session<T> {
 }
 
 impl<T: SessionStream> Session<T> {
+    fn timeout(&self) -> Duration {
+        if !matches!(self.state, State::NotAuthenticated { .. }) {
+            self.server.core.imap.timeout_auth
+        } else {
+            self.server.core.imap.timeout_unauth
+        }
+    }
+
     pub async fn write_bytes(&mut self, bytes: impl AsRef<[u8]>) -> trc::Result<()> {
         let bytes = bytes.as_ref();
 
@@ -163,17 +167,28 @@ impl<T: SessionStream> Session<T> {
             Contents = trc::Value::from_maybe_string(bytes),
         );
 
-        self.stream.write_all(bytes.as_ref()).await.map_err(|err| {
-            trc::NetworkEvent::WriteError
+        let timeout = self.timeout();
+        let stream = &mut self.stream;
+        ready_or_timeout(timeout, async {
+            stream.write_all(bytes).await.map_err(|err| {
+                trc::NetworkEvent::WriteError
+                    .into_err()
+                    .reason(err)
+                    .caused_by(trc::location!())
+            })?;
+            stream.flush().await.map_err(|err| {
+                trc::NetworkEvent::WriteError
+                    .into_err()
+                    .reason(err)
+                    .caused_by(trc::location!())
+            })
+        })
+        .await
+        .unwrap_or_else(|| {
+            Err(trc::NetworkEvent::Timeout
                 .into_err()
-                .reason(err)
-                .caused_by(trc::location!())
-        })?;
-        self.stream.flush().await.map_err(|err| {
-            trc::NetworkEvent::WriteError
-                .into_err()
-                .reason(err)
-                .caused_by(trc::location!())
+                .details("Write timed out")
+                .caused_by(trc::location!()))
         })
     }
 

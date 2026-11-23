@@ -5,6 +5,8 @@
  */
 
 use crate::{BlobStore, CacheSwapStore, InMemoryStore, registry::bootstrap::Bootstrap};
+#[cfg(feature = "foundation")]
+use registry::schema::prelude::ObjectType;
 use registry::schema::structs;
 
 const NO_FILESYSTEM: &str = "The filesystem blob store cannot back the cache swap tier because \
@@ -16,8 +18,9 @@ const NO_CHUNKED_KEYS: &str = "The default cache swap store requires a Stalwart 
 
 #[allow(unreachable_patterns)]
 impl BlobStore {
+    #[cfg_attr(not(feature = "foundation"), allow(unused_variables))]
     pub async fn build_cache_swap(
-        _bp: &mut Bootstrap,
+        bp: &mut Bootstrap,
         config: structs::BlobSwapStore,
         configured: &BlobStore,
     ) -> Result<Self, String> {
@@ -31,9 +34,13 @@ impl BlobStore {
             }
             #[cfg(feature = "foundation")]
             structs::BlobSwapStore::FoundationDb(store) => {
-                crate::backend::foundationdb::FdbStore::open(store)
-                    .await
-                    .map(BlobStore::Store)
+                crate::backend::foundationdb::FdbStore::open_shared(
+                    store,
+                    bp,
+                    ObjectType::Cache.singleton(),
+                )
+                .await
+                .map(BlobStore::Store)
             }
             #[cfg(feature = "postgres")]
             structs::BlobSwapStore::PostgreSql(store) => {

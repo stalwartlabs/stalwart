@@ -1,6 +1,6 @@
 [package]
 name = "services"
-version = "1.1.1"
+version = "1.2.0"
 edition = "2024"
 
 [dependencies]
@@ -11,6 +11,7 @@ utils = { path =  "../utils" }
 trc = { path = "../trc" }
 crypto = { path = "../crypto" }
 email = { path = "../email" }
+exchange = { path = "../exchange", optional = true }
 smtp = { path = "../smtp" }
 groupware = { path = "../groupware" }
 nlp = { path = "../nlp" }
@@ -40,7 +41,8 @@ compact_str = "0.10.0"
 [dev-dependencies]
 
 [features]
-enterprise = ["store/enterprise", "common/enterprise", "coordinator/enterprise", "utils/enterprise", "trc/enterprise", "email/enterprise", "smtp/enterprise", "groupware/enterprise", "spam-filter/enterprise", "jmap_proto/enterprise", "registry/enterprise"]
+exchange = ["dep:exchange", "common/exchange"]
+enterprise = ["store/enterprise", "common/enterprise", "coordinator/enterprise", "utils/enterprise", "trc/enterprise", "email/enterprise", "exchange?/enterprise", "smtp/enterprise", "groupware/enterprise", "spam-filter/enterprise", "jmap_proto/enterprise", "registry/enterprise"]
 
 [lints]
 workspace = true

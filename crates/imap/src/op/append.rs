@@ -7,15 +7,15 @@
 use super::{ImapContext, IntoImapError, ToModSeq};
 use crate::core::{MailboxId, Row, SelectedMailbox, Session, SessionData};
 use common::{
-    MAX_RECEIVED_AT,
-    auth::BuildAccessToken,
-    ipc::{EmailPush, PushNotification},
-    network::SessionStream,
+    MAX_RECEIVED_AT, auth::BuildAccessToken, ipc::PushNotification, network::SessionStream,
 };
-use email::message::ingest::{
-    IngestEmail, IngestSource, IngestedEmail,
-    group::{IngestGroup, ThreadKey},
-    recheck::ThreadRecheck,
+use email::{
+    mailbox::JUNK_ID,
+    message::ingest::{
+        IngestEmail, IngestSource, IngestedEmail,
+        group::{IngestGroup, ThreadKey},
+        recheck::ThreadRecheck,
+    },
 };
 use imap_proto::{
     Command, ResponseCode, StatusResponse,
@@ -204,6 +204,10 @@ impl<T: SessionStream> SessionData<T> {
                 .received_at
                 .map(|received_at| received_at.clamp(0, MAX_RECEIVED_AT as i64) as u64);
 
+            let train_classifier = mailbox_id == JUNK_ID
+                || keywords
+                    .iter()
+                    .any(|k| matches!(k, Keyword::Junk | Keyword::NotJunk));
             let key = match &parsed {
                 Some(parsed) if grouping => ThreadKey::new(parsed),
                 _ => ThreadKey::default(),
@@ -232,9 +236,7 @@ impl<T: SessionStream> SessionData<T> {
                         mailbox_ids: vec![mailbox_id],
                         keywords,
                         received_at,
-                        source: IngestSource::Imap {
-                            train_classifier: true,
-                        },
+                        source: IngestSource::Imap { train_classifier },
                         metadata: None,
                         session_id: self.session_id,
                     },
@@ -258,28 +260,15 @@ impl<T: SessionStream> SessionData<T> {
 
         // Broadcast changes
         if let Some(change_id) = last_change_id {
-            if created.is_empty() {
-                self.server
-                    .broadcast_push_notification(PushNotification::StateChange(
-                        StateChange::new(account_id)
-                            .with_change_id(change_id)
-                            .with_change(DataType::EmailDelivery)
-                            .with_change(DataType::Email)
-                            .with_change(DataType::Mailbox)
-                            .with_change(DataType::Thread),
-                    ))
-                    .await;
-            } else {
-                for row in &created {
-                    self.server
-                        .broadcast_push_notification(PushNotification::EmailPush(EmailPush {
-                            account_id,
-                            email_id: row.id,
-                            change_id,
-                        }))
-                        .await;
-                }
-            }
+            self.server
+                .broadcast_push_notification(PushNotification::StateChange(
+                    StateChange::new(account_id)
+                        .with_change_id(change_id)
+                        .with_change(DataType::Email)
+                        .with_change(DataType::Mailbox)
+                        .with_change(DataType::Thread),
+                ))
+                .await;
         }
 
         trc::event!(

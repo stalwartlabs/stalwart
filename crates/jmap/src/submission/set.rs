@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::changes::state::StateManager;
 use common::{
     Server,
     config::smtp::queue::QueueName,
@@ -51,7 +52,7 @@ use types::{
     field::EmailField,
     id::Id,
 };
-use utils::{map::vec_map::VecMap, sanitize_email};
+use utils::{map::vec_map::VecMap, sanitize_envelope_address};
 
 pub trait EmailSubmissionSet: Sync + Send {
     fn email_submission_set<'x>(
@@ -80,7 +81,15 @@ impl EmailSubmissionSet for Server {
         next_call: &mut Option<Call<RequestMethod<'x>>>,
     ) -> trc::Result<SetResponse<email_submission::EmailSubmission>> {
         let account_id = request.account_id.document_id();
-        let mut response = SetResponse::from_request(&request, self.core.jmap.set_max_objects)?;
+        let mut response = SetResponse::from_request(&request, self.core.jmap.set_max_objects)?
+            .with_state(
+                self.assert_state(
+                    account_id,
+                    SyncCollection::EmailSubmission,
+                    &request.if_in_state,
+                )
+                .await?,
+            );
         let will_destroy = response.collect_will_destroy(request.unwrap_destroy());
 
         // Obtain submission quota
@@ -634,7 +643,7 @@ impl EmailSubmissionSet for Server {
                 };
                 for address in list
                     .mailboxes()
-                    .filter_map(|mailbox| mailbox.address().and_then(sanitize_email))
+                    .filter_map(|mailbox| mailbox.address().and_then(sanitize_envelope_address))
                 {
                     if !rcpt_to.iter().any(|rcpt| rcpt.address == address) {
                         submission.envelope.rcpt_to.push(Address {
@@ -811,7 +820,7 @@ fn parse_envelope_address(
         if let Some(Value::Str(addr)) =
             envelope.remove(&Key::Property(EmailSubmissionProperty::Email))
         {
-            if let Some(addr) = sanitize_email(&addr) {
+            if let Some(addr) = sanitize_envelope_address(&addr) {
                 if let Some(Value::Object(params)) =
                     envelope.remove(&Key::Property(EmailSubmissionProperty::Parameters))
                 {

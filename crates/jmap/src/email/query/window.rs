@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{Candidates, Page, SPARSE_RESIDUAL_RATIO, WalkOrder, filter::RowFilter};
+use super::{Candidates, Page, SPARSE_RESIDUAL_RATIO, WalkOrder};
 use common::{MessageStoreCache, MessagesCache, Server, cache::email::MessageRef};
-use email::cache::email::MessageCacheAccess;
+use email::{cache::email::MessageCacheAccess, message::query::RowFilter};
 use store::{dispatch::search::MAX_FILTER_CANDIDATES, roaring::RoaringBitmap, search::SearchQuery};
 use trc::AddContext;
 

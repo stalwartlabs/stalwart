@@ -12,7 +12,6 @@ use email::{
 use mail_parser::MessageParser;
 use registry::schema::{enums::ArchivedItemType, structs::TaskRestoreArchivedItem};
 use store::write::{BatchBuilder, BlobLink, BlobOp};
-use trc::AddContext;
 
 use crate::task_manager::outcome::Outcome;
 
@@ -40,10 +39,15 @@ async fn restore_item(server: &Server, task: &TaskRestoreArchivedItem) -> trc::R
     match task.archived_item_type {
         ArchivedItemType::Email => {
             let account_id = task.account_id.document_id();
-            let access_token = server
-                .access_token(account_id)
-                .await
-                .caused_by(trc::location!())?;
+            let access_token = match server.access_token(account_id).await {
+                Ok(access_token) => access_token,
+                Err(err)
+                    if err.matches(trc::EventType::Security(trc::SecurityEvent::Unauthorized)) =>
+                {
+                    return Ok(Outcome::Obsolete("Account no longer exists"));
+                }
+                Err(err) => return Err(err.caused_by(trc::location!())),
+            };
 
             let Some(bytes) = server
                 .get_blob(task.blob_id.hash.as_slice(), 0..usize::MAX)

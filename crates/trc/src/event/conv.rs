@@ -229,6 +229,11 @@ impl From<mail_auth::Error> for Error {
             mail_auth::Error::NoHeadersFound => {
                 EventType::MailAuth(MailAuthEvent::NoHeadersFound).into_err()
             }
+            mail_auth::Error::BodyNotAvailable => {
+                EventType::MailAuth(MailAuthEvent::MissingParameters)
+                    .into_err()
+                    .details(err.to_compact_string())
+            }
             mail_auth::Error::Io(details) => EventType::MailAuth(MailAuthEvent::Io)
                 .into_err()
                 .details(CompactString::from(details)),
@@ -268,6 +273,11 @@ impl From<mail_auth::Error> for Error {
                 mail_auth::DnsError::InvalidRecordType => {
                     EventType::MailAuth(MailAuthEvent::DnsInvalidRecordType).into_err()
                 }
+                mail_auth::DnsError::MultipleRecords => {
+                    EventType::MailAuth(MailAuthEvent::DnsInvalidRecordType)
+                        .into_err()
+                        .details(err.to_compact_string())
+                }
             },
             mail_auth::Error::Dkim(err) => EventType::Dkim(match err {
                 DkimError::UnsupportedVersion
@@ -301,6 +311,7 @@ impl From<mail_auth::Error> for Error {
                 | Dkim2Error::InstanceTagMissing { .. }
                 | Dkim2Error::InstanceNotSigned(_)
                 | Dkim2Error::InstanceDuplicateHash(_)
+                | Dkim2Error::InstanceDuplicated(_)
                 | Dkim2Error::UnknownHash { .. } => Dkim2Event::InstanceInvalid,
                 Dkim2Error::SignatureMissing(_)
                 | Dkim2Error::SignatureSyntax(_)
@@ -308,6 +319,9 @@ impl From<mail_auth::Error> for Error {
                 | Dkim2Error::SignatureTagUnexpected { .. }
                 | Dkim2Error::DuplicateSelector(_)
                 | Dkim2Error::TooManySelectors(_)
+                | Dkim2Error::SignatureDuplicated(_)
+                | Dkim2Error::ExplodedFirstSignature
+                | Dkim2Error::UnexpectedNextDomain(_)
                 | Dkim2Error::UnknownAlgorithm { .. } => Dkim2Event::SignatureInvalid,
                 Dkim2Error::SequenceGap(_)
                 | Dkim2Error::SequenceOverflow
@@ -323,12 +337,18 @@ impl From<mail_auth::Error> for Error {
                 | Dkim2Error::NextDomainMismatch(_)
                 | Dkim2Error::CustodyMailFromMismatch { .. }
                 | Dkim2Error::CustodyDomainMismatch { .. }
-                | Dkim2Error::FromNotAuthentic(_) => Dkim2Event::CustodyBroken,
+                | Dkim2Error::FromNotAuthentic(_)
+                | Dkim2Error::FromSubdomainForbidden { .. }
+                | Dkim2Error::FromMultipleAddresses(_)
+                | Dkim2Error::FromDomainLiteral(_)
+                | Dkim2Error::PolicyFetch { .. }
+                | Dkim2Error::PolicyMultiple { .. } => Dkim2Event::CustodyBroken,
                 Dkim2Error::PublicKeyFetch { .. }
                 | Dkim2Error::PublicKeyMissing { .. }
                 | Dkim2Error::PublicKeyMultiple { .. }
                 | Dkim2Error::PublicKeySyntax { .. }
                 | Dkim2Error::PublicKeyMalformed { .. }
+                | Dkim2Error::PublicKeyTooShort { .. }
                 | Dkim2Error::PublicKeyAlgorithmMismatch { .. }
                 | Dkim2Error::PublicKeyRevoked { .. } => Dkim2Event::PublicKeyError,
                 Dkim2Error::IncorrectSignature { .. } | Dkim2Error::NoSignatureGroupPassed(_) => {
@@ -340,6 +360,7 @@ impl From<mail_auth::Error> for Error {
                 Dkim2Error::InvalidJson(_)
                 | Dkim2Error::InvalidRecipe { .. }
                 | Dkim2Error::NullBodyRecipe(_)
+                | Dkim2Error::BodyNotAvailable(_)
                 | Dkim2Error::RecipeSyntax
                 | Dkim2Error::HeaderNotRepresentable
                 | Dkim2Error::BodyUnreconstructable => Dkim2Event::RecipeError,

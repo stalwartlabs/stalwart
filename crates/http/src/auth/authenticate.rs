@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+use crate::is_exchange_enabled;
 use common::{
     HttpAuthCache, Server,
     auth::{AccessToken, AuthRequest, authentication::Authenticated},
@@ -15,7 +16,14 @@ use directory::Credentials;
 use encodify::base64::LENIENT;
 use http_proto::{HttpRequest, HttpSessionData};
 use hyper::header;
+use mail_parser::Charset;
 use std::future::Future;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BasicLogin {
+    Strict,
+    Exchange,
+}
 
 pub struct HttpAuthenticated {
     pub in_flight: Option<InFlight>,
@@ -70,7 +78,12 @@ impl Authenticator for Server {
 
             let credentials = if mechanism.eq_ignore_ascii_case("basic") {
                 // Decode the base64 encoded credentials
-                decode_plain_auth(token).ok_or_else(|| {
+                let login = if is_exchange_enabled(&self.core) {
+                    BasicLogin::Exchange
+                } else {
+                    BasicLogin::Strict
+                };
+                decode_plain_auth(token, login).ok_or_else(|| {
                     trc::AuthEvent::Error
                         .into_err()
                         .details("Failed to decode Basic auth request.")
@@ -172,14 +185,50 @@ impl HttpHeaders for HttpRequest {
     }
 }
 
-fn decode_plain_auth(token: &str) -> Option<Credentials> {
-    LENIENT.decode_to_string(token).ok().and_then(|token| {
-        token
-            .split_once(':')
-            .map(|(login, secret)| Credentials::Basic {
-                username: login.trim().to_lowercase(),
+fn decode_plain_auth(token: &str, login: BasicLogin) -> Option<Credentials> {
+    match login {
+        BasicLogin::Strict => LENIENT.decode_to_string(token).ok().and_then(|token| {
+            token
+                .split_once(':')
+                .map(|(login, secret)| Credentials::Basic {
+                    username: login.trim().to_lowercase(),
+                    secret: secret.to_string(),
+                    mfa_token: None,
+                })
+        }),
+        BasicLogin::Exchange => {
+            let token = match String::from_utf8(LENIENT.decode(token).ok()?) {
+                Ok(token) => token,
+                Err(err) => Charset::Windows1252.decode_owned(err.into_bytes()),
+            };
+            let (login, secret) = token.split_once(':')?;
+            let username = match login.split_once('%') {
+                Some((account, master)) => {
+                    let mut username = without_domain(account)?.to_lowercase();
+                    username.push('%');
+                    username.push_str(&without_domain(master)?.to_lowercase());
+                    username
+                }
+                None => without_domain(login)?.to_lowercase(),
+            };
+            Some(Credentials::Basic {
+                username,
                 secret: secret.to_string(),
                 mfa_token: None,
             })
-    })
+        }
+    }
 }
+
+fn without_domain(login: &str) -> Option<&str> {
+    let login = login
+        .rsplit_once('\\')
+        .map_or(login, |(_, user)| user)
+        .trim();
+    (!login.is_empty()).then_some(login)
+}
+
+#[cfg(all(test, stalwart_tests))]
+#[rustfmt::skip]
+#[path = "../../../../../stalwart-tests/unit/http/src/auth/authenticate/tests.rs"]
+mod tests;

@@ -43,6 +43,7 @@ pub enum MethodObject {
     FileNode,
     ParticipantIdentity,
     ShareNotification,
+    Mdn,
     Registry(ObjectType),
 }
 
@@ -66,6 +67,7 @@ impl MethodObject {
             | MethodObject::ParticipantIdentity => Capability::Calendars,
             MethodObject::AddressBook | MethodObject::ContactCard => Capability::Contacts,
             MethodObject::FileNode => Capability::FileNode,
+            MethodObject::Mdn => Capability::Mdn,
             MethodObject::Registry(_) => Capability::Stalwart,
         }
     }
@@ -87,6 +89,7 @@ pub enum MethodFunction {
     Echo,
     GetAvailability,
     RegistrationOptions,
+    Send,
 }
 
 impl Display for MethodName {
@@ -247,6 +250,9 @@ impl MethodName {
             }
             (MethodFunction::Set, MethodObject::ParticipantIdentity) => "ParticipantIdentity/set",
 
+            (MethodFunction::Send, MethodObject::Mdn) => "MDN/send",
+            (MethodFunction::Parse, MethodObject::Mdn) => "MDN/parse",
+
             (MethodFunction::Echo, MethodObject::Core) => "Core/echo",
             (method, MethodObject::Registry(obj)) => {
                 return Cow::Owned(format!("x:{}/{}", obj.as_str(), method.as_str()));
@@ -365,6 +371,9 @@ impl MethodName {
             "ParticipantIdentity/changes" => (MethodObject::ParticipantIdentity, MethodFunction::Changes),
             "ParticipantIdentity/set" => (MethodObject::ParticipantIdentity, MethodFunction::Set),
 
+            "MDN/send" => (MethodObject::Mdn, MethodFunction::Send),
+            "MDN/parse" => (MethodObject::Mdn, MethodFunction::Parse),
+
             "Core/echo" => (MethodObject::Core, MethodFunction::Echo),
 
         ).copied().or_else(|| {
@@ -422,6 +431,7 @@ impl Display for MethodObject {
             MethodObject::CalendarEvent => "CalendarEvent",
             MethodObject::CalendarEventNotification => "CalendarEventNotification",
             MethodObject::ShareNotification => "ShareNotification",
+            MethodObject::Mdn => "MDN",
             MethodObject::Registry(obj) => {
                 f.write_str("x:")?;
                 return f.write_str(obj.as_str());
@@ -447,6 +457,7 @@ impl MethodFunction {
             MethodFunction::Echo => "echo",
             MethodFunction::GetAvailability => "getAvailability",
             MethodFunction::RegistrationOptions => "registrationOptions",
+            MethodFunction::Send => "send",
         }
     }
 }

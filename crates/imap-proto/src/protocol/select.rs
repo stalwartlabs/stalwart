@@ -8,8 +8,6 @@ use compact_str::CompactString;
 use types::acl::Acl;
 use utils::map::bitmap::Bitmap;
 
-use crate::{ResponseCode, StatusResponse};
-
 use super::{Flag, ImapResponse, ObjectId, Sequence, list::ListItem, store::Operation};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,7 +40,6 @@ pub struct Response {
     pub uid_next: u32,
     pub is_rev2: bool,
     pub is_utf8: bool,
-    pub closed_previous: bool,
     pub highest_modseq: Option<HighestModSeq>,
     pub objectid: Option<ObjectId>,
     pub permanent_flags: PermanentFlags,
@@ -63,11 +60,6 @@ pub struct Exists {
 
 impl ImapResponse for Response {
     fn serialize_into(&self, buf: &mut Vec<u8>) {
-        if self.closed_previous {
-            StatusResponse::ok("Closed previous mailbox")
-                .with_code(ResponseCode::Closed)
-                .serialize_into(buf);
-        }
         buf.extend_from_slice(b"* ");
         push_int(buf, self.total_messages);
         if !self.is_rev2 && self.recent_messages > 0 {
@@ -111,13 +103,11 @@ impl ImapResponse for Response {
     fn size_hint(&self) -> usize {
         const FRAMING_LEN: usize = 320;
         const OBJECT_ID_LEN: usize = 96;
-        const CLOSED_LEN: usize = 40;
         const MODSEQ_LEN: usize = 64;
 
         FRAMING_LEN
             + self.mailbox.mailbox_name.len() * 2
             + self.mailbox.attributes.len() * 16
-            + if self.closed_previous { CLOSED_LEN } else { 0 }
             + if self.highest_modseq.is_some() {
                 MODSEQ_LEN
             } else {

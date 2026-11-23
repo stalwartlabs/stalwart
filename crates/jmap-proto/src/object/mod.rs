@@ -26,6 +26,7 @@ pub mod identity;
 #[path = "../../../../../stalwart-tests/unit/jmap-proto/src/object/key_tests.rs"]
 mod key_tests;
 pub mod mailbox;
+pub mod mdn;
 pub mod metadata;
 pub mod participant_identity;
 pub mod principal;

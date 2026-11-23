@@ -5,12 +5,15 @@
  */
 
 use crate::{
-    core::{MailboxId, Session, SessionData},
+    core::{AccountCaches, MailboxId, Session, SessionData},
     op::ImapContext,
 };
 use common::{network::SessionStream, storage::index::ObjectIndexBuilder};
 use compact_str::format_compact;
-use email::{cache::MessageCacheFetch, mailbox::role::RoleChange};
+use email::{
+    cache::MessageCacheFetch,
+    mailbox::{manage::MailboxFnc, role::RoleChange},
+};
 use imap_proto::{
     Command, ResponseCode, StatusResponse,
     protocol::{create::Arguments, list::Attribute},
@@ -64,13 +67,47 @@ impl<T: SessionStream> SessionData<T> {
 
         // Refresh mailboxes
         self.expire_folders_of(&arguments.mailbox_name);
+        self.synchronize_mailboxes(false)
+            .await
+            .imap_ctx(&arguments.tag, trc::location!())?;
+
+        // Validate mailbox name
+        let account_id = self
+            .validate_mailbox_create(&arguments.mailbox_name, arguments.mailbox_role)
+            .await
+            .imap_ctx(&arguments.tag, trc::location!())?
+            .account_id;
+
+        let lock = self
+            .server
+            .lock_mailbox_names(account_id)
+            .await
+            .imap_ctx(&arguments.tag, trc::location!())?;
+        let result = self
+            .commit_folder(arguments, account_id, is_objectid, op_start)
+            .await;
+        self.server.unlock_mailbox_names(lock).await;
+        result
+    }
+
+    async fn commit_folder(
+        &self,
+        arguments: Arguments,
+        account_id: u32,
+        is_objectid: bool,
+        op_start: Instant,
+    ) -> trc::Result<StatusResponse> {
+        let cache = self
+            .server
+            .get_current_messages(account_id)
+            .await
+            .imap_ctx(&arguments.tag, trc::location!())?;
+        self.expire_folders(account_id);
         let mut caches = self
-            .synchronize_mailboxes(false)
+            .synchronize_mailboxes_using(false, AccountCaches::with(account_id, cache))
             .await
             .imap_ctx(&arguments.tag, trc::location!())?
             .caches;
-
-        // Validate mailbox name
         let params = self
             .validate_mailbox_create(&arguments.mailbox_name, arguments.mailbox_role)
             .await

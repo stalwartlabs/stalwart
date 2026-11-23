@@ -29,6 +29,7 @@ use crate::{
     file::{copy::FileNodeCopy, get::FileNodeGet, query::FileNodeQuery, set::FileNodeSet},
     identity::{get::IdentityGet, set::IdentitySet},
     mailbox::{get::MailboxGet, query::MailboxQuery, set::MailboxSet},
+    mdn::{parse::MdnParse, send::JmapMdnSend},
     participant_identity::{get::ParticipantIdentityGet, set::ParticipantIdentitySet},
     principal::{availability::PrincipalGetAvailability, get::PrincipalGet, query::PrincipalQuery},
     push::{get::PushSubscriptionFetch, set::PushSubscriptionSet},
@@ -60,6 +61,7 @@ use jmap_proto::{
     },
     response::{CopyResponseMethod, Response, ResponseMethod, SetResponseMethod},
 };
+use registry::schema::enums::Permission;
 use std::future::Future;
 use std::time::Instant;
 use trc::JmapEvent;
@@ -95,11 +97,10 @@ impl RequestHandler for Server {
         session: &HttpSessionData,
         reservation: &mut MemoryReservation,
     ) -> Response<'x> {
-        let add_created_ids = request.created_ids.is_some();
         let using = request.using;
         let mut response = Response::new(
             access_token.state(),
-            request.created_ids.unwrap_or_default(),
+            request.created_ids,
             request.method_calls.len(),
         );
 
@@ -254,10 +255,6 @@ impl RequestHandler for Server {
                     break;
                 }
             }
-        }
-
-        if !add_created_ids {
-            response.created_ids.clear();
         }
 
         response
@@ -756,6 +753,27 @@ impl RequestHandler for Server {
                     self.calendar_event_parse(*req, access_token).await?.into()
                 }
             },
+            RequestMethod::MdnSend(mut req) => {
+                resolve_account_id(&mut req.account_id, method_name.obj, access_token)?;
+                access_token.assert_is_member(req.account_id)?;
+                access_token.enforce_permission(Permission::EmailSend)?;
+                access_token.enforce_permission(Permission::JmapEmailUpdate)?;
+                if !using.contains(Capability::Mail) {
+                    return Err(trc::JmapEvent::UnknownMethod
+                        .into_err()
+                        .details("MDN/send requires the urn:ietf:params:jmap:mail capability"));
+                }
+
+                self.mdn_send(*req, &session.instance, session.session_id, next_call)
+                    .await?
+                    .into()
+            }
+            RequestMethod::MdnParse(mut req) => {
+                resolve_account_id(&mut req.account_id, method_name.obj, access_token)?;
+                access_token.assert_has_access(req.account_id, Collection::Email)?;
+
+                self.mdn_parse(*req, access_token).await?.into()
+            }
             RequestMethod::QueryChanges(req) => {
                 self.query_changes(req, access_token, using).await?.into()
             }

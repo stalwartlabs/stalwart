@@ -200,6 +200,23 @@ impl Runtime {
         }
     }
 
+    pub fn cpu_limit(&self) -> usize {
+        self.cpu_limit
+    }
+
+    pub fn can_edit_header(&self, name: &str) -> bool {
+        self.allowed_capabilities.contains(&Capability::EditHeader)
+            && HeaderName::parse(name).is_some_and(|name| !self.protected_headers.contains(&name))
+    }
+
+    pub fn max_redirects(&self) -> usize {
+        self.max_redirects
+    }
+
+    pub fn max_out_messages(&self) -> usize {
+        self.max_out_messages
+    }
+
     pub fn set_cpu_limit(&mut self, size: usize) {
         self.cpu_limit = size;
     }

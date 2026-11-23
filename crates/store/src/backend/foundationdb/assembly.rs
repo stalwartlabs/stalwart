@@ -6,7 +6,7 @@
 
 use super::MAX_VALUE_SIZE;
 use crate::{Fetch, write::key::KeySerializer};
-use foundationdb::future::{FdbKeyValue, FdbValues};
+use fdb::{KeyValue, RangePage};
 use std::iter::once;
 
 pub(super) struct ChunkedValueCollector {
@@ -50,7 +50,7 @@ impl ChunkedValueCollector {
 
 #[derive(Default)]
 pub(super) struct ReverseRun {
-    held: Option<FdbValues>,
+    held: Option<RangePage>,
     key: Vec<u8>,
     suffixes: Vec<u8>,
     first: Vec<u8>,
@@ -65,10 +65,10 @@ enum ChunkLink {
 }
 
 impl ChunkLink {
-    fn of(held: &[u8], row: &FdbKeyValue) -> Option<Self> {
-        let key = row.key();
+    fn of(held: &[u8], row: KeyValue<'_>) -> Option<Self> {
+        let key = row.key;
         let (_, prefix) = held.split_last()?;
-        if row.value().len() < MAX_VALUE_SIZE {
+        if row.value.len() < MAX_VALUE_SIZE {
             None
         } else if key == prefix {
             Some(ChunkLink::Base)
@@ -85,8 +85,8 @@ impl ReverseRun {
         self.suffixes.len() as u64 + u64::from(self.held.is_some())
     }
 
-    fn hold(&mut self, row: &FdbKeyValue, values: bool) {
-        let key = row.key();
+    fn hold(&mut self, row: KeyValue<'_>, values: bool) {
+        let key = row.key;
         self.key.clear();
         self.key.extend_from_slice(key);
         self.suffixes.clear();
@@ -94,20 +94,20 @@ impl ReverseRun {
         self.first.clear();
         self.chunks.clear();
         if values {
-            self.first.extend_from_slice(row.value());
+            self.first.extend_from_slice(row.value);
         }
     }
 
-    fn push(&mut self, row: &FdbKeyValue, values: bool) {
-        self.suffixes.extend(row.key().last());
+    fn push(&mut self, row: KeyValue<'_>, values: bool) {
+        self.suffixes.extend(row.key.last());
         if values {
-            self.chunks.extend_from_slice(row.value());
+            self.chunks.extend_from_slice(row.value);
         }
     }
 
     fn complete<F>(
         &mut self,
-        base: &FdbKeyValue,
+        base: KeyValue<'_>,
         sink: &mut RowSink<F>,
         values: bool,
     ) -> trc::Result<bool>
@@ -118,14 +118,14 @@ impl ReverseRun {
         self.value.clear();
         if values {
             self.value
-                .reserve(base.value().len() + self.chunks.len() + self.first.len());
-            self.value.extend_from_slice(base.value());
+                .reserve(base.value.len() + self.chunks.len() + self.first.len());
+            self.value.extend_from_slice(base.value);
             for chunk in self.chunks.as_chunks::<MAX_VALUE_SIZE>().0.iter().rev() {
                 self.value.extend_from_slice(chunk);
             }
             self.value.extend_from_slice(&self.first);
         }
-        sink.deliver(base.key(), &self.value)
+        sink.deliver(base.key, &self.value)
     }
 
     fn flush<F>(&mut self, sink: &mut RowSink<F>) -> trc::Result<bool>
@@ -159,7 +159,7 @@ impl ReverseRun {
 
     fn batch<F>(
         &mut self,
-        rows: FdbValues,
+        rows: RangePage,
         sink: &mut RowSink<F>,
         values: bool,
     ) -> trc::Result<bool>
@@ -170,7 +170,7 @@ impl ReverseRun {
         let mut local = previous.as_ref().and_then(|batch| batch.last());
         for row in rows.iter() {
             let held = match local {
-                Some(prev) => prev.key(),
+                Some(prev) => prev.key,
                 None if !self.suffixes.is_empty() => self.key.as_slice(),
                 None => {
                     local = Some(row);
@@ -193,7 +193,7 @@ impl ReverseRun {
                 }
                 None => {
                     let continues = match local.replace(row) {
-                        Some(prev) => sink.deliver(prev.key(), prev.value())?,
+                        Some(prev) => sink.deliver(prev.key, prev.value)?,
                         None => self.flush(sink)?,
                     };
                     if !continues {
@@ -219,7 +219,7 @@ impl ReverseRun {
         match self.held.take() {
             Some(batch) => {
                 if let Some(row) = batch.last() {
-                    sink.deliver(row.key(), row.value())?;
+                    sink.deliver(row.key, row.value)?;
                 }
             }
             None => {
@@ -238,7 +238,7 @@ pub(super) enum Assembly {
 impl Assembly {
     pub(super) fn batch<F>(
         &mut self,
-        rows: FdbValues,
+        rows: RangePage,
         sink: &mut RowSink<F>,
         values: bool,
     ) -> trc::Result<bool>
@@ -247,8 +247,7 @@ impl Assembly {
     {
         match self {
             Assembly::Forward(pending) => {
-                for row in rows.iter() {
-                    let (key, value) = (row.key(), row.value());
+                for KeyValue { key, value } in rows.iter() {
                     if let Some(chunk) = pending {
                         if key.len() == chunk.key.len() + 1 && key.starts_with(&chunk.key) {
                             if values {

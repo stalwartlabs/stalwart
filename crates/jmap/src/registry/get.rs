@@ -8,12 +8,14 @@ use crate::registry::{
     EnterpriseRegistry,
     mapping::{
         RegistryGetResponse, account::account_get, bootstrap::bootstrap_get,
-        cluster::cluster_node_get, index_queue::index_queue_status_get, log::log_get,
-        public_key::PublicKeyManagement, queued_message::queued_message_get, report::report_get,
-        spam_sample::spam_sample_get, task::task_get,
+        calendar_settings::calendar_settings_get, cluster::cluster_node_get,
+        index_queue::index_queue_status_get, log::log_get, public_key::PublicKeyManagement,
+        queued_message::queued_message_get, report::report_get, spam_sample::spam_sample_get,
+        task::task_get,
     },
 };
 use common::{Server, auth::AccessToken, network::dkim::generate_dkim_public_key};
+use email::sieve::rules::SenderListKind;
 use jmap_proto::{
     method::get::{GetRequest, GetResponse},
     object::registry::Registry,
@@ -201,6 +203,7 @@ impl RegistryGet for Server {
             | ObjectType::TlsReportSettings
             | ObjectType::Tracer
             | ObjectType::WebDav
+            | ObjectType::Exchange
             | ObjectType::WebHook
             | ObjectType::Account
             | ObjectType::DsnReportSettings
@@ -261,11 +264,27 @@ impl RegistryGet for Server {
             }
             ObjectType::Log => log_get(get).await.map(|get| get.into_response()),
             ObjectType::Bootstrap => bootstrap_get(get).await.map(|get| get.into_response()),
+            ObjectType::CalendarSettings => calendar_settings_get(get)
+                .await
+                .map(|get| get.into_response()),
             ObjectType::AccountSettings
             | ObjectType::ApiKey
             | ObjectType::AccountPassword
             | ObjectType::AppPassword
             | ObjectType::Passkey => account_get(get).await.map(|get| get.into_response()),
+            ObjectType::MailRule => crate::registry::mapping::mail_rule::mail_rule_get(get)
+                .await
+                .map(|get| get.into_response()),
+            ObjectType::BlockedSender => {
+                crate::registry::mapping::sender_list::sender_list_get(get, SenderListKind::Blocked)
+                    .await
+                    .map(|get| get.into_response())
+            }
+            ObjectType::SafeSender => {
+                crate::registry::mapping::sender_list::sender_list_get(get, SenderListKind::Safe)
+                    .await
+                    .map(|get| get.into_response())
+            }
             ObjectType::Action => Ok(get.not_found_any().into_response()),
         }
     }
@@ -366,6 +385,7 @@ async fn registry_object_get(
                     let (name, domain_id) = match obj.as_ref() {
                         Account::User(obj) => (obj.name.as_str(), obj.domain_id),
                         Account::Group(obj) => (obj.name.as_str(), obj.domain_id),
+                        Account::Resource(obj) => (obj.name.as_str(), obj.domain_id),
                     };
                     let domain = server.domain_by_id(domain_id.document_id()).await?;
                     let email = format!(

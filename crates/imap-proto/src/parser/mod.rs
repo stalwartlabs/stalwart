@@ -204,6 +204,8 @@ impl Flag {
 }
 
 const SECONDS_PER_DAY: i64 = 86_400;
+pub(crate) const MAX_FLAGS: usize = 128;
+const MAX_SEQUENCE_ITEMS: usize = 4096;
 
 #[inline(always)]
 fn short_month(m0: u8, m1: u8, m2: u8) -> Option<u32> {
@@ -443,7 +445,7 @@ fn sequence_item(value: &[u8]) -> Option<(Sequence, &[u8])> {
     }
 }
 
-fn parse_sequence_set_fast(value: &[u8]) -> Option<Sequence> {
+fn parse_sequence_set_fast(value: &[u8], commas: usize) -> Option<Sequence> {
     let (first, tail) = sequence_item(value)?;
     let mut rest = match tail {
         [] => return Some(first),
@@ -451,8 +453,7 @@ fn parse_sequence_set_fast(value: &[u8]) -> Option<Sequence> {
         _ => return None,
     };
 
-    let commas = rest.iter().filter(|&&ch| ch == b',').count();
-    let mut items = Vec::with_capacity(commas + 2);
+    let mut items = Vec::with_capacity(commas + 1);
     items.push(first);
     loop {
         let (item, tail) = sequence_item(rest)?;
@@ -466,16 +467,21 @@ fn parse_sequence_set_fast(value: &[u8]) -> Option<Sequence> {
 }
 
 pub fn parse_sequence_set(value: &[u8]) -> Result<Sequence> {
-    if let Some(sequence_set) = parse_sequence_set_fast(value) {
+    let commas = value.iter().filter(|&&ch| ch == b',').count();
+    if commas >= MAX_SEQUENCE_ITEMS {
+        return Err(Cow::from("Too many items in sequence set."));
+    }
+
+    if let Some(sequence_set) = parse_sequence_set_fast(value, commas) {
         return Ok(sequence_set);
     }
 
-    parse_sequence_set_slow(value)
+    parse_sequence_set_slow(value, commas)
 }
 
 #[inline(never)]
-fn parse_sequence_set_slow(value: &[u8]) -> Result<Sequence> {
-    let mut sequence_set = Vec::with_capacity(value.iter().filter(|&&ch| ch == b',').count() + 1);
+fn parse_sequence_set_slow(value: &[u8], commas: usize) -> Result<Sequence> {
+    let mut sequence_set = Vec::with_capacity(commas + 1);
 
     let mut range_start = None;
     let mut token_start = None;

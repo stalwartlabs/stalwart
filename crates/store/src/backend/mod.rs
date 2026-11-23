@@ -8,8 +8,18 @@
 pub mod azure;
 pub mod elastic;
 pub mod ephemeral;
-#[cfg(feature = "foundation")]
+#[cfg(all(
+    feature = "foundation",
+    not(any(feature = "foundation-native", feature = "foundation-c"))
+))]
+compile_error!("feature \"foundation\" requires \"foundation-native\" or \"foundation-c\"");
+#[cfg(all(feature = "foundation-native", not(feature = "foundation-c")))]
 pub mod foundationdb;
+#[cfg(feature = "foundation-c")]
+#[path = "foundationdb_c/mod.rs"]
+pub mod foundationdb;
+#[cfg(feature = "foundation")]
+pub(crate) mod foundationdb_config;
 pub mod fs;
 pub mod http;
 #[cfg(feature = "keep")]

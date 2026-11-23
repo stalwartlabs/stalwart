@@ -5,7 +5,7 @@
  */
 
 use crate::auth::AccessToken;
-use crate::network::ip_to_bytes;
+use crate::network::ip_rate_key;
 use crate::network::limiter::{
     AccountLimits, AccountRate, InFlight, LimiterResult, RateCounter, RateHit,
 };
@@ -141,7 +141,7 @@ impl Server {
                 .core
                 .storage
                 .memory
-                .is_rate_allowed(KV_RATE_LIMIT_HTTP_ANONYMOUS, &ip_to_bytes(&addr), rate)
+                .is_rate_allowed(KV_RATE_LIMIT_HTTP_ANONYMOUS, &ip_rate_key(&addr), rate)
                 .await
                 .caused_by(trc::location!())?
         {

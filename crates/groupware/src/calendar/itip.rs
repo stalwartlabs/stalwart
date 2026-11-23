@@ -12,6 +12,7 @@ use crate::{
         CalendarEventNotificationContent, ChangedBy, EVENT_HIDE_ATTENDEES,
         EVENT_NOTIFICATION_IS_CHANGE,
         alerts::DefaultAlertsResolver,
+        booking::{BookingRequest, ResourceBookingHandler},
         notification::NotificationAudience,
         privacy::{EventPrivacy, ICalendarPrivacy},
         schedule::{AlarmTasks, EventAlarmScheduler, EventAlarmUsers},
@@ -44,7 +45,10 @@ use common::{
     i18n,
 };
 use compact_str::ToCompactString;
-use registry::schema::enums::{Permission, StorageQuota};
+use registry::schema::{
+    enums::{Permission, StorageQuota},
+    structs::AutomaticBooking,
+};
 use std::{net::IpAddr, ops::RangeInclusive, time::Duration};
 use store::{
     rand::{self, RngExt},
@@ -87,6 +91,12 @@ pub enum ItipSendStatus {
     EventInPast,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ItipAutoAdd {
+    Policy,
+    Consented,
+}
+
 pub trait ItipIngest: Sync + Send {
     fn itip_ingest(
         &self,
@@ -95,6 +105,25 @@ pub trait ItipIngest: Sync + Send {
         origin: ItipOrigin,
         recipient: &str,
         itip_message: &str,
+    ) -> impl Future<Output = Result<Option<ItipMessage<ICalendar>>, ItipIngestError>> + Send {
+        self.itip_ingest_with(
+            account_info,
+            sender,
+            origin,
+            recipient,
+            itip_message,
+            ItipAutoAdd::Policy,
+        )
+    }
+
+    fn itip_ingest_with(
+        &self,
+        account_info: &AccountInfo,
+        sender: &str,
+        origin: ItipOrigin,
+        recipient: &str,
+        itip_message: &str,
+        auto_add: ItipAutoAdd,
     ) -> impl Future<Output = Result<Option<ItipMessage<ICalendar>>, ItipIngestError>> + Send;
 
     fn http_rsvp_url(
@@ -112,6 +141,7 @@ pub trait ItipIngest: Sync + Send {
         remote_ip: IpAddr,
     ) -> impl Future<Output = trc::Result<RsvpResponse>> + Send;
 
+    #[allow(clippy::too_many_arguments)]
     fn itip_ingest_once(
         &self,
         account_info: &AccountInfo,
@@ -119,6 +149,8 @@ pub trait ItipIngest: Sync + Send {
         origin: ItipOrigin,
         recipient: &str,
         itip_message: &str,
+        auto_add: ItipAutoAdd,
+        booking_policy: Option<&AutomaticBooking>,
     ) -> impl Future<Output = Result<Option<ItipMessage<ICalendar>>, ItipIngestError>> + Send;
 
     fn itip_ingest_forward(
@@ -153,7 +185,8 @@ pub trait ItipIngest: Sync + Send {
         itip: ICalendar,
         changed_by: ChangedBy,
         is_organizer_update: bool,
-    ) -> impl Future<Output = Result<(), ItipIngestError>> + Send;
+        booking: Option<BookingRequest<'_>>,
+    ) -> impl Future<Output = Result<Option<ItipMessage<ICalendar>>, ItipIngestError>> + Send;
     fn http_rsvp_sync_attendee_copy(
         &self,
         target: RsvpTarget,
@@ -175,18 +208,41 @@ pub trait ItipIngest: Sync + Send {
 }
 
 impl ItipIngest for Server {
-    async fn itip_ingest(
+    async fn itip_ingest_with(
         &self,
         account_info: &AccountInfo,
         sender: &str,
         origin: ItipOrigin,
         recipient: &str,
         itip_message: &str,
+        auto_add: ItipAutoAdd,
     ) -> Result<Option<ItipMessage<ICalendar>>, ItipIngestError> {
+        let policy = match auto_add {
+            ItipAutoAdd::Policy => self.resource_booking_policy(account_info).await?,
+            ItipAutoAdd::Consented => None,
+        };
+        let (booking_policy, booking_lock) = match policy {
+            Some(policy) => match self.lock_resource_booking(account_info.account_id()).await {
+                Ok(lock) => (Some(policy), Some(lock)),
+                Err(err) => {
+                    trc::error!(err.caused_by(trc::location!()));
+                    (None, None)
+                }
+            },
+            None => (None, None),
+        };
         let mut attempt = 1;
-        loop {
+        let result = loop {
             match self
-                .itip_ingest_once(account_info, sender, origin, recipient, itip_message)
+                .itip_ingest_once(
+                    account_info,
+                    sender,
+                    origin,
+                    recipient,
+                    itip_message,
+                    auto_add,
+                    booking_policy.as_ref(),
+                )
                 .await
             {
                 Err(ItipIngestError::Internal(err))
@@ -196,9 +252,13 @@ impl ItipIngest for Server {
                     let backoff = rand::rng().random_range(WRITE_RETRY_BACKOFF_MS);
                     tokio::time::sleep(Duration::from_millis(backoff)).await;
                 }
-                result => return result,
+                result => break result,
             }
+        };
+        if let Some(lock) = booking_lock {
+            self.release_resource_booking(lock).await;
         }
+        result
     }
 
     async fn http_rsvp_url(
@@ -400,10 +460,11 @@ impl ItipIngest for Server {
                 reply,
                 changed_by,
                 false,
+                None,
             )
             .await
         {
-            Ok(()) => {}
+            Ok(_) => {}
             Err(ItipIngestError::Message(err)) => {
                 trc::event!(
                     Calendar(trc::CalendarEvent::ItipMessageError),
@@ -436,6 +497,8 @@ impl ItipIngest for Server {
         origin: ItipOrigin,
         recipient: &str,
         itip_message: &str,
+        auto_add: ItipAutoAdd,
+        booking_policy: Option<&AutomaticBooking>,
     ) -> Result<Option<ItipMessage<ICalendar>>, ItipIngestError> {
         // Parse and validate the iTIP message
         let mut itip = ICalendar::parse(itip_message)
@@ -525,6 +588,13 @@ impl ItipIngest for Server {
         } else {
             ChangedBy::CalendarAddress(sender.into())
         };
+        let is_request = itip_method(&itip)? == &ICalendarMethod::Request;
+        let booking = booking_policy
+            .filter(|_| is_request)
+            .map(|policy| BookingRequest {
+                policy,
+                organizer_is_local: matches!(changed_by, ChangedBy::PrincipalId(_)),
+            });
 
         // Find event by UID
         let account_id = account_info.account_id();
@@ -587,10 +657,9 @@ impl ItipIngest for Server {
                             itip,
                             changed_by,
                             is_organizer_update,
+                            booking,
                         )
-                        .await?;
-
-                        Ok(None)
+                        .await
                     }
                     MergeResult::Message(itip_message) => Ok(Some(itip_message)),
                     MergeResult::None => Ok(None),
@@ -600,7 +669,9 @@ impl ItipIngest for Server {
             }
         } else {
             // Verify that auto-adding invitations is allowed
-            if !self.core.groupware.itip_auto_add
+            if auto_add == ItipAutoAdd::Policy
+                && booking.is_none()
+                && !self.core.groupware.itip_auto_add
                 && !matches!(changed_by, ChangedBy::PrincipalId(_))
                 && !self
                     .document_exists(
@@ -613,18 +684,27 @@ impl ItipIngest for Server {
                     .caused_by(trc::location!())?
             {
                 return Err(ItipIngestError::Message(ItipError::AutoAddDisabled));
-            } else if itip_method(&itip)? != &ICalendarMethod::Request {
+            } else if !is_request {
                 return Err(ItipIngestError::Message(ItipError::EventNotFound));
             }
 
             // Import the iTIP message
             let mut ical = itip.clone();
             itip_import_message(&mut ical)?;
+            let reply = match &booking {
+                Some(booking) => {
+                    self.book_resource(account_info, &mut ical, booking, None)
+                        .await?
+                }
+                None => None,
+            };
 
-            self.itip_create_event(account_info, ical, itip, changed_by, itip_message)
-                .await?;
+            if booking.as_ref().is_none_or(BookingRequest::is_authorized) {
+                self.itip_create_event(account_info, ical, itip, changed_by, itip_message)
+                    .await?;
+            }
 
-            Ok(None)
+            Ok(reply)
         }
     }
 
@@ -815,7 +895,8 @@ impl ItipIngest for Server {
         itip: ICalendar,
         changed_by: ChangedBy,
         is_organizer_update: bool,
-    ) -> Result<(), ItipIngestError> {
+        booking: Option<BookingRequest<'_>>,
+    ) -> Result<Option<ItipMessage<ICalendar>>, ItipIngestError> {
         let event_ = archive
             .to_unarchived::<CalendarEvent>()
             .caused_by(trc::location!())?;
@@ -847,6 +928,18 @@ impl ItipIngest for Server {
         {
             content.data.event.set_privacy(privacy);
         }
+        let reply = match &booking {
+            Some(booking) if is_organizer_update => {
+                self.book_resource(
+                    account_info,
+                    &mut content.data.event,
+                    booking,
+                    Some(document_id),
+                )
+                .await?
+            }
+            _ => None,
+        };
         let current = content.data.event.clone();
 
         // Calculate the new ical size
@@ -1002,7 +1095,7 @@ impl ItipIngest for Server {
         }
         self.commit_batch(batch).await.caused_by(trc::location!())?;
 
-        Ok(())
+        Ok(reply)
     }
 
     async fn http_rsvp_sync_attendee_copy(

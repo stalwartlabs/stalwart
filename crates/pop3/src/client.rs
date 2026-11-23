@@ -239,6 +239,13 @@ impl<T: SessionStream> Session<T> {
             | Command::Stat
             | Command::Rset => {
                 if let State::Authenticated { access_token, .. } = &self.state {
+                    if !self.server.is_access_token_current(access_token) {
+                        Box::pin(
+                            self.server
+                                .assert_session_access(access_token, self.remote_addr),
+                        )
+                        .await?;
+                    }
                     self.server
                         .is_imap_request_allowed(access_token)
                         .await

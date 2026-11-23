@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::borrow::Cow;
+use std::{borrow::Cow, time::Duration};
 
 use compact_str::{CompactString, ToCompactString};
 use http_body_util::BodyExt;
@@ -15,6 +15,10 @@ use crate::HttpRequest;
 const MIN_FIRST_BODY_ALLOCATION: usize = 4 * 1024;
 const MIN_BODY_GROWTH: usize = 64 * 1024;
 const BODY_GROWTH_FACTOR: usize = 4;
+#[cfg(not(stalwart_tests))]
+const BODY_FRAME_TIMEOUT: Duration = Duration::from_secs(60);
+#[cfg(stalwart_tests)]
+const BODY_FRAME_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[inline]
 pub fn decode_path_element(item: &str) -> Cow<'_, str> {
@@ -35,7 +39,20 @@ pub async fn fetch_body(
         .and_then(|len| usize::try_from(len).ok())
         .filter(|&len| max_size == 0 || len <= max_size);
     let mut bytes = Vec::new();
-    while let Some(Ok(frame)) = req.frame().await {
+    loop {
+        let frame = match tokio::time::timeout(BODY_FRAME_TIMEOUT, req.frame()).await {
+            Ok(Some(Ok(frame))) => frame,
+            Ok(_) => break,
+            Err(_) => {
+                trc::event!(
+                    Network(trc::NetworkEvent::Timeout),
+                    SpanId = session_id,
+                    Details = "Request body read timed out",
+                    Size = bytes.len(),
+                );
+                return None;
+            }
+        };
         if let Some(data) = frame.data_ref() {
             let len = bytes.len() + data.len();
             if len <= max_size || max_size == 0 {

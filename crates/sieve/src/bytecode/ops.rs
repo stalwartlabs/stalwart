@@ -188,7 +188,7 @@ ops! {
     TestConvert = 16 => { from_media_type: Rec, to_media_type: Rec, transcoding_params: Range, is_not: bool }
     Convert = 17 => { from_media_type: Rec, to_media_type: Rec, transcoding_params: Range, is_not: bool }
     TestDate = 18 => { header_name: Rec, key_list: Range, match_type: Match, comparator: u8, index: Option<i32>, zone: Zone, date_part: u8, mime_anychild: bool, is_not: bool }
-    TestCurrentDate = 19 => { zone: Option<i64>, match_type: Match, comparator: u8, date_part: u8, key_list: Range, is_not: bool }
+    TestCurrentDate = 19 => { zone: Zone, match_type: Match, comparator: u8, date_part: u8, key_list: Range, is_not: bool }
     TestDuplicate = 20 => { handle: Rec, dup_match: DupMatch, seconds: Option<u64>, last: bool, is_not: bool }
     TestString = 21 => { match_type: Match, comparator: u8, source: Range, key_list: Range, is_not: bool }
     TestEnvironment = 22 => { match_type: Match, comparator: u8, source: Range, key_list: Range, is_not: bool }

@@ -5,6 +5,7 @@
  */
 
 use super::{StoredIdentities, get::IdentityGet};
+use crate::changes::state::StateManager;
 use common::{Server, storage::index::ObjectIndexBuilder};
 use email::identity::{EmailAddress, Identity};
 use jmap_proto::{
@@ -77,7 +78,11 @@ impl IdentitySet for Server {
         mut request: SetRequest<'_, identity::Identity>,
     ) -> trc::Result<SetResponse<identity::Identity>> {
         let account_id = request.account_id.document_id();
-        let mut response = SetResponse::from_request(&request, self.core.jmap.set_max_objects)?;
+        let mut response = SetResponse::from_request(&request, self.core.jmap.set_max_objects)?
+            .with_state(
+                self.assert_state(account_id, SyncCollection::Identity, &request.if_in_state)
+                    .await?,
+            );
         let will_destroy = response.collect_will_destroy(request.unwrap_destroy());
         let identities = if request.has_creates() || !will_destroy.is_empty() {
             self.identities(account_id).await?

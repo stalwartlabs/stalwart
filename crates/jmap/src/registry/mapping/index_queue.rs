@@ -100,7 +100,10 @@ pub(crate) async fn index_queue_status_query(
             }
             Property::Partition => {
                 if matches!(op, RegistryFilterOp::Equal)
-                    && let Some(partition_) = value.as_str().and_then(|v| v.parse::<u32>().ok())
+                    && let Some(partition_) = value
+                        .as_str()
+                        .and_then(|v| v.parse::<u32>().ok())
+                        .or_else(|| value.as_u64().and_then(|v| u32::try_from(v).ok()))
                 {
                     partition = Some(partition_);
                     true

@@ -2,6 +2,135 @@
 
 All notable changes to this project will be documented in this file. This project adheres to [Semantic Versioning](http://semver.org/).
 
+## [1.2.0] - 2026-11-23
+
+Upgrade instructions:
+
+- **Add the new permissions to the default roles.** Mail rules, junk e-mail lists, calendar settings and Exchange need new permissions, which default roles created by an earlier version do not include:
+  - User, group and administrator roles: `sysMailRule*`, `sysBlockedSender*`, `sysSafeSender*` and `sysCalendarSettings*`.
+  - Administrator role: `sysExchangeGet` and `sysExchangeUpdate`.
+
+  Add these permissions manually using the recovery administrator or restart the server once with the environment variable `STALWART_UPDATE_ROLE_PERMISSIONS=true` to add them, then remove the variable. See [Default roles on upgraded servers](https://stalw.art/docs/auth/authorization/permissions#default-roles-on-upgraded-servers) for details.
+- **Upgrade the WebUI to version 2.1.1.**
+
+## Added
+- **Microsoft Exchange** protocols for Outlook, Apple Mail, Calendar and Contacts, and ActiveSync devices (disabled by default):
+  - Exchange Web Services (EWS): mail, calendar, contacts, tasks, folders, sharing and delegates, free/busy, inbox rules, out of office, reminders, name resolution and distribution lists, streaming and pull notifications; schema versions Exchange 2010 SP2 to Exchange 2016 (`ewsVersion`).
+  - MAPI over HTTP (EMSMDB and NSPI) for Outlook for Windows in online and cached mode: incremental change synchronization, offline address book, delegate access, rules and junk e-mail settings, reminders, search folders and read receipts.
+  - Exchange ActiveSync 14.1 and 16.1: mail, calendar, contacts, tasks and notes, folder sync, Ping, SendMail, SmartReply, SmartForward, ItemOperations, MeetingResponse, ResolveRecipients, Search, Settings and out of office.
+  - Autodiscover (POX, SOAP and JSON v2) for EWS, MAPI over HTTP and ActiveSync.
+  - New `x:Exchange` object (`enable`, `ewsVersion`, `maxRequestSize`, `maxDevices`, `maxHeartbeat`, `maxObjectSize`; permissions `sysExchangeGet` and `sysExchangeUpdate`) and a new `exchange` cache size setting.
+  - Exchange clients share data with IMAP, JMAP, CalDAV and CardDAV: Exchange-only item properties are kept, categories are shared account-wide, and Outlook and EWS rules are stored as `x:MailRule` rules.
+  - Basic and OAuth authentication; NTLM and Kerberos are not supported.
+  - New `exchange` Cargo feature (enabled by default) to build without the Exchange protocols.
+- **Message Disposition Notifications**:
+  - [RFC 8098 - Message Disposition Notification](https://datatracker.ietf.org/doc/html/rfc8098)
+  - [RFC 9007 - Handling MDN with JMAP](https://datatracker.ietf.org/doc/html/rfc9007): `MDN/send` and `MDN/parse` methods, capability `urn:ietf:params:jmap:mdn`.
+- **Calendar Availability**:
+  - Per-account working hours in the new `x:CalendarSettings` object (permissions `sysCalendarSettings*`).
+  - Managed in the WebUI, over JMAP or through the CalDAV `calendar-availability` property (RFC 7953), which generates and accepts `VAVAILABILITY`. 
+  - Time outside working hours appears as `BUSY-UNAVAILABLE` in iTIP free/busy and as unavailable periods in JMAP `Principal/getAvailability`.
+  - New `shareFreeBusy` calendar setting that lets users see each other's free/busy time without an explicit share, within the same tenant or across the whole server when tenants are not used. Applies to CalDAV scheduling, JMAP availability and EWS.
+- **Resource accounts** for rooms and equipment:
+  - Capacity and location
+  - Delegates who manage the resource's calendar
+  - Automatic or manual booking of invitations
+- **Mail rules**:
+  - Server-side rules in the new `x:MailRule` object (permissions `sysMailRule*`), compiled together with the vacation response into one read-only Sieve script named `managed`.
+  - Conditions: sender and recipient addresses, addressed to me, subject, body, subject or body, any header, header exists, size, attachments and attachment name or type, importance, sensitivity, message type (meeting, delivery report, read receipt, automatic reply, signed, encrypted), mailing list, recipient address and plus-address, spam score, authenticated sender, received date range and a weekly schedule with an optional time zone.
+  - Actions: move, copy, Trash, Junk, not junk, mark as read, keywords, redirect or forward, set importance, reply with a template, reject (authenticated senders only) and discard.
+  - Junk e-mail lists: blocked senders, safe senders and safe recipients, plus delegation of meeting requests.
+- **FoundationDB** Rust native client: 
+  - Native asynchronous Rust client replaces `libfdb_c`. 
+  - Supports FoundationDB 7.1 to 8.0 and TLS, needs no client library installed on the host. Included in the standard build and Docker image. 
+  - Compared with the previous `libfdb_c` client: 4.5x to 6.9x the throughput on point reads at 256 concurrent clients and 2.1x on key scans, 5x to 7x lower median latency, about 3x lower p99 latency at equal load, and roughly half the client CPU and a quarter of the client memory per point read.
+  - The `libfdb_c` backend remains available with the `foundationdb-c` feature.
+
+## Changed
+- FoundationDB: the separate `stalwart-foundationdb` build, its Docker image and the `install.sh --fdb` option are removed; the standard `stalwart` binary connects to FoundationDB.
+- OAuth: dynamically registered clients may use the device authorization grant and request the full access scope; they remain unverified and always require the user's consent.
+- MTA: every message stored in a local mailbox gets a `Return-Path` header from the envelope sender, whatever port or protocol it was submitted on.
+- Sieve: 
+  - Vacation response is no longer replied to messages classified as spam, and the untrusted interpreter enforces `maxReceivedHeaders` itself.
+  - `:zone` also accepts IANA time zone names (non-standard extension), evaluated with daylight saving time at run time.
+- Spam filter: IMAP `APPEND` trains the classifier only on `$Junk`/`$NotJunk` or an upload to Junk, like JMAP `Email/import`, so migrations no longer flood it with ham.
+- DKIM2: updated to [draft-ietf-dkim-dkim2-spec-09](https://datatracker.ietf.org/doc/html/draft-ietf-dkim-dkim2-spec-09) and [draft-ietf-dkim-dkim2-dns-03](https://datatracker.ietf.org/doc/html/draft-ietf-dkim-dkim2-dns-03) (`mail-auth` 0.16).
+
+## Fixed
+- OAuth: successful bearer authentication now emits `auth.success`.
+- MySQL: a counter update whose result is exactly zero (such as a queue quota counter that had drifted to -1) no longer fails with "LAST_INSERT_ID() did not return a value", which blocked all incoming mail.
+- SPF: unknown modifiers containing `/` no longer cause a permerror.
+- DNS: cached TXT lookups used for one purpose no longer make a domain's DMARC policy, DKIM keys or DKIM2 Domain Policy Record look missing.
+- MTA:
+  - RCPT TO for an empty mailing list no longer fails at DATA with 503.
+  - Expanding large mailing lists no longer takes quadratic time.
+  - Stricter validation of ENVID, ORCPT, AUTH during a transaction and repeated EHLO.
+  - SMTP, IMAP, POP3 and ManageSieve writes time out when the client stops reading.
+  - The Delivery Test now handles TLS and DANE like real deliveries.
+  - `RCPT TO:<Postmaster>` without a domain is accepted (RFC 5321 4.5.1).
+- IMAP:
+  - Messages arriving during a command are announced before its tagged reply, so clients no longer skip them.
+  - `STATUS` notifications during `IDLE` include `HIGHESTMODSEQ`, so Apple Mail syncs changes right away.
+  - A failed `SELECT` or `EXAMINE` closes the previously selected mailbox, so a following `CLOSE` or `EXPUNGE` no longer affects it (Reported by Hebin Lv (吕贺彬), Beijing University of Posts and Telecommunications).
+  - Limits on FETCH items, SEARCH criteria, sequence sets, flags and header field names per command.
+  - Concurrent creates and renames of the same mailbox name no longer leave duplicates.
+- JMAP:
+  - Draft saves, copies and imports no longer trigger new-mail pushes.
+  - `EmailSubmission` no longer drops recipients on non-public TLDs such as `.internal`.
+  - `Email/query` text searches containing symbol-only words no longer return nothing.
+  - `ContactCard/parse` returns every vCard in a blob.
+  - `ContactCard/set` generates a `uid` when the client omits it.
+  - Unknown capabilities are answered with `unknownCapability`, and WebSocket `RequestError` frames carry the `requestId`.
+  - `SieveScript/set` activation reports state changes correctly and uses the `sieveIsActive` error.
+  - Oversized WebSocket messages are refused while reading.
+  - `Identity/set` and `EmailSubmission/set` return `oldState`/`newState` and honour `ifInState`.
+  - Invalid JSON bodies are answered with `notJSON`, and empty `createdIds` is echoed.
+  - Push subscriptions whose endpoint answers 404 or 410 are destroyed.
+- Sieve:
+  - `vacation`, `enclose` and `notify` strip CR/LF from header values taken from the message or script.
+  - `enclose` and redirect loops stop at the hop limit.
+  - `:addrbook:default` and named address books work in `:list` tests.
+  - `redirect` copies to local accounts keep the spam verdict computed at DATA, so spam is filed in the target's Junk.
+- Calendar:
+  - Meeting updates and acceptances refresh the Microsoft busy status.
+  - Truncating a recurring series to a past end date notifies attendees.
+  - Destroying an account removes its pending alarms.
+  - Limits on generated time zone definitions and iMIP parts per message.
+  - `CalendarEvent/set` rejects non-IANA time zone names instead of storing a floating event.
+  - Invitation and alarm e-mails keep the line breaks of the event description.
+  - CalDAV follows the default calendar set through JMAP.
+- Calendar scheduling:
+  - New exceptions to recurring events reach attendees who already replied.
+  - Attendees with `RSVP=FALSE` receive invitations, updates and cancellations.
+- Contacts: online services with a user name and no URI are no longer lost.
+- DKIM: automatic key rotation keeps the settings of the replaced key.
+- ACME: editing the contacts of an existing provider no longer fails with "Invalid email address".
+- OAuth:
+  - The device authorization verification page is reachable in bootstrap and recovery mode.
+  - In a cluster, access tokens are accepted immediately on all nodes.
+- Directories:
+  - An unavailable directory no longer blocks settings reloads.
+  - Accounts and groups created from external directories respect tenant quotas.
+- Security:
+  - Auto-ban and rate limits apply per IPv6 /64, and blocked networks added at runtime are enforced without a reload.
+  - Failed logins tripping only the per-login counter ban just the source address.
+  - Role managers can no longer grant themselves permissions through parent roles.
+  - Open IMAP, POP3, ManageSieve, WebSocket and EventSource sessions end when the account's permissions or password change.
+  - Push delivery reads at most 1 KiB of an endpoint's error response.
+- Spam filter: cluster nodes load the updated classifier model after training on another node.
+- Cluster: nodes that miss coordinator events reload their state instead of keeping stale settings until a restart.
+- HTTP: stalled connections are closed after 60 seconds, POST /jmap buffering is limited, cross-site requests no longer trigger scan bans, and EventSource streams end on token revocation.
+- Search index:
+  - Destroying an account during indexing no longer leaves index entries behind.
+  - Busy accounts no longer hold an indexing slot indefinitely.
+  - `x:IndexQueueStatus/query` accepts a numeric `partition`.
+- Storage:
+  - PostgreSQL: requests on idle pooled connections and pool waits are bounded by `responseTimeout`.
+  - Elasticsearch: searches return more than 10,000 matches and rejected bulk documents are reported.
+- Archiving: restoring items of a deleted account is refused.
+- Log viewer: only files written by the log tracer are read.
+- Recovery and bootstrap mode: new `STALWART_RECOVERY_MODE_BIND` environment variable sets the setup listener address, and an invalid bind address stops startup.
+
 ## [1.1.1] - 2026-11-16
 
 ## Added
@@ -20,7 +149,7 @@ All notable changes to this project will be documented in this file. This projec
   - `Principal/query` `text` and `name` filters now match a full address and whole words of the name and description; `name` was an exact address match and `text` never matched an address.
   - The `ClassifySpam` and `TroubleshootDmarc` actions accept `mailFrom: null` for the null reverse-path (`MAIL FROM:<>`), and the `ClassifySpam` `mailFromParameters` value `bit8Mime` is spelled correctly and no longer swapped with `binaryMime`.
 - IMAP:
-  - Every token of a request, including empty quoted strings, now counts toward the request size limit at its in-memory size; floods of `""` before login or of `(` after it could exhaust server memory.
+  - Every token of a request, including empty quoted strings, now counts toward the request size limit at its in-memory size; floods of `""` before login or of `(` after it could exhaust server memory (Reported by Jan Kahmen (turingpoint)).
   - FETCH, SEARCH, STORE, THREAD, UIDBATCHES, COPY and MOVE now send `EXISTS` for messages delivered since the last update before their responses refer to them (RFC 9051 §5.2); clients could record the new UID without the message and skip it for good.
 - Email:
   - An incoming or appended message is no longer dropped as a duplicate when the only stored message with the same `Message-ID` in the target mailbox is a draft.

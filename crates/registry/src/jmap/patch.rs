@@ -18,6 +18,7 @@ use crate::{
     },
 };
 use jmap_tools::{JsonPointer, JsonPointerItem, Key, Value};
+use std::borrow::Cow;
 use utils::map::vec_map::VecMap;
 
 impl<'x> JsonPointerPatch<'x> {
@@ -94,8 +95,25 @@ impl<'x> JsonPointerPatch<'x> {
         self
     }
 
+    pub fn has_validators(&self) -> bool {
+        !self.validators.is_empty()
+    }
+
+    pub fn sanitize<'v>(&self, mut value: Cow<'v, str>) -> Result<Cow<'v, str>, PatchError> {
+        for validator in self.validators {
+            match validator.validate(&value) {
+                StringValidatorResult::Valid => {}
+                StringValidatorResult::Replace(new_value) => value = Cow::Owned(new_value),
+                StringValidatorResult::Invalid(err) => {
+                    return Err(PatchError::new(self.clone(), err));
+                }
+            }
+        }
+        Ok(value)
+    }
+
     #[allow(clippy::should_implement_trait)]
-    pub fn next(&mut self) -> Option<&JsonPointerItem<Property>> {
+    pub fn next(&mut self) -> Option<&'x JsonPointerItem<Property>> {
         self.ptr.as_slice().get(self.pos).inspect(|_| self.pos += 1)
     }
 
@@ -218,19 +236,7 @@ impl RegistryJsonPatch for String {
         value: JmapValue<'x>,
     ) -> PatchResult<'x> {
         if let Some(value) = value.into_string().filter(|v| !v.is_empty()) {
-            let mut value = value.into_owned();
-
-            for validator in pointer.validators {
-                match validator.validate(&value) {
-                    StringValidatorResult::Valid => {}
-                    StringValidatorResult::Replace(new_value) => value = new_value,
-                    StringValidatorResult::Invalid(err) => {
-                        return Err(PatchError::new(pointer, err));
-                    }
-                }
-            }
-
-            *self = value;
+            *self = pointer.sanitize(value)?.into_owned();
             pointer.assert_eof()
         } else {
             Err(PatchError::new(pointer, "Invalid value for property."))

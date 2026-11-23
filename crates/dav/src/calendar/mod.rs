@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
+pub mod availability;
 pub mod copy_move;
 pub mod delete;
 pub mod filter;
@@ -29,17 +30,18 @@ use dav_proto::schema::{
     property::{CalDavProperty, CalendarData, DavProperty, WebDavProperty},
     response::CalCondition,
 };
-use groupware::{
-    calendar::{
-        Alarm, ArchivedCalendarEvent, ArchivedCalendarEventContent, Calendar, CalendarEventContent,
-        EVENT_HAS_ALARMS, SupportedComponent,
-        alarm::ExpandAlarm,
-        alerts::{DefaultAlertsResolver, DefaultAlertsView, ICalendarDefaultAlerts},
-        compare::{ComparisonScope, RecurrenceComponents},
-        privacy::{EventPrivacy, EventViewer, ICalendarPrivacy, PrivacyDenied},
-        user::{ICalendarUserData, UserDataError, UserDataView},
+use groupware::calendar::{
+    Alarm, ArchivedCalendarEvent, ArchivedCalendarEventContent, CalendarEventContent,
+    EVENT_HAS_ALARMS, SupportedComponent,
+    alarm::ExpandAlarm,
+    alerts::{DefaultAlertsResolver, DefaultAlertsView, ICalendarDefaultAlerts},
+    compare::RecurrenceComponents,
+    privacy::{EventPrivacy, EventViewer},
+    user::{ICalendarUserData, UserDataError, UserDataView},
+    write::{
+        EventWriteError, SchedulingPrecondition, SupportedComponents, assert_privacy_access,
+        assert_unique_uid,
     },
-    scheduling::ItipError,
 };
 use hyper::StatusCode;
 use store::{
@@ -48,7 +50,6 @@ use store::{
 };
 use trc::AddContext;
 use types::{collection::Collection, field::CalendarEventField};
-use utils::map::bitmap::Bitmap;
 
 pub(crate) static CALENDAR_CONTAINER_PROPS: [DavProperty; 31] = [
     DavProperty::WebDav(WebDavProperty::CreationDate),
@@ -119,30 +120,7 @@ pub(crate) fn assert_is_unique_uid(
     calendar_id: u32,
     uid: Option<&str>,
 ) -> crate::Result<()> {
-    let Some(uid) = uid else {
-        return Ok(());
-    };
-
-    let is_owner = access_token.is_member(account_id);
-    let mut has_hidden_conflict = false;
-    for path in resources.children_with_uid(calendar_id, uid) {
-        if is_owner
-            || EventPrivacy::from_flags(path.resource.event_flags().unwrap_or_default())
-                != EventPrivacy::Secret
-        {
-            return Err(DavError::Condition(DavErrorCondition::new(
-                StatusCode::FORBIDDEN,
-                CalCondition::NoUidConflict(resources.format_resource(path).into()),
-            )));
-        }
-        has_hidden_conflict = true;
-    }
-
-    if has_hidden_conflict {
-        Err(DavError::Code(StatusCode::FORBIDDEN))
-    } else {
-        Ok(())
-    }
+    assert_unique_uid(resources, access_token, account_id, calendar_id, uid).map_err(Into::into)
 }
 
 impl ContainerOperation {
@@ -164,25 +142,6 @@ impl ContainerOperation {
             }
         }
         Ok(document_ids)
-    }
-}
-
-pub(crate) struct SupportedComponents(Bitmap<SupportedComponent>);
-
-impl SupportedComponents {
-    fn is_restricted(&self) -> bool {
-        !self.0.is_empty()
-    }
-
-    pub(crate) fn assert_supports(&self, component: SupportedComponent) -> crate::Result<()> {
-        if !self.is_restricted() || self.0.contains(component) {
-            Ok(())
-        } else {
-            Err(DavError::Condition(DavErrorCondition::new(
-                StatusCode::FORBIDDEN,
-                CalCondition::SupportedCalendarComponent,
-            )))
-        }
     }
 }
 
@@ -209,12 +168,6 @@ impl CalendarObjectComponent for ArchivedICalendar {
 }
 
 pub(crate) trait CalendarComponentSupport: Sync + Send {
-    fn supported_components(
-        &self,
-        account_id: u32,
-        calendar_id: u32,
-    ) -> impl Future<Output = crate::Result<SupportedComponents>> + Send;
-
     fn assert_stored_event_supported(
         &self,
         event_account_id: u32,
@@ -225,32 +178,6 @@ pub(crate) trait CalendarComponentSupport: Sync + Send {
 }
 
 impl CalendarComponentSupport for Server {
-    async fn supported_components(
-        &self,
-        account_id: u32,
-        calendar_id: u32,
-    ) -> crate::Result<SupportedComponents> {
-        self.store()
-            .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
-                account_id,
-                Collection::Calendar,
-                calendar_id,
-            ))
-            .await
-            .caused_by(trc::location!())?
-            .map(|archive| {
-                archive
-                    .unarchive::<Calendar>()
-                    .map(|calendar| calendar.supported_components.to_native())
-            })
-            .transpose()
-            .caused_by(trc::location!())
-            .map(|supported_components| {
-                SupportedComponents(Bitmap::from(supported_components.unwrap_or_default()))
-            })
-            .map_err(Into::into)
-    }
-
     async fn assert_stored_event_supported(
         &self,
         event_account_id: u32,
@@ -258,7 +185,8 @@ impl CalendarComponentSupport for Server {
         account_id: u32,
         calendar_id: u32,
     ) -> crate::Result<Option<Archive<ArchiveBytes>>> {
-        let supported_components = self.supported_components(account_id, calendar_id).await?;
+        let supported_components =
+            SupportedComponents::fetch(self, account_id, calendar_id).await?;
         if !supported_components.is_restricted() {
             return Ok(None);
         }
@@ -290,31 +218,7 @@ pub(crate) fn assert_event_privacy_access(
     flags: Option<u16>,
     viewer: EventViewer,
 ) -> crate::Result<()> {
-    flags
-        .map(EventPrivacy::from_flags)
-        .unwrap_or_default()
-        .check_access(viewer)
-        .map_err(|denied| {
-            DavError::Code(match denied {
-                PrivacyDenied::Forbidden => StatusCode::FORBIDDEN,
-                PrivacyDenied::NotFound => StatusCode::NOT_FOUND,
-            })
-        })
-}
-
-pub(crate) fn assert_event_privacy_allowed(
-    ical: &ICalendar,
-    viewer: EventViewer,
-) -> crate::Result<()> {
-    if ical.privacy().may_be_set_by(viewer) {
-        Ok(())
-    } else {
-        Err(DavError::Code(StatusCode::FORBIDDEN))
-    }
-}
-
-pub(crate) fn serves_ical(view: &ICalendar, submitted: &ICalendar) -> bool {
-    view == submitted || ComparisonScope::SharedData.component_eq(view, 0, submitted, 0)
+    assert_privacy_access(flags, viewer).map_err(Into::into)
 }
 
 pub(crate) trait CalendarEventView: Sync + Send {
@@ -475,31 +379,61 @@ pub(crate) fn user_data_error(err: UserDataError) -> DavError {
     )
 }
 
-pub(crate) trait ItipPrecondition {
-    fn failed_precondition(&self) -> Option<CalCondition>;
-}
-
-impl ItipPrecondition for ItipError {
-    fn failed_precondition(&self) -> Option<CalCondition> {
-        match self {
-            ItipError::MultipleOrganizer => Some(CalCondition::SameOrganizerInAllComponents),
-            ItipError::OrganizerIsLocalAddress
-            | ItipError::SenderIsNotParticipant(_)
-            | ItipError::OrganizerMismatch => Some(CalCondition::ValidOrganizer),
-            ItipError::CannotModifyProperty(_)
-            | ItipError::CannotModifyInstance
-            | ItipError::CannotModifyAddress => Some(CalCondition::AllowedAttendeeObjectChange),
-            ItipError::MissingUid
-            | ItipError::MultipleUid
-            | ItipError::MultipleObjectTypes
-            | ItipError::MultipleObjectInstances
-            | ItipError::MissingMethod
-            | ItipError::InvalidComponentType
-            | ItipError::OutOfSequence
-            | ItipError::UnknownParticipant(_)
-            | ItipError::UnsupportedMethod(_) => Some(CalCondition::ValidSchedulingMessage),
-            ItipError::TooManyRecipients => Some(CalCondition::MaxAttendeesPerInstance),
-            _ => None,
+impl From<EventWriteError> for DavError {
+    fn from(err: EventWriteError) -> Self {
+        match err {
+            EventWriteError::NotFound => DavError::Code(StatusCode::NOT_FOUND),
+            EventWriteError::Forbidden
+            | EventWriteError::UidChanged(None)
+            | EventWriteError::UidConflict { href: None, .. } => {
+                DavError::Code(StatusCode::FORBIDDEN)
+            }
+            EventWriteError::InvalidObject => DavError::Condition(
+                DavErrorCondition::new(
+                    StatusCode::PRECONDITION_FAILED,
+                    CalCondition::ValidCalendarObjectResource,
+                )
+                .with_details("iCalendar must contain exactly one UID and same component types"),
+            ),
+            EventWriteError::UidChanged(Some(path))
+            | EventWriteError::UidConflict {
+                href: Some(path), ..
+            } => DavError::Condition(DavErrorCondition::new(
+                StatusCode::FORBIDDEN,
+                CalCondition::NoUidConflict(path.into()),
+            )),
+            EventWriteError::UnsupportedComponent => DavError::Condition(DavErrorCondition::new(
+                StatusCode::FORBIDDEN,
+                CalCondition::SupportedCalendarComponent,
+            )),
+            EventWriteError::ScheduleTagMismatch => DavError::Code(StatusCode::PRECONDITION_FAILED),
+            EventWriteError::UserData(err) => user_data_error(err),
+            EventWriteError::TooManyRecipients => DavError::Condition(DavErrorCondition::new(
+                StatusCode::PRECONDITION_FAILED,
+                CalCondition::MaxAttendeesPerInstance,
+            )),
+            EventWriteError::Scheduling(precondition, err) => DavError::Condition(
+                DavErrorCondition::new(
+                    StatusCode::PRECONDITION_FAILED,
+                    match precondition {
+                        SchedulingPrecondition::SameOrganizerInAllComponents => {
+                            CalCondition::SameOrganizerInAllComponents
+                        }
+                        SchedulingPrecondition::ValidOrganizer => CalCondition::ValidOrganizer,
+                        SchedulingPrecondition::AllowedAttendeeObjectChange => {
+                            CalCondition::AllowedAttendeeObjectChange
+                        }
+                        SchedulingPrecondition::ValidSchedulingMessage => {
+                            CalCondition::ValidSchedulingMessage
+                        }
+                        SchedulingPrecondition::MaxAttendeesPerInstance => {
+                            CalCondition::MaxAttendeesPerInstance
+                        }
+                    },
+                )
+                .with_details(err.to_string()),
+            ),
+            EventWriteError::Store(err) => DavError::Internal(err),
         }
     }
 }

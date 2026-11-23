@@ -8,7 +8,9 @@
  *
  */
 
-use crate::{BlobStore, Store, backend::fs::FsStore};
+use crate::{BlobStore, Store, backend::fs::FsStore, registry::bootstrap::Bootstrap};
+#[cfg(feature = "foundation")]
+use registry::schema::prelude::ObjectType;
 use registry::schema::structs::{BlobStoreBase, ShardedBlobStore};
 use std::{ops::Range, sync::Arc};
 
@@ -18,7 +20,8 @@ pub struct ShardedBlob {
 
 #[allow(unreachable_patterns)]
 impl ShardedBlob {
-    pub async fn open(config: ShardedBlobStore) -> Result<BlobStore, String> {
+    #[cfg_attr(not(feature = "foundation"), allow(unused_variables))]
+    pub async fn open(config: ShardedBlobStore, bp: &mut Bootstrap) -> Result<BlobStore, String> {
         if config.stores.len() >= 2 {
             let mut stores = Vec::new();
 
@@ -37,9 +40,13 @@ impl ShardedBlob {
                     }
                     #[cfg(feature = "foundation")]
                     BlobStoreBase::FoundationDb(foundation_db_store) => {
-                        crate::backend::foundationdb::FdbStore::open(foundation_db_store)
-                            .await
-                            .map(BlobStore::Store)
+                        crate::backend::foundationdb::FdbStore::open_shared(
+                            foundation_db_store,
+                            bp,
+                            ObjectType::BlobStore.singleton(),
+                        )
+                        .await
+                        .map(BlobStore::Store)
                     }
                     #[cfg(feature = "postgres")]
                     BlobStoreBase::PostgreSql(postgre_sql_store) => {

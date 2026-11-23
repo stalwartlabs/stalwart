@@ -320,7 +320,10 @@ pub(crate) async fn task_set(
             use common::{cache::invalidate::CacheInvalidationBuilder, ipc::CacheInvalidation};
             use registry::schema::{
                 enums::{AccountType, TaskAccountMaintenanceType},
-                structs::{Account, GroupAccount, TaskAccountMaintenance, TaskStatus, UserAccount},
+                structs::{
+                    Account, GroupAccount, ResourceAccount, TaskAccountMaintenance, TaskStatus,
+                    UserAccount,
+                },
             };
             use store::registry::write::{RegistryWrite, RegistryWriteResult};
 
@@ -341,6 +344,11 @@ pub(crate) async fn task_set(
                     ..Default::default()
                 }),
                 AccountType::Group => Account::Group(GroupAccount {
+                    name: task.account_name,
+                    domain_id: task.account_domain_id,
+                    ..Default::default()
+                }),
+                AccountType::Resource => Account::Resource(ResourceAccount {
                     name: task.account_name,
                     domain_id: task.account_domain_id,
                     ..Default::default()

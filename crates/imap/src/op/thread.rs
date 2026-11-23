@@ -13,7 +13,10 @@ use common::network::SessionStream;
 use email::cache::{MessageCacheFetch, email::MessageCacheAccess};
 use imap_proto::{
     Command, StatusResponse,
-    protocol::thread::{Arguments, Response},
+    protocol::{
+        ImapResponse,
+        thread::{Arguments, Response},
+    },
     receiver::Request,
 };
 use registry::schema::enums::Permission;
@@ -39,12 +42,17 @@ impl<T: SessionStream> Session<T> {
         spawn_op!(permit, data, {
             let tag = std::mem::take(&mut arguments.tag);
 
-            match data.thread(arguments, mailbox, is_uid, op_start).await {
+            match data
+                .thread(arguments, mailbox.clone(), is_uid, op_start)
+                .await
+            {
                 Ok(response) => {
+                    let mut buf = response.serialize();
+                    mailbox.announce_appended(&mut buf);
                     data.write_bytes(
                         StatusResponse::completed(command)
                             .with_tag(tag)
-                            .serialize_after(&response),
+                            .serialize(buf),
                     )
                     .await
                 }
@@ -67,7 +75,7 @@ impl<T: SessionStream> SessionData<T> {
             .get_cached_messages(mailbox.id.account_id)
             .await
             .caused_by(trc::location!())?;
-        self.sync_and_announce(&mailbox, &cache)
+        self.sync_view(&mailbox, &cache, None)
             .await
             .caused_by(trc::location!())?;
 

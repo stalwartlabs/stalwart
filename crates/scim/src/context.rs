@@ -354,6 +354,7 @@ pub fn account_domain_id(object: &Object) -> Option<Id> {
     match account_of(object).ok()? {
         Account::User(account) => Some(account.domain_id),
         Account::Group(account) => Some(account.domain_id),
+        Account::Resource(_) => None,
     }
 }
 
@@ -367,14 +368,14 @@ pub fn account_of(object: &Object) -> Result<&Account> {
 pub fn user_account(object: &Object) -> Result<&UserAccount> {
     match account_of(object)? {
         Account::User(account) => Ok(account),
-        Account::Group(_) => Err(Error::not_found().into()),
+        Account::Group(_) | Account::Resource(_) => Err(Error::not_found().into()),
     }
 }
 
 pub fn group_account(object: &Object) -> Result<&GroupAccount> {
     match account_of(object)? {
         Account::Group(account) => Ok(account),
-        Account::User(_) => Err(Error::not_found().into()),
+        Account::User(_) | Account::Resource(_) => Err(Error::not_found().into()),
     }
 }
 

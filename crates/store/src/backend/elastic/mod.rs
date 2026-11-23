@@ -44,6 +44,23 @@ pub struct Hit {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct BulkResponse {
+    pub errors: bool,
+    #[serde(default)]
+    pub items: Vec<BulkItem>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BulkItem {
+    pub index: Option<BulkItemResult>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BulkItemResult {
+    pub error: Option<Value>,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct DeleteByQueryResponse {
     pub deleted: u64,
 }

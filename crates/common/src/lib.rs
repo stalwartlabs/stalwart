@@ -37,6 +37,11 @@ use crate::{
     network::security::BlockedIps,
     storage::metadata::MetadataViewerCache,
 };
+#[cfg(feature = "exchange")]
+use crate::{
+    cache::{exchange::ExchangeAccountCache, exchange_sessions::ExchangeSessions},
+    config::exchange::ExchangeConfig,
+};
 use ahash::AHashMap;
 use arc_swap::ArcSwap;
 use auth::oauth::config::OAuthConfig;
@@ -165,6 +170,16 @@ pub const KV_LOCK_SEARCH_INDEX: u8 = 17;
 pub const KV_OAUTH_CIMD: u8 = 18;
 pub const KV_RATE_LIMIT_CIMD: u8 = 19;
 pub const KV_KEY_LOOKUP: u8 = 20;
+pub const KV_LOCK_RESOURCE_BOOKING: u8 = 21;
+pub const KV_LOCK_CREATE: u8 = 22;
+#[cfg(feature = "exchange")]
+pub const KV_EXCHANGE_SESSION: u8 = 23;
+#[cfg(feature = "exchange")]
+pub const KV_LOCK_EXCHANGE_SESSION: u8 = 24;
+#[cfg(feature = "exchange")]
+pub const KV_EXCHANGE_SUBMIT: u8 = 25;
+#[cfg(feature = "exchange")]
+pub const KV_LOCK_EXCHANGE_SUBMIT: u8 = 26;
 
 #[derive(Clone)]
 pub struct Server {
@@ -203,6 +218,8 @@ pub struct Data {
 
     pub smtp_connectors: TlsConnectors,
     pub memory_budget: MemoryBudget,
+    #[cfg(feature = "exchange")]
+    pub exchange_sessions: ExchangeSessions,
 
     pub harvest_tasks: Arc<Semaphore>,
 }
@@ -236,6 +253,8 @@ pub struct Caches {
     pub events: Cache<u32, Arc<GroupwareResources>, SwapEviction>,
     pub scheduling: Cache<u32, Arc<GroupwareResources>, SwapEviction>,
     pub metadata_viewers: MetadataViewerCache,
+    #[cfg(feature = "exchange")]
+    pub exchange: Cache<u32, Arc<ExchangeAccountCache>>,
 
     pub emails: Cache<EmailAddress, EmailCache>,
     pub emails_negative: CacheWithTtl<EmailAddress, ()>,
@@ -639,6 +658,8 @@ pub struct Core {
     pub smtp: SmtpConfig,
     pub spam: SpamFilterConfig,
     pub groupware: GroupwareConfig,
+    #[cfg(feature = "exchange")]
+    pub exchange: ExchangeConfig,
     pub metadata: MetadataConfig,
     pub metrics: Metrics,
     pub blob: BlobConfig,

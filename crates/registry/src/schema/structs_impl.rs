@@ -17,6 +17,7 @@ impl ObjectImpl for Account {
         match self {
             Account::User(inner) => inner.validate(errors),
             Account::Group(inner) => inner.validate(errors),
+            Account::Resource(inner) => inner.validate(errors),
         }
     }
 
@@ -28,6 +29,10 @@ impl ObjectImpl for Account {
             }
             Account::Group(object) => {
                 i.typ(1);
+                object.index(i);
+            }
+            Account::Resource(object) => {
+                i.typ(2);
                 object.index(i);
             }
         }
@@ -51,6 +56,10 @@ impl Pickle for Account {
                 1u16.pickle(out);
                 inner.pickle(out);
             }
+            Account::Resource(inner) => {
+                2u16.pickle(out);
+                inner.pickle(out);
+            }
         }
     }
 
@@ -61,6 +70,7 @@ impl Pickle for Account {
         match u16::unpickle(stream)? {
             0 => Pickle::unpickle(stream).map(Account::User),
             1 => Pickle::unpickle(stream).map(Account::Group),
+            2 => Pickle::unpickle(stream).map(Account::Resource),
             _ => None,
         }
     }
@@ -87,6 +97,13 @@ impl IntoValue for Account {
                     .insert_unchecked(Property::Type, JmapValue::Str("Group".into()));
                 obj
             }
+            Account::Resource(obj) => {
+                let mut obj = obj.into_value_with(opts);
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("Resource".into()));
+                obj
+            }
         }
     }
 }
@@ -101,11 +118,13 @@ impl RegistryJsonPatch for Account {
             match object_type(&pointer, &value)? {
                 AccountType::User => *self = Account::User(Default::default()),
                 AccountType::Group => *self = Account::Group(Default::default()),
+                AccountType::Resource => *self = Account::Resource(Default::default()),
             }
         }
         match self {
             Account::User(inner) => inner.patch(pointer, value),
             Account::Group(inner) => inner.patch(pointer, value),
+            Account::Resource(inner) => inner.patch(pointer, value),
         }
     }
 }
@@ -115,6 +134,7 @@ impl Account {
         match self {
             Account::User(_) => AccountType::User,
             Account::Group(_) => AccountType::Group,
+            Account::Resource(_) => AccountType::Resource,
         }
     }
 }
@@ -6740,6 +6760,138 @@ impl RegistryJsonPropertyPatch for Authentication {
     }
 }
 
+impl AutomaticBooking {
+    fn validate(&self, _: &mut Vec<ValidationError>) -> bool {
+        true
+    }
+}
+
+impl Pickle for AutomaticBooking {
+    fn pickle(&self, out: &mut Vec<u8>) {
+        let mut bitmap = 0u64;
+        if self.allow_conflicts {
+            bitmap |= 1 << 0;
+        }
+        if self.allow_recurring {
+            bitmap |= 1 << 1;
+        }
+        if self.allow_external {
+            bitmap |= 1 << 2;
+        }
+        if self.booking_window.is_some() {
+            bitmap |= 1 << 3;
+        }
+        if self.max_duration.is_some() {
+            bitmap |= 1 << 4;
+        }
+        let block = crate::pickle::begin_block(out, 5, 5, bitmap);
+        if let Some(value) = &self.booking_window {
+            value.pickle(out);
+        }
+        if let Some(value) = &self.max_duration {
+            value.pickle(out);
+        }
+        crate::pickle::end_block(out, block);
+    }
+
+    fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
+        let block = stream.open_block()?;
+        let field0: bool = if block.has(0) { block.flag(0) } else { false };
+        let field1: bool = if block.has(1) { block.flag(1) } else { true };
+        let field2: bool = if block.has(2) { block.flag(2) } else { false };
+        let field3: Option<Duration> = if block.has(3) {
+            if block.flag(3) {
+                Some(Pickle::unpickle(stream)?)
+            } else {
+                None
+            }
+        } else {
+            Default::default()
+        };
+        let field4: Option<Duration> = if block.has(4) {
+            if block.flag(4) {
+                Some(Pickle::unpickle(stream)?)
+            } else {
+                None
+            }
+        } else {
+            Default::default()
+        };
+        stream.close_block(block);
+        Some(Self {
+            allow_conflicts: field0,
+            allow_recurring: field1,
+            allow_external: field2,
+            booking_window: field3,
+            max_duration: field4,
+        })
+    }
+}
+
+impl Default for AutomaticBooking {
+    fn default() -> Self {
+        Self {
+            allow_conflicts: false,
+            allow_recurring: true,
+            allow_external: false,
+            booking_window: Default::default(),
+            max_duration: Default::default(),
+        }
+    }
+}
+
+impl IntoValue for AutomaticBooking {
+    fn into_value(self) -> JmapValue<'static> {
+        self.into_value_with(ValueOptions::default())
+    }
+
+    fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
+        let mut map = jmap_tools::Map::with_capacity(7);
+        map.insert_unchecked(
+            Property::AllowConflicts,
+            self.allow_conflicts.into_value_with(opts),
+        );
+        map.insert_unchecked(
+            Property::AllowRecurring,
+            self.allow_recurring.into_value_with(opts),
+        );
+        map.insert_unchecked(
+            Property::AllowExternal,
+            self.allow_external.into_value_with(opts),
+        );
+        map.insert_unchecked(
+            Property::BookingWindow,
+            self.booking_window.into_value_with(opts),
+        );
+        map.insert_unchecked(
+            Property::MaxDuration,
+            self.max_duration.into_value_with(opts),
+        );
+        JmapValue::Object(map)
+    }
+}
+
+impl RegistryJsonPropertyPatch for AutomaticBooking {
+    fn patch_property<'x>(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        match pointer.next_property() {
+            Some(Property::AllowConflicts) => self.allow_conflicts.patch(pointer, value),
+            Some(Property::AllowRecurring) => self.allow_recurring.patch(pointer, value),
+            Some(Property::AllowExternal) => self.allow_external.patch(pointer, value),
+            Some(Property::BookingWindow) => self.booking_window.patch(pointer, value),
+            Some(Property::MaxDuration) => self.max_duration.patch(pointer, value),
+            Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
+                property: Property::Type,
+                value,
+            }),
+            _ => Err(PatchError::new(pointer, "Invalid property")),
+        }
+    }
+}
+
 impl AzureAuth {
     fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
         match self {
@@ -7618,6 +7770,7 @@ impl ObjectImpl for BlobStore {
             BlobStore::Sharded(inner) => inner.validate_inline_secrets(errors),
             BlobStore::S3(inner) => inner.validate_inline_secrets(errors),
             BlobStore::Azure(inner) => inner.validate_inline_secrets(errors),
+            BlobStore::FoundationDb(inner) => inner.validate_inline_secrets(errors),
             BlobStore::PostgreSql(inner) => inner.validate_inline_secrets(errors),
             BlobStore::MySql(inner) => inner.validate_inline_secrets(errors),
             _ => {}
@@ -7849,6 +8002,7 @@ impl BlobStoreBase {
         match self {
             BlobStoreBase::S3(inner) => inner.validate_inline_secrets(errors),
             BlobStoreBase::Azure(inner) => inner.validate_inline_secrets(errors),
+            BlobStoreBase::FoundationDb(inner) => inner.validate_inline_secrets(errors),
             BlobStoreBase::PostgreSql(inner) => inner.validate_inline_secrets(errors),
             BlobStoreBase::MySql(inner) => inner.validate_inline_secrets(errors),
             _ => {}
@@ -8177,6 +8331,7 @@ impl BlobSwapStore {
         match self {
             BlobSwapStore::S3(inner) => inner.validate_inline_secrets(errors),
             BlobSwapStore::Azure(inner) => inner.validate_inline_secrets(errors),
+            BlobSwapStore::FoundationDb(inner) => inner.validate_inline_secrets(errors),
             BlobSwapStore::PostgreSql(inner) => inner.validate_inline_secrets(errors),
             BlobSwapStore::MySql(inner) => inner.validate_inline_secrets(errors),
             _ => {}
@@ -8462,6 +8617,68 @@ impl RegistryJsonPropertyPatch for BlockedIp {
     }
 }
 
+impl ObjectImpl for BlockedSender {
+    const FLAGS: u64 = OBJ_FILTER_ACCOUNT | OBJ_NOT_STORED | OBJ_NO_UPDATE;
+    const VERSION: u8 = 0;
+    const OBJECT: ObjectType = ObjectType::BlockedSender;
+
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        let neb = errors.len();
+        let value = &self.address;
+        if value.is_empty() {
+            errors.push(ValidationError::required(Property::Address));
+        }
+        if value.len() > 255 {
+            errors.push(ValidationError::max_length(Property::Address, 255));
+        }
+        errors.len() == neb
+    }
+
+    fn index<'x>(&'x self, _: &mut IndexBuilder<'x>) {}
+}
+
+impl Default for BlockedSender {
+    fn default() -> Self {
+        Self {
+            address: Default::default(),
+        }
+    }
+}
+
+impl IntoValue for BlockedSender {
+    fn into_value(self) -> JmapValue<'static> {
+        self.into_value_with(ValueOptions::default())
+    }
+
+    fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
+        let mut map = jmap_tools::Map::with_capacity(3);
+        map.insert_unchecked(Property::Address, self.address.into_value_with(opts));
+        JmapValue::Object(map)
+    }
+}
+
+impl RegistryJsonPropertyPatch for BlockedSender {
+    fn patch_property<'x>(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        match pointer.next_property() {
+            Some(Property::Address) => self.address.patch(
+                pointer
+                    .assert_read_only()?
+                    .with_validators(&[StringValidator::Trim, StringValidator::Lowercase]),
+                value,
+            ),
+            Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
+                property: Property::Type,
+                value,
+            }),
+            _ => Err(PatchError::new(pointer, "Invalid property")),
+        }
+    }
+}
+
 impl ObjectImpl for Bootstrap {
     const FLAGS: u64 = OBJ_SINGLETON | OBJ_NOT_STORED;
     const VERSION: u8 = 0;
@@ -8667,6 +8884,10 @@ impl ObjectImpl for Cache {
         if *value < 2048 {
             errors.push(ValidationError::min_value(Property::Files, 2048));
         }
+        let value = &self.exchange;
+        if *value < 2048 {
+            errors.push(ValidationError::min_value(Property::Exchange, 2048));
+        }
         let value = &self.http_auth;
         if *value < 2048 {
             errors.push(ValidationError::min_value(Property::HttpAuth, 2048));
@@ -8761,7 +8982,7 @@ impl ObjectImpl for Cache {
 
 impl Pickle for Cache {
     fn pickle(&self, out: &mut Vec<u8>) {
-        let block = crate::pickle::begin_block(out, 34, 0, 0);
+        let block = crate::pickle::begin_block(out, 35, 0, 0);
         self.access_tokens.pickle(out);
         self.contacts.pickle(out);
         self.dns_ipv4.pickle(out);
@@ -8806,6 +9027,7 @@ impl Pickle for Cache {
         self.directory_recipients_ttl.pickle(out);
         self.swap.pickle(out);
         self.external_public_keys.pickle(out);
+        self.exchange.pickle(out);
         crate::pickle::end_block(out, block);
     }
 
@@ -8994,6 +9216,11 @@ impl Pickle for Cache {
         } else {
             16777216
         };
+        let field34: u64 = if block.has(34) {
+            Pickle::unpickle(stream)?
+        } else {
+            33554432
+        };
         stream.close_block(block);
         Some(Self {
             access_tokens: field0,
@@ -9035,6 +9262,7 @@ impl Pickle for Cache {
             directory_recipients_ttl: field31,
             swap: field32,
             external_public_keys: field33,
+            exchange: field34,
         })
     }
 }
@@ -9055,6 +9283,7 @@ impl Default for Cache {
             events: 50331648,
             scheduling: 6291456,
             files: 25165824,
+            exchange: 33554432,
             http_auth: 2097152,
             messages: 335544320,
             messages_large: 536870912,
@@ -9091,7 +9320,7 @@ impl IntoValue for Cache {
     }
 
     fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
-        let mut map = jmap_tools::Map::with_capacity(36);
+        let mut map = jmap_tools::Map::with_capacity(37);
         map.insert_unchecked(
             Property::AccessTokens,
             self.access_tokens.into_value_with(opts),
@@ -9108,6 +9337,7 @@ impl IntoValue for Cache {
         map.insert_unchecked(Property::Events, self.events.into_value_with(opts));
         map.insert_unchecked(Property::Scheduling, self.scheduling.into_value_with(opts));
         map.insert_unchecked(Property::Files, self.files.into_value_with(opts));
+        map.insert_unchecked(Property::Exchange, self.exchange.into_value_with(opts));
         map.insert_unchecked(Property::HttpAuth, self.http_auth.into_value_with(opts));
         map.insert_unchecked(Property::Messages, self.messages.into_value_with(opts));
         map.insert_unchecked(
@@ -9200,6 +9430,7 @@ impl RegistryJsonPropertyPatch for Cache {
             Some(Property::Events) => self.events.patch(pointer, value),
             Some(Property::Scheduling) => self.scheduling.patch(pointer, value),
             Some(Property::Files) => self.files.patch(pointer, value),
+            Some(Property::Exchange) => self.exchange.patch(pointer, value),
             Some(Property::HttpAuth) => self.http_auth.patch(pointer, value),
             Some(Property::Messages) => self.messages.patch(pointer, value),
             Some(Property::MessagesLarge) => self.messages_large.patch(pointer, value),
@@ -9460,7 +9691,10 @@ impl Pickle for Calendar {
         if self.availability_rate_limit.is_some() {
             bitmap |= 1 << 6;
         }
-        let block = crate::pickle::begin_block(out, 14, 7, bitmap);
+        if self.share_free_busy {
+            bitmap |= 1 << 7;
+        }
+        let block = crate::pickle::begin_block(out, 15, 8, bitmap);
         if let Some(value) = &self.default_display_name {
             value.pickle(out);
         }
@@ -9598,6 +9832,7 @@ impl Pickle for Calendar {
         } else {
             5242880
         };
+        let field14: bool = if block.has(14) { block.flag(7) } else { true };
         stream.close_block(block);
         Some(Self {
             default_display_name: field0,
@@ -9614,6 +9849,7 @@ impl Pickle for Calendar {
             max_availability_duration: field11,
             availability_rate_limit: field12,
             max_attachments_size: field13,
+            share_free_busy: field14,
         })
     }
 }
@@ -9638,6 +9874,7 @@ impl Default for Calendar {
                 period: Duration::from_millis(60000),
             }),
             max_attachments_size: 5242880,
+            share_free_busy: true,
         }
     }
 }
@@ -9648,7 +9885,7 @@ impl IntoValue for Calendar {
     }
 
     fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
-        let mut map = jmap_tools::Map::with_capacity(16);
+        let mut map = jmap_tools::Map::with_capacity(17);
         map.insert_unchecked(
             Property::DefaultDisplayName,
             self.default_display_name.into_value_with(opts),
@@ -9702,6 +9939,10 @@ impl IntoValue for Calendar {
             Property::MaxAttachmentsSize,
             self.max_attachments_size.into_value_with(opts),
         );
+        map.insert_unchecked(
+            Property::ShareFreeBusy,
+            self.share_free_busy.into_value_with(opts),
+        );
         JmapValue::Object(map)
     }
 }
@@ -9745,6 +9986,7 @@ impl RegistryJsonPropertyPatch for Calendar {
                 self.availability_rate_limit.patch(pointer, value)
             }
             Some(Property::MaxAttachmentsSize) => self.max_attachments_size.patch(pointer, value),
+            Some(Property::ShareFreeBusy) => self.share_free_busy.patch(pointer, value),
             Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
                 property: Property::Type,
                 value,
@@ -10228,6 +10470,89 @@ impl RegistryJsonPropertyPatch for CalendarScheduling {
             #[cfg(feature = "enterprise")]
             Some(Property::HttpRsvpTemplate) => self.http_rsvp_template.patch(pointer, value),
             // SPDX-SnippetEnd
+            Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
+                property: Property::Type,
+                value,
+            }),
+            _ => Err(PatchError::new(pointer, "Invalid property")),
+        }
+    }
+}
+
+impl ObjectImpl for CalendarSettings {
+    const FLAGS: u64 = OBJ_SINGLETON | OBJ_FILTER_ACCOUNT;
+    const VERSION: u8 = 0;
+    const OBJECT: ObjectType = ObjectType::CalendarSettings;
+
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        let neb = errors.len();
+        let value = &self.working_hours;
+        value.validate(errors);
+        errors.len() == neb
+    }
+
+    fn index<'x>(&'x self, _: &mut IndexBuilder<'x>) {}
+}
+
+impl Pickle for CalendarSettings {
+    fn pickle(&self, out: &mut Vec<u8>) {
+        let block = crate::pickle::begin_block(out, 1, 0, 0);
+        self.working_hours.pickle(out);
+        crate::pickle::end_block(out, block);
+    }
+
+    fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
+        if stream.version() > Self::VERSION {
+            return None;
+        }
+        let block = stream.open_block()?;
+        let field0: WorkingHours = if block.has(0) {
+            Pickle::unpickle(stream)?
+        } else {
+            WorkingHours {
+                ..Default::default()
+            }
+        };
+        stream.close_block(block);
+        Some(Self {
+            working_hours: field0,
+        })
+    }
+}
+
+impl Default for CalendarSettings {
+    fn default() -> Self {
+        Self {
+            working_hours: WorkingHours {
+                ..Default::default()
+            },
+        }
+    }
+}
+
+impl IntoValue for CalendarSettings {
+    fn into_value(self) -> JmapValue<'static> {
+        self.into_value_with(ValueOptions::default())
+    }
+
+    fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
+        let mut map = jmap_tools::Map::with_capacity(3);
+        map.insert_unchecked(
+            Property::WorkingHours,
+            self.working_hours.into_value_with(opts),
+        );
+        JmapValue::Object(map)
+    }
+}
+
+impl RegistryJsonPropertyPatch for CalendarSettings {
+    fn patch_property<'x>(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        match pointer.next_property() {
+            Some(Property::WorkingHours) => self.working_hours.patch(pointer, value),
             Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
                 property: Property::Type,
                 value,
@@ -12676,6 +13001,7 @@ impl ObjectImpl for DataStore {
     #[cfg(feature = "enterprise")]
     fn validate_inline_secrets(&self, errors: &mut Vec<ValidationError>) {
         match self {
+            DataStore::FoundationDb(inner) => inner.validate_inline_secrets(errors),
             DataStore::PostgreSql(inner) => inner.validate_inline_secrets(errors),
             DataStore::MySql(inner) => inner.validate_inline_secrets(errors),
             _ => {}
@@ -16977,7 +17303,10 @@ impl Pickle for DnsManagementProperties {
         if self.origin.is_some() {
             bitmap |= 1 << 0;
         }
-        let block = crate::pickle::begin_block(out, 3, 1, bitmap);
+        if self.allow_subdomain_signing {
+            bitmap |= 1 << 1;
+        }
+        let block = crate::pickle::begin_block(out, 4, 2, bitmap);
         self.dns_server_id.pickle(out);
         if let Some(value) = &self.origin {
             value.pickle(out);
@@ -17019,11 +17348,13 @@ impl Pickle for DnsManagementProperties {
                 DnsRecordType::AutoDiscover,
             ])
         };
+        let field3: bool = if block.has(3) { block.flag(1) } else { true };
         stream.close_block(block);
         Some(Self {
             dns_server_id: field0,
             origin: field1,
             publish_records: field2,
+            allow_subdomain_signing: field3,
         })
     }
 }
@@ -17046,6 +17377,7 @@ impl Default for DnsManagementProperties {
                 DnsRecordType::AutoConfigLegacy,
                 DnsRecordType::AutoDiscover,
             ]),
+            allow_subdomain_signing: true,
         }
     }
 }
@@ -17056,7 +17388,7 @@ impl IntoValue for DnsManagementProperties {
     }
 
     fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
-        let mut map = jmap_tools::Map::with_capacity(5);
+        let mut map = jmap_tools::Map::with_capacity(6);
         map.insert_unchecked(
             Property::DnsServerId,
             self.dns_server_id.into_value_with(opts),
@@ -17065,6 +17397,10 @@ impl IntoValue for DnsManagementProperties {
         map.insert_unchecked(
             Property::PublishRecords,
             self.publish_records.into_value_with(opts),
+        );
+        map.insert_unchecked(
+            Property::AllowSubdomainSigning,
+            self.allow_subdomain_signing.into_value_with(opts),
         );
         JmapValue::Object(map)
     }
@@ -17082,6 +17418,9 @@ impl RegistryJsonPropertyPatch for DnsManagementProperties {
                 .origin
                 .patch(pointer.with_validators(&[StringValidator::Trim]), value),
             Some(Property::PublishRecords) => self.publish_records.patch(pointer, value),
+            Some(Property::AllowSubdomainSigning) => {
+                self.allow_subdomain_signing.patch(pointer, value)
+            }
             Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
                 property: Property::Type,
                 value,
@@ -36087,6 +36426,159 @@ impl RegistryJsonPropertyPatch for EventTracingLevel {
     }
 }
 
+impl ObjectImpl for Exchange {
+    const FLAGS: u64 = OBJ_SINGLETON;
+    const VERSION: u8 = 0;
+    const OBJECT: ObjectType = ObjectType::Exchange;
+
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        let neb = errors.len();
+        let value = &self.max_devices;
+        if *value < 1 {
+            errors.push(ValidationError::min_value(Property::MaxDevices, 1));
+        }
+        if *value > 1024 {
+            errors.push(ValidationError::max_value(Property::MaxDevices, 1024));
+        }
+        let value = &self.max_heartbeat;
+        if !value.is_valid() {
+            errors.push(ValidationError::invalid(Property::MaxHeartbeat, value));
+        }
+        if *value < Duration::from_millis(60000) {
+            errors.push(ValidationError::min_value(Property::MaxHeartbeat, 60000));
+        }
+        if *value > Duration::from_millis(3540000) {
+            errors.push(ValidationError::max_value(Property::MaxHeartbeat, 3540000));
+        }
+        let value = &self.max_object_size;
+        if *value < 1024 {
+            errors.push(ValidationError::min_value(Property::MaxObjectSize, 1024));
+        }
+        errors.len() == neb
+    }
+
+    fn index<'x>(&'x self, _: &mut IndexBuilder<'x>) {}
+}
+
+impl Pickle for Exchange {
+    fn pickle(&self, out: &mut Vec<u8>) {
+        let mut bitmap = 0u64;
+        if self.enable {
+            bitmap |= 1 << 0;
+        }
+        let block = crate::pickle::begin_block(out, 6, 1, bitmap);
+        self.ews_version.pickle(out);
+        self.max_request_size.pickle(out);
+        self.max_devices.pickle(out);
+        self.max_heartbeat.pickle(out);
+        self.max_object_size.pickle(out);
+        crate::pickle::end_block(out, block);
+    }
+
+    fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
+        if stream.version() > Self::VERSION {
+            return None;
+        }
+        let block = stream.open_block()?;
+        let field0: bool = if block.has(0) { block.flag(0) } else { false };
+        let field1: EwsVersion = if block.has(1) {
+            Pickle::unpickle(stream)?
+        } else {
+            EwsVersion::Exchange2016
+        };
+        let field2: u64 = if block.has(2) {
+            Pickle::unpickle(stream)?
+        } else {
+            52428800
+        };
+        let field3: u64 = if block.has(3) {
+            Pickle::unpickle(stream)?
+        } else {
+            16u64
+        };
+        let field4: Duration = if block.has(4) {
+            Pickle::unpickle(stream)?
+        } else {
+            Duration::from_millis(3540000)
+        };
+        let field5: u64 = if block.has(5) {
+            Pickle::unpickle(stream)?
+        } else {
+            262144
+        };
+        stream.close_block(block);
+        Some(Self {
+            enable: field0,
+            ews_version: field1,
+            max_request_size: field2,
+            max_devices: field3,
+            max_heartbeat: field4,
+            max_object_size: field5,
+        })
+    }
+}
+
+impl Default for Exchange {
+    fn default() -> Self {
+        Self {
+            enable: false,
+            ews_version: EwsVersion::Exchange2016,
+            max_request_size: 52428800,
+            max_devices: 16u64,
+            max_heartbeat: Duration::from_millis(3540000),
+            max_object_size: 262144,
+        }
+    }
+}
+
+impl IntoValue for Exchange {
+    fn into_value(self) -> JmapValue<'static> {
+        self.into_value_with(ValueOptions::default())
+    }
+
+    fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
+        let mut map = jmap_tools::Map::with_capacity(8);
+        map.insert_unchecked(Property::Enable, self.enable.into_value_with(opts));
+        map.insert_unchecked(Property::EwsVersion, self.ews_version.into_value_with(opts));
+        map.insert_unchecked(
+            Property::MaxRequestSize,
+            self.max_request_size.into_value_with(opts),
+        );
+        map.insert_unchecked(Property::MaxDevices, self.max_devices.into_value_with(opts));
+        map.insert_unchecked(
+            Property::MaxHeartbeat,
+            self.max_heartbeat.into_value_with(opts),
+        );
+        map.insert_unchecked(
+            Property::MaxObjectSize,
+            self.max_object_size.into_value_with(opts),
+        );
+        JmapValue::Object(map)
+    }
+}
+
+impl RegistryJsonPropertyPatch for Exchange {
+    fn patch_property<'x>(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        match pointer.next_property() {
+            Some(Property::Enable) => self.enable.patch(pointer, value),
+            Some(Property::EwsVersion) => self.ews_version.patch(pointer, value),
+            Some(Property::MaxRequestSize) => self.max_request_size.patch(pointer, value),
+            Some(Property::MaxDevices) => self.max_devices.patch(pointer, value),
+            Some(Property::MaxHeartbeat) => self.max_heartbeat.patch(pointer, value),
+            Some(Property::MaxObjectSize) => self.max_object_size.patch(pointer, value),
+            Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
+                property: Property::Type,
+                value,
+            }),
+            _ => Err(PatchError::new(pointer, "Invalid property")),
+        }
+    }
+}
+
 impl Expression {
     fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
         let neb = errors.len();
@@ -37085,14 +37577,305 @@ impl RegistryJsonPropertyPatch for FileSystemStore {
     }
 }
 
+impl FoundationDbCluster {
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        match self {
+            FoundationDbCluster::File(inner) => inner.validate(errors),
+            FoundationDbCluster::Manual(inner) => inner.validate(errors),
+        }
+    }
+}
+
+impl Default for FoundationDbCluster {
+    fn default() -> Self {
+        FoundationDbCluster::File(Default::default())
+    }
+}
+
+impl Pickle for FoundationDbCluster {
+    fn pickle(&self, out: &mut Vec<u8>) {
+        match self {
+            FoundationDbCluster::File(inner) => {
+                0u16.pickle(out);
+                inner.pickle(out);
+            }
+            FoundationDbCluster::Manual(inner) => {
+                1u16.pickle(out);
+                inner.pickle(out);
+            }
+        }
+    }
+
+    fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
+        match u16::unpickle(stream)? {
+            0 => Pickle::unpickle(stream).map(FoundationDbCluster::File),
+            1 => Pickle::unpickle(stream).map(FoundationDbCluster::Manual),
+            _ => None,
+        }
+    }
+}
+
+impl IntoValue for FoundationDbCluster {
+    fn into_value(self) -> JmapValue<'static> {
+        self.into_value_with(ValueOptions::default())
+    }
+
+    fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
+        match self {
+            FoundationDbCluster::File(obj) => {
+                let mut obj = obj.into_value_with(opts);
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("File".into()));
+                obj
+            }
+            FoundationDbCluster::Manual(obj) => {
+                let mut obj = obj.into_value_with(opts);
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("Manual".into()));
+                obj
+            }
+        }
+    }
+}
+
+impl RegistryJsonPatch for FoundationDbCluster {
+    fn patch<'x>(
+        &mut self,
+        pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        if !pointer.has_next() {
+            match object_type(&pointer, &value)? {
+                FoundationDbClusterType::File => {
+                    *self = FoundationDbCluster::File(Default::default())
+                }
+                FoundationDbClusterType::Manual => {
+                    *self = FoundationDbCluster::Manual(Default::default())
+                }
+            }
+        }
+        match self {
+            FoundationDbCluster::File(inner) => inner.patch(pointer, value),
+            FoundationDbCluster::Manual(inner) => inner.patch(pointer, value),
+        }
+    }
+}
+
+impl FoundationDbCluster {
+    pub fn object_type(&self) -> FoundationDbClusterType {
+        match self {
+            FoundationDbCluster::File(_) => FoundationDbClusterType::File,
+            FoundationDbCluster::Manual(_) => FoundationDbClusterType::Manual,
+        }
+    }
+}
+
+impl FoundationDbClusterFile {
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        let neb = errors.len();
+        if let Some(value) = &self.path {
+            if value.is_empty() {
+                errors.push(ValidationError::required(Property::Path));
+            }
+        }
+        errors.len() == neb
+    }
+}
+
+impl Pickle for FoundationDbClusterFile {
+    fn pickle(&self, out: &mut Vec<u8>) {
+        let mut bitmap = 0u64;
+        if self.path.is_some() {
+            bitmap |= 1 << 0;
+        }
+        let block = crate::pickle::begin_block(out, 1, 1, bitmap);
+        if let Some(value) = &self.path {
+            value.pickle(out);
+        }
+        crate::pickle::end_block(out, block);
+    }
+
+    fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
+        let block = stream.open_block()?;
+        let field0: Option<String> = if block.has(0) {
+            if block.flag(0) {
+                Some(Pickle::unpickle(stream)?)
+            } else {
+                None
+            }
+        } else {
+            Default::default()
+        };
+        stream.close_block(block);
+        Some(Self { path: field0 })
+    }
+}
+
+impl Default for FoundationDbClusterFile {
+    fn default() -> Self {
+        Self {
+            path: Default::default(),
+        }
+    }
+}
+
+impl IntoValue for FoundationDbClusterFile {
+    fn into_value(self) -> JmapValue<'static> {
+        self.into_value_with(ValueOptions::default())
+    }
+
+    fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
+        let mut map = jmap_tools::Map::with_capacity(3);
+        map.insert_unchecked(Property::Path, self.path.into_value_with(opts));
+        JmapValue::Object(map)
+    }
+}
+
+impl RegistryJsonPropertyPatch for FoundationDbClusterFile {
+    fn patch_property<'x>(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        match pointer.next_property() {
+            Some(Property::Path) => self
+                .path
+                .patch(pointer.with_validators(&[StringValidator::Trim]), value),
+            Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
+                property: Property::Type,
+                value,
+            }),
+            _ => Err(PatchError::new(pointer, "Invalid property")),
+        }
+    }
+}
+
+impl FoundationDbClusterManual {
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        let neb = errors.len();
+        let value = &self.description;
+        if value.is_empty() {
+            errors.push(ValidationError::required(Property::Description));
+        }
+        let value = &self.id;
+        if value.is_empty() {
+            errors.push(ValidationError::required(Property::Id));
+        }
+        let value = &self.coordinators;
+        for value in value.iter() {
+            if value.is_empty() {
+                errors.push(ValidationError::required(Property::Coordinators));
+            }
+        }
+        if value.len() < 1 {
+            errors.push(ValidationError::min_items(Property::Coordinators, 1));
+        }
+        if value.len() > 64 {
+            errors.push(ValidationError::max_items(Property::Coordinators, 64));
+        }
+        errors.len() == neb
+    }
+}
+
+impl Pickle for FoundationDbClusterManual {
+    fn pickle(&self, out: &mut Vec<u8>) {
+        let block = crate::pickle::begin_block(out, 3, 0, 0);
+        self.description.pickle(out);
+        self.id.pickle(out);
+        self.coordinators.pickle(out);
+        crate::pickle::end_block(out, block);
+    }
+
+    fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
+        let block = stream.open_block()?;
+        let field0: String = if block.has(0) {
+            Pickle::unpickle(stream)?
+        } else {
+            Default::default()
+        };
+        let field1: String = if block.has(1) {
+            Pickle::unpickle(stream)?
+        } else {
+            Default::default()
+        };
+        let field2: Map<String> = if block.has(2) {
+            Pickle::unpickle(stream)?
+        } else {
+            Default::default()
+        };
+        stream.close_block(block);
+        Some(Self {
+            description: field0,
+            id: field1,
+            coordinators: field2,
+        })
+    }
+}
+
+impl Default for FoundationDbClusterManual {
+    fn default() -> Self {
+        Self {
+            description: Default::default(),
+            id: Default::default(),
+            coordinators: Default::default(),
+        }
+    }
+}
+
+impl IntoValue for FoundationDbClusterManual {
+    fn into_value(self) -> JmapValue<'static> {
+        self.into_value_with(ValueOptions::default())
+    }
+
+    fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
+        let mut map = jmap_tools::Map::with_capacity(5);
+        map.insert_unchecked(
+            Property::Description,
+            self.description.into_value_with(opts),
+        );
+        map.insert_unchecked(Property::Id, self.id.into_value_with(opts));
+        map.insert_unchecked(
+            Property::Coordinators,
+            self.coordinators.into_value_with(opts),
+        );
+        JmapValue::Object(map)
+    }
+}
+
+impl RegistryJsonPropertyPatch for FoundationDbClusterManual {
+    fn patch_property<'x>(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        match pointer.next_property() {
+            Some(Property::Description) => self
+                .description
+                .patch(pointer.with_validators(&[StringValidator::Trim]), value),
+            Some(Property::Id) => self
+                .id
+                .patch(pointer.with_validators(&[StringValidator::Trim]), value),
+            Some(Property::Coordinators) => self
+                .coordinators
+                .patch(pointer.with_validators(&[StringValidator::Trim]), value),
+            Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
+                property: Property::Type,
+                value,
+            }),
+            _ => Err(PatchError::new(pointer, "Invalid property")),
+        }
+    }
+}
+
 impl FoundationDbStore {
     fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
         let neb = errors.len();
-        if let Some(value) = &self.cluster_file {
-            if value.is_empty() {
-                errors.push(ValidationError::required(Property::ClusterFile));
-            }
-        }
+        let value = &self.cluster;
+        value.validate(errors);
+        let value = &self.tls;
+        value.validate(errors);
         if let Some(value) = &self.datacenter_id {
             if value.is_empty() {
                 errors.push(ValidationError::required(Property::DatacenterId));
@@ -37119,14 +37902,21 @@ impl FoundationDbStore {
         }
         errors.len() == neb
     }
+
+    // SPDX-SnippetBegin
+    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+    // SPDX-License-Identifier: LicenseRef-SEL
+    #[cfg(feature = "enterprise")]
+    fn validate_inline_secrets(&self, errors: &mut Vec<ValidationError>) {
+        self.tls.validate_inline_secrets(errors);
+    }
+
+    // SPDX-SnippetEnd
 }
 
 impl Pickle for FoundationDbStore {
     fn pickle(&self, out: &mut Vec<u8>) {
         let mut bitmap = 0u64;
-        if self.cluster_file.is_some() {
-            bitmap |= 1 << 0;
-        }
         if self.datacenter_id.is_some() {
             bitmap |= 1 << 1;
         }
@@ -37142,10 +37932,7 @@ impl Pickle for FoundationDbStore {
         if self.transaction_timeout.is_some() {
             bitmap |= 1 << 5;
         }
-        let block = crate::pickle::begin_block(out, 6, 6, bitmap);
-        if let Some(value) = &self.cluster_file {
-            value.pickle(out);
-        }
+        let block = crate::pickle::begin_block(out, 9, 6, bitmap);
         if let Some(value) = &self.datacenter_id {
             value.pickle(out);
         }
@@ -37161,20 +37948,17 @@ impl Pickle for FoundationDbStore {
         if let Some(value) = &self.transaction_timeout {
             value.pickle(out);
         }
+        self.cluster.pickle(out);
+        self.tls.pickle(out);
+        self.protocol.pickle(out);
         crate::pickle::end_block(out, block);
     }
 
     fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
         let block = stream.open_block()?;
-        let field0: Option<String> = if block.has(0) {
-            if block.flag(0) {
-                Some(Pickle::unpickle(stream)?)
-            } else {
-                None
-            }
-        } else {
-            Default::default()
-        };
+        if block.has(0) && block.flag(0) {
+            let _: String = Pickle::unpickle(stream)?;
+        }
         let field1: Option<String> = if block.has(1) {
             if block.flag(1) {
                 Some(Pickle::unpickle(stream)?)
@@ -37220,14 +38004,31 @@ impl Pickle for FoundationDbStore {
         } else {
             Default::default()
         };
+        let field6: FoundationDbCluster = if block.has(6) {
+            Pickle::unpickle(stream)?
+        } else {
+            FoundationDbCluster::File(Default::default())
+        };
+        let field7: FoundationDbTls = if block.has(7) {
+            Pickle::unpickle(stream)?
+        } else {
+            FoundationDbTls::Default
+        };
+        let field8: FoundationDbProtocol = if block.has(8) {
+            Pickle::unpickle(stream)?
+        } else {
+            FoundationDbProtocol::Negotiate
+        };
         stream.close_block(block);
         Some(Self {
-            cluster_file: field0,
             datacenter_id: field1,
             machine_id: field2,
             transaction_retry_delay: field3,
             transaction_retry_limit: field4,
             transaction_timeout: field5,
+            cluster: field6,
+            tls: field7,
+            protocol: field8,
         })
     }
 }
@@ -37235,7 +38036,9 @@ impl Pickle for FoundationDbStore {
 impl Default for FoundationDbStore {
     fn default() -> Self {
         Self {
-            cluster_file: Default::default(),
+            cluster: FoundationDbCluster::File(Default::default()),
+            tls: FoundationDbTls::Default,
+            protocol: FoundationDbProtocol::Negotiate,
             datacenter_id: Default::default(),
             machine_id: Default::default(),
             transaction_retry_delay: Default::default(),
@@ -37251,11 +38054,10 @@ impl IntoValue for FoundationDbStore {
     }
 
     fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
-        let mut map = jmap_tools::Map::with_capacity(8);
-        map.insert_unchecked(
-            Property::ClusterFile,
-            self.cluster_file.into_value_with(opts),
-        );
+        let mut map = jmap_tools::Map::with_capacity(10);
+        map.insert_unchecked(Property::Cluster, self.cluster.into_value_with(opts));
+        map.insert_unchecked(Property::Tls, self.tls.into_value_with(opts));
+        map.insert_unchecked(Property::Protocol, self.protocol.into_value_with(opts));
         map.insert_unchecked(
             Property::DatacenterId,
             self.datacenter_id.into_value_with(opts),
@@ -37284,9 +38086,12 @@ impl RegistryJsonPropertyPatch for FoundationDbStore {
         value: JmapValue<'x>,
     ) -> PatchResult<'x> {
         match pointer.next_property() {
-            Some(Property::ClusterFile) => self
-                .cluster_file
-                .patch(pointer.with_validators(&[StringValidator::Trim]), value),
+            Some(Property::Cluster) => self.cluster.patch(pointer, value),
+            Some(Property::Tls) => self.tls.patch(pointer, value),
+            Some(Property::Protocol) => self.protocol.patch(pointer, value),
+            Some(property @ Property::ClusterFile) => {
+                Ok(MaybeUnpatched::Unpatched { property, value })
+            }
             Some(Property::DatacenterId) => self
                 .datacenter_id
                 .patch(pointer.with_validators(&[StringValidator::Trim]), value),
@@ -37300,6 +38105,280 @@ impl RegistryJsonPropertyPatch for FoundationDbStore {
                 self.transaction_retry_limit.patch(pointer, value)
             }
             Some(Property::TransactionTimeout) => self.transaction_timeout.patch(pointer, value),
+            Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
+                property: Property::Type,
+                value,
+            }),
+            _ => Err(PatchError::new(pointer, "Invalid property")),
+        }
+    }
+}
+
+impl FoundationDbTls {
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        match self {
+            FoundationDbTls::Default => true,
+            FoundationDbTls::Manual(inner) => inner.validate(errors),
+        }
+    }
+
+    // SPDX-SnippetBegin
+    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+    // SPDX-License-Identifier: LicenseRef-SEL
+    #[cfg(feature = "enterprise")]
+    fn validate_inline_secrets(&self, errors: &mut Vec<ValidationError>) {
+        if let FoundationDbTls::Manual(inner) = self {
+            inner.validate_inline_secrets(errors);
+        }
+    }
+
+    // SPDX-SnippetEnd
+}
+
+impl Default for FoundationDbTls {
+    fn default() -> Self {
+        FoundationDbTls::Default
+    }
+}
+
+impl Pickle for FoundationDbTls {
+    fn pickle(&self, out: &mut Vec<u8>) {
+        match self {
+            FoundationDbTls::Default => {
+                0u16.pickle(out);
+            }
+            FoundationDbTls::Manual(inner) => {
+                1u16.pickle(out);
+                inner.pickle(out);
+            }
+        }
+    }
+
+    fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
+        match u16::unpickle(stream)? {
+            0 => Some(FoundationDbTls::Default),
+            1 => Pickle::unpickle(stream).map(FoundationDbTls::Manual),
+            _ => None,
+        }
+    }
+}
+
+impl IntoValue for FoundationDbTls {
+    fn into_value(self) -> JmapValue<'static> {
+        self.into_value_with(ValueOptions::default())
+    }
+
+    fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
+        match self {
+            FoundationDbTls::Default => {
+                let mut obj = jmap_tools::Map::new();
+                obj.insert_unchecked(Property::Type, JmapValue::Str("Default".into()));
+                JmapValue::Object(obj)
+            }
+            FoundationDbTls::Manual(obj) => {
+                let mut obj = obj.into_value_with(opts);
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("Manual".into()));
+                obj
+            }
+        }
+    }
+}
+
+impl RegistryJsonPatch for FoundationDbTls {
+    fn patch<'x>(
+        &mut self,
+        pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        if !pointer.has_next() {
+            match object_type(&pointer, &value)? {
+                FoundationDbTlsType::Default => *self = FoundationDbTls::Default,
+                FoundationDbTlsType::Manual => *self = FoundationDbTls::Manual(Default::default()),
+            }
+        }
+        match self {
+            FoundationDbTls::Default => pointer.assert_eof(),
+            FoundationDbTls::Manual(inner) => inner.patch(pointer, value),
+        }
+    }
+}
+
+impl FoundationDbTls {
+    pub fn object_type(&self) -> FoundationDbTlsType {
+        match self {
+            FoundationDbTls::Default => FoundationDbTlsType::Default,
+            FoundationDbTls::Manual(_) => FoundationDbTlsType::Manual,
+        }
+    }
+}
+
+impl FoundationDbTlsManual {
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        let neb = errors.len();
+        let value = &self.certificate;
+        value.validate(errors);
+        let value = &self.private_key;
+        value.validate(errors);
+        let value = &self.private_key_password;
+        value.validate(errors);
+        let value = &self.ca_certificate;
+        value.validate(errors);
+        let value = &self.verify_peers;
+        for value in value.iter() {
+            if value.is_empty() {
+                errors.push(ValidationError::required(Property::VerifyPeers));
+            }
+        }
+        if value.len() > 16 {
+            errors.push(ValidationError::max_items(Property::VerifyPeers, 16));
+        }
+        errors.len() == neb
+    }
+
+    // SPDX-SnippetBegin
+    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+    // SPDX-License-Identifier: LicenseRef-SEL
+    #[cfg(feature = "enterprise")]
+    fn validate_inline_secrets(&self, errors: &mut Vec<ValidationError>) {
+        if let Some(source) = self.certificate.external_source() {
+            errors.push(ValidationError::invalid(Property::Certificate, source));
+        }
+        if let Some(source) = self.private_key.external_source() {
+            errors.push(ValidationError::invalid(Property::PrivateKey, source));
+        }
+        if let Some(source) = self.private_key_password.external_source() {
+            errors.push(ValidationError::invalid(
+                Property::PrivateKeyPassword,
+                source,
+            ));
+        }
+        if let Some(source) = self.ca_certificate.external_source() {
+            errors.push(ValidationError::invalid(Property::CaCertificate, source));
+        }
+    }
+
+    // SPDX-SnippetEnd
+}
+
+impl Pickle for FoundationDbTlsManual {
+    fn pickle(&self, out: &mut Vec<u8>) {
+        let mut bitmap = 0u64;
+        if self.disable_plaintext_connection {
+            bitmap |= 1 << 0;
+        }
+        let block = crate::pickle::begin_block(out, 6, 1, bitmap);
+        self.certificate.pickle(out);
+        self.private_key.pickle(out);
+        self.private_key_password.pickle(out);
+        self.ca_certificate.pickle(out);
+        self.verify_peers.pickle(out);
+        crate::pickle::end_block(out, block);
+    }
+
+    fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
+        let block = stream.open_block()?;
+        let field0: PublicTextOptional = if block.has(0) {
+            Pickle::unpickle(stream)?
+        } else {
+            Default::default()
+        };
+        let field1: SecretTextOptional = if block.has(1) {
+            Pickle::unpickle(stream)?
+        } else {
+            Default::default()
+        };
+        let field2: SecretKeyOptional = if block.has(2) {
+            Pickle::unpickle(stream)?
+        } else {
+            Default::default()
+        };
+        let field3: PublicTextOptional = if block.has(3) {
+            Pickle::unpickle(stream)?
+        } else {
+            Default::default()
+        };
+        let field4: Map<String> = if block.has(4) {
+            Pickle::unpickle(stream)?
+        } else {
+            Default::default()
+        };
+        let field5: bool = if block.has(5) { block.flag(0) } else { false };
+        stream.close_block(block);
+        Some(Self {
+            certificate: field0,
+            private_key: field1,
+            private_key_password: field2,
+            ca_certificate: field3,
+            verify_peers: field4,
+            disable_plaintext_connection: field5,
+        })
+    }
+}
+
+impl Default for FoundationDbTlsManual {
+    fn default() -> Self {
+        Self {
+            certificate: Default::default(),
+            private_key: Default::default(),
+            private_key_password: Default::default(),
+            ca_certificate: Default::default(),
+            verify_peers: Default::default(),
+            disable_plaintext_connection: false,
+        }
+    }
+}
+
+impl IntoValue for FoundationDbTlsManual {
+    fn into_value(self) -> JmapValue<'static> {
+        self.into_value_with(ValueOptions::default())
+    }
+
+    fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
+        let mut map = jmap_tools::Map::with_capacity(8);
+        map.insert_unchecked(
+            Property::Certificate,
+            self.certificate.into_value_with(opts),
+        );
+        map.insert_unchecked(Property::PrivateKey, self.private_key.into_value_with(opts));
+        map.insert_unchecked(
+            Property::PrivateKeyPassword,
+            self.private_key_password.into_value_with(opts),
+        );
+        map.insert_unchecked(
+            Property::CaCertificate,
+            self.ca_certificate.into_value_with(opts),
+        );
+        map.insert_unchecked(
+            Property::VerifyPeers,
+            self.verify_peers.into_value_with(opts),
+        );
+        map.insert_unchecked(
+            Property::DisablePlaintextConnection,
+            self.disable_plaintext_connection.into_value_with(opts),
+        );
+        JmapValue::Object(map)
+    }
+}
+
+impl RegistryJsonPropertyPatch for FoundationDbTlsManual {
+    fn patch_property<'x>(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        match pointer.next_property() {
+            Some(Property::Certificate) => self.certificate.patch(pointer, value),
+            Some(Property::PrivateKey) => self.private_key.patch(pointer, value),
+            Some(Property::PrivateKeyPassword) => self.private_key_password.patch(pointer, value),
+            Some(Property::CaCertificate) => self.ca_certificate.patch(pointer, value),
+            Some(Property::VerifyPeers) => self
+                .verify_peers
+                .patch(pointer.with_validators(&[StringValidator::Trim]), value),
+            Some(Property::DisablePlaintextConnection) => {
+                self.disable_plaintext_connection.patch(pointer, value)
+            }
             Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
                 property: Property::Type,
                 value,
@@ -43314,6 +44393,1571 @@ impl RegistryJsonPropertyPatch for MailExchanger {
     }
 }
 
+impl ObjectImpl for MailRule {
+    const FLAGS: u64 = OBJ_FILTER_ACCOUNT | OBJ_NOT_STORED;
+    const VERSION: u8 = 0;
+    const OBJECT: ObjectType = ObjectType::MailRule;
+
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        let neb = errors.len();
+        let value = &self.name;
+        if value.is_empty() {
+            errors.push(ValidationError::required(Property::Name));
+        }
+        if value.len() > 255 {
+            errors.push(ValidationError::max_length(Property::Name, 255));
+        }
+        let value = &self.conditions;
+        value.validate(errors);
+        let value = &self.actions;
+        value.validate(errors);
+        errors.len() == neb
+    }
+
+    fn index<'x>(&'x self, _: &mut IndexBuilder<'x>) {}
+}
+
+impl Default for MailRule {
+    fn default() -> Self {
+        Self {
+            name: Default::default(),
+            is_enabled: true,
+            position: 0u64,
+            conditions: Default::default(),
+            actions: Default::default(),
+        }
+    }
+}
+
+impl IntoValue for MailRule {
+    fn into_value(self) -> JmapValue<'static> {
+        self.into_value_with(ValueOptions::default())
+    }
+
+    fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
+        let mut map = jmap_tools::Map::with_capacity(7);
+        map.insert_unchecked(Property::Name, self.name.into_value_with(opts));
+        map.insert_unchecked(Property::IsEnabled, self.is_enabled.into_value_with(opts));
+        map.insert_unchecked(Property::Position, self.position.into_value_with(opts));
+        map.insert_unchecked(Property::Conditions, self.conditions.into_value_with(opts));
+        map.insert_unchecked(Property::Actions, self.actions.into_value_with(opts));
+        JmapValue::Object(map)
+    }
+}
+
+impl RegistryJsonPropertyPatch for MailRule {
+    fn patch_property<'x>(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        match pointer.next_property() {
+            Some(Property::Name) => self
+                .name
+                .patch(pointer.with_validators(&[StringValidator::Trim]), value),
+            Some(Property::IsEnabled) => self.is_enabled.patch(pointer, value),
+            Some(Property::Position) => self.position.patch(pointer, value),
+            Some(Property::Conditions) => self.conditions.patch(pointer, value),
+            Some(Property::Actions) => self.actions.patch(pointer, value),
+            Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
+                property: Property::Type,
+                value,
+            }),
+            _ => Err(PatchError::new(pointer, "Invalid property")),
+        }
+    }
+}
+
+impl MailRuleActions {
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        let neb = errors.len();
+        let value = &self.add_keywords;
+        for value in value.iter() {
+            if value.is_empty() {
+                errors.push(ValidationError::required(Property::AddKeywords));
+            }
+        }
+        if value.len() > 128 {
+            errors.push(ValidationError::max_items(Property::AddKeywords, 128));
+        }
+        let value = &self.remove_keywords;
+        for value in value.iter() {
+            if value.is_empty() {
+                errors.push(ValidationError::required(Property::RemoveKeywords));
+            }
+        }
+        if value.len() > 128 {
+            errors.push(ValidationError::max_items(Property::RemoveKeywords, 128));
+        }
+        if let Some(value) = &self.redirect {
+            value.validate(errors);
+        }
+        if let Some(value) = &self.reply {
+            value.validate(errors);
+        }
+        let value = &self.copy_to;
+        for value in value.iter() {
+            if !value.is_valid() {
+                errors.push(ValidationError::invalid(Property::CopyTo, value));
+            }
+        }
+        if value.len() > 16 {
+            errors.push(ValidationError::max_items(Property::CopyTo, 16));
+        }
+        let value = &self.move_to;
+        for value in value.iter() {
+            if !value.is_valid() {
+                errors.push(ValidationError::invalid(Property::MoveTo, value));
+            }
+        }
+        if value.len() > 16 {
+            errors.push(ValidationError::max_items(Property::MoveTo, 16));
+        }
+        if let Some(value) = &self.reject {
+            value.validate(errors);
+        }
+        errors.len() == neb
+    }
+}
+
+impl Default for MailRuleActions {
+    fn default() -> Self {
+        Self {
+            add_keywords: Default::default(),
+            remove_keywords: Default::default(),
+            clear_keywords: false,
+            set_importance: Default::default(),
+            redirect: Default::default(),
+            reply: Default::default(),
+            copy_to: Default::default(),
+            move_to: Default::default(),
+            discard: false,
+            reject: Default::default(),
+            stop_processing: false,
+        }
+    }
+}
+
+impl IntoValue for MailRuleActions {
+    fn into_value(self) -> JmapValue<'static> {
+        self.into_value_with(ValueOptions::default())
+    }
+
+    fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
+        let mut map = jmap_tools::Map::with_capacity(13);
+        map.insert_unchecked(
+            Property::AddKeywords,
+            self.add_keywords.into_value_with(opts),
+        );
+        map.insert_unchecked(
+            Property::RemoveKeywords,
+            self.remove_keywords.into_value_with(opts),
+        );
+        map.insert_unchecked(
+            Property::ClearKeywords,
+            self.clear_keywords.into_value_with(opts),
+        );
+        map.insert_unchecked(
+            Property::SetImportance,
+            self.set_importance.into_value_with(opts),
+        );
+        map.insert_unchecked(Property::Redirect, self.redirect.into_value_with(opts));
+        map.insert_unchecked(Property::Reply, self.reply.into_value_with(opts));
+        map.insert_unchecked(Property::CopyTo, self.copy_to.into_value_with(opts));
+        map.insert_unchecked(Property::MoveTo, self.move_to.into_value_with(opts));
+        map.insert_unchecked(Property::Discard, self.discard.into_value_with(opts));
+        map.insert_unchecked(Property::Reject, self.reject.into_value_with(opts));
+        map.insert_unchecked(
+            Property::StopProcessing,
+            self.stop_processing.into_value_with(opts),
+        );
+        JmapValue::Object(map)
+    }
+}
+
+impl RegistryJsonPropertyPatch for MailRuleActions {
+    fn patch_property<'x>(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        match pointer.next_property() {
+            Some(Property::AddKeywords) => self.add_keywords.patch(
+                pointer.with_validators(&[StringValidator::Trim, StringValidator::RemoveSpaces]),
+                value,
+            ),
+            Some(Property::RemoveKeywords) => self.remove_keywords.patch(
+                pointer.with_validators(&[StringValidator::Trim, StringValidator::RemoveSpaces]),
+                value,
+            ),
+            Some(Property::ClearKeywords) => self.clear_keywords.patch(pointer, value),
+            Some(Property::SetImportance) => self.set_importance.patch(pointer, value),
+            Some(Property::Redirect) => self.redirect.patch(pointer, value),
+            Some(Property::Reply) => self.reply.patch(pointer, value),
+            Some(Property::CopyTo) => self.copy_to.patch(pointer, value),
+            Some(Property::MoveTo) => self.move_to.patch(pointer, value),
+            Some(Property::Discard) => self.discard.patch(pointer, value),
+            Some(Property::Reject) => self.reject.patch(pointer, value),
+            Some(Property::StopProcessing) => self.stop_processing.patch(pointer, value),
+            Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
+                property: Property::Type,
+                value,
+            }),
+            _ => Err(PatchError::new(pointer, "Invalid property")),
+        }
+    }
+}
+
+impl MailRuleAddressTest {
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        let neb = errors.len();
+        let value = &self.values;
+        for value in value.iter() {
+            if value.is_empty() {
+                errors.push(ValidationError::required(Property::Values));
+            }
+        }
+        if value.len() < 1 {
+            errors.push(ValidationError::min_items(Property::Values, 1));
+        }
+        if value.len() > 64 {
+            errors.push(ValidationError::max_items(Property::Values, 64));
+        }
+        errors.len() == neb
+    }
+}
+
+impl Default for MailRuleAddressTest {
+    fn default() -> Self {
+        Self {
+            operator: MailRuleAddressOperator::Is,
+            values: Default::default(),
+        }
+    }
+}
+
+impl IntoValue for MailRuleAddressTest {
+    fn into_value(self) -> JmapValue<'static> {
+        self.into_value_with(ValueOptions::default())
+    }
+
+    fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
+        let mut map = jmap_tools::Map::with_capacity(4);
+        map.insert_unchecked(Property::Operator, self.operator.into_value_with(opts));
+        map.insert_unchecked(Property::Values, self.values.into_value_with(opts));
+        JmapValue::Object(map)
+    }
+}
+
+impl RegistryJsonPropertyPatch for MailRuleAddressTest {
+    fn patch_property<'x>(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        match pointer.next_property() {
+            Some(Property::Operator) => self.operator.patch(pointer, value),
+            Some(Property::Values) => self
+                .values
+                .patch(pointer.with_validators(&[StringValidator::Trim]), value),
+            Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
+                property: Property::Type,
+                value,
+            }),
+            _ => Err(PatchError::new(pointer, "Invalid property")),
+        }
+    }
+}
+
+impl MailRuleCondition {
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        match self {
+            MailRuleCondition::From(inner) => inner.validate(errors),
+            MailRuleCondition::To(inner) => inner.validate(errors),
+            MailRuleCondition::Cc(inner) => inner.validate(errors),
+            MailRuleCondition::ToOrCc(inner) => inner.validate(errors),
+            MailRuleCondition::SentToMe(inner) => inner.validate(errors),
+            MailRuleCondition::Subject(inner) => inner.validate(errors),
+            MailRuleCondition::Body(inner) => inner.validate(errors),
+            MailRuleCondition::Header(inner) => inner.validate(errors),
+            MailRuleCondition::SizeOver(inner) => inner.validate(errors),
+            MailRuleCondition::SizeUnder(inner) => inner.validate(errors),
+            MailRuleCondition::HasAttachment => true,
+            MailRuleCondition::Importance(inner) => inner.validate(errors),
+            MailRuleCondition::Sensitivity(inner) => inner.validate(errors),
+            MailRuleCondition::MessageType(inner) => inner.validate(errors),
+            MailRuleCondition::HeaderExists(inner) => inner.validate(errors),
+            MailRuleCondition::AttachmentName(inner) => inner.validate(errors),
+            MailRuleCondition::AttachmentType(inner) => inner.validate(errors),
+            MailRuleCondition::MailingList => true,
+            MailRuleCondition::RecipientAddress(inner) => inner.validate(errors),
+            MailRuleCondition::RecipientDetail(inner) => inner.validate(errors),
+            MailRuleCondition::SpamScore(inner) => inner.validate(errors),
+            MailRuleCondition::SubjectOrBody(inner) => inner.validate(errors),
+            MailRuleCondition::ReceivedAfter(inner) => inner.validate(errors),
+            MailRuleCondition::ReceivedBefore(inner) => inner.validate(errors),
+            MailRuleCondition::Schedule(inner) => inner.validate(errors),
+            MailRuleCondition::PrivateEvent => true,
+            MailRuleCondition::Keyword(inner) => inner.validate(errors),
+            MailRuleCondition::AnyKeyword => true,
+            MailRuleCondition::Flagged => true,
+            MailRuleCondition::IsAway => true,
+        }
+    }
+}
+
+impl Default for MailRuleCondition {
+    fn default() -> Self {
+        MailRuleCondition::From(Default::default())
+    }
+}
+
+impl IntoValue for MailRuleCondition {
+    fn into_value(self) -> JmapValue<'static> {
+        self.into_value_with(ValueOptions::default())
+    }
+
+    fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
+        match self {
+            MailRuleCondition::From(obj) => {
+                let mut obj = obj.into_value_with(opts);
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("From".into()));
+                obj
+            }
+            MailRuleCondition::To(obj) => {
+                let mut obj = obj.into_value_with(opts);
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("To".into()));
+                obj
+            }
+            MailRuleCondition::Cc(obj) => {
+                let mut obj = obj.into_value_with(opts);
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("Cc".into()));
+                obj
+            }
+            MailRuleCondition::ToOrCc(obj) => {
+                let mut obj = obj.into_value_with(opts);
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("ToOrCc".into()));
+                obj
+            }
+            MailRuleCondition::SentToMe(obj) => {
+                let mut obj = obj.into_value_with(opts);
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("SentToMe".into()));
+                obj
+            }
+            MailRuleCondition::Subject(obj) => {
+                let mut obj = obj.into_value_with(opts);
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("Subject".into()));
+                obj
+            }
+            MailRuleCondition::Body(obj) => {
+                let mut obj = obj.into_value_with(opts);
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("Body".into()));
+                obj
+            }
+            MailRuleCondition::Header(obj) => {
+                let mut obj = obj.into_value_with(opts);
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("Header".into()));
+                obj
+            }
+            MailRuleCondition::SizeOver(obj) => {
+                let mut obj = obj.into_value_with(opts);
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("SizeOver".into()));
+                obj
+            }
+            MailRuleCondition::SizeUnder(obj) => {
+                let mut obj = obj.into_value_with(opts);
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("SizeUnder".into()));
+                obj
+            }
+            MailRuleCondition::HasAttachment => {
+                let mut obj = jmap_tools::Map::new();
+                obj.insert_unchecked(Property::Type, JmapValue::Str("HasAttachment".into()));
+                JmapValue::Object(obj)
+            }
+            MailRuleCondition::Importance(obj) => {
+                let mut obj = obj.into_value_with(opts);
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("Importance".into()));
+                obj
+            }
+            MailRuleCondition::Sensitivity(obj) => {
+                let mut obj = obj.into_value_with(opts);
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("Sensitivity".into()));
+                obj
+            }
+            MailRuleCondition::MessageType(obj) => {
+                let mut obj = obj.into_value_with(opts);
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("MessageType".into()));
+                obj
+            }
+            MailRuleCondition::HeaderExists(obj) => {
+                let mut obj = obj.into_value_with(opts);
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("HeaderExists".into()));
+                obj
+            }
+            MailRuleCondition::AttachmentName(obj) => {
+                let mut obj = obj.into_value_with(opts);
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("AttachmentName".into()));
+                obj
+            }
+            MailRuleCondition::AttachmentType(obj) => {
+                let mut obj = obj.into_value_with(opts);
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("AttachmentType".into()));
+                obj
+            }
+            MailRuleCondition::MailingList => {
+                let mut obj = jmap_tools::Map::new();
+                obj.insert_unchecked(Property::Type, JmapValue::Str("MailingList".into()));
+                JmapValue::Object(obj)
+            }
+            MailRuleCondition::RecipientAddress(obj) => {
+                let mut obj = obj.into_value_with(opts);
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("RecipientAddress".into()));
+                obj
+            }
+            MailRuleCondition::RecipientDetail(obj) => {
+                let mut obj = obj.into_value_with(opts);
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("RecipientDetail".into()));
+                obj
+            }
+            MailRuleCondition::SpamScore(obj) => {
+                let mut obj = obj.into_value_with(opts);
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("SpamScore".into()));
+                obj
+            }
+            MailRuleCondition::SubjectOrBody(obj) => {
+                let mut obj = obj.into_value_with(opts);
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("SubjectOrBody".into()));
+                obj
+            }
+            MailRuleCondition::ReceivedAfter(obj) => {
+                let mut obj = obj.into_value_with(opts);
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("ReceivedAfter".into()));
+                obj
+            }
+            MailRuleCondition::ReceivedBefore(obj) => {
+                let mut obj = obj.into_value_with(opts);
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("ReceivedBefore".into()));
+                obj
+            }
+            MailRuleCondition::Schedule(obj) => {
+                let mut obj = obj.into_value_with(opts);
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("Schedule".into()));
+                obj
+            }
+            MailRuleCondition::PrivateEvent => {
+                let mut obj = jmap_tools::Map::new();
+                obj.insert_unchecked(Property::Type, JmapValue::Str("PrivateEvent".into()));
+                JmapValue::Object(obj)
+            }
+            MailRuleCondition::Keyword(obj) => {
+                let mut obj = obj.into_value_with(opts);
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("Keyword".into()));
+                obj
+            }
+            MailRuleCondition::AnyKeyword => {
+                let mut obj = jmap_tools::Map::new();
+                obj.insert_unchecked(Property::Type, JmapValue::Str("AnyKeyword".into()));
+                JmapValue::Object(obj)
+            }
+            MailRuleCondition::Flagged => {
+                let mut obj = jmap_tools::Map::new();
+                obj.insert_unchecked(Property::Type, JmapValue::Str("Flagged".into()));
+                JmapValue::Object(obj)
+            }
+            MailRuleCondition::IsAway => {
+                let mut obj = jmap_tools::Map::new();
+                obj.insert_unchecked(Property::Type, JmapValue::Str("IsAway".into()));
+                JmapValue::Object(obj)
+            }
+        }
+    }
+}
+
+impl RegistryJsonPatch for MailRuleCondition {
+    fn patch<'x>(
+        &mut self,
+        pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        if !pointer.has_next() {
+            match object_type(&pointer, &value)? {
+                MailRuleConditionType::From => *self = MailRuleCondition::From(Default::default()),
+                MailRuleConditionType::To => *self = MailRuleCondition::To(Default::default()),
+                MailRuleConditionType::Cc => *self = MailRuleCondition::Cc(Default::default()),
+                MailRuleConditionType::ToOrCc => {
+                    *self = MailRuleCondition::ToOrCc(Default::default())
+                }
+                MailRuleConditionType::SentToMe => {
+                    *self = MailRuleCondition::SentToMe(Default::default())
+                }
+                MailRuleConditionType::Subject => {
+                    *self = MailRuleCondition::Subject(Default::default())
+                }
+                MailRuleConditionType::Body => *self = MailRuleCondition::Body(Default::default()),
+                MailRuleConditionType::Header => {
+                    *self = MailRuleCondition::Header(Default::default())
+                }
+                MailRuleConditionType::SizeOver => {
+                    *self = MailRuleCondition::SizeOver(Default::default())
+                }
+                MailRuleConditionType::SizeUnder => {
+                    *self = MailRuleCondition::SizeUnder(Default::default())
+                }
+                MailRuleConditionType::HasAttachment => *self = MailRuleCondition::HasAttachment,
+                MailRuleConditionType::Importance => {
+                    *self = MailRuleCondition::Importance(Default::default())
+                }
+                MailRuleConditionType::Sensitivity => {
+                    *self = MailRuleCondition::Sensitivity(Default::default())
+                }
+                MailRuleConditionType::MessageType => {
+                    *self = MailRuleCondition::MessageType(Default::default())
+                }
+                MailRuleConditionType::HeaderExists => {
+                    *self = MailRuleCondition::HeaderExists(Default::default())
+                }
+                MailRuleConditionType::AttachmentName => {
+                    *self = MailRuleCondition::AttachmentName(Default::default())
+                }
+                MailRuleConditionType::AttachmentType => {
+                    *self = MailRuleCondition::AttachmentType(Default::default())
+                }
+                MailRuleConditionType::MailingList => *self = MailRuleCondition::MailingList,
+                MailRuleConditionType::RecipientAddress => {
+                    *self = MailRuleCondition::RecipientAddress(Default::default())
+                }
+                MailRuleConditionType::RecipientDetail => {
+                    *self = MailRuleCondition::RecipientDetail(Default::default())
+                }
+                MailRuleConditionType::SpamScore => {
+                    *self = MailRuleCondition::SpamScore(Default::default())
+                }
+                MailRuleConditionType::SubjectOrBody => {
+                    *self = MailRuleCondition::SubjectOrBody(Default::default())
+                }
+                MailRuleConditionType::ReceivedAfter => {
+                    *self = MailRuleCondition::ReceivedAfter(Default::default())
+                }
+                MailRuleConditionType::ReceivedBefore => {
+                    *self = MailRuleCondition::ReceivedBefore(Default::default())
+                }
+                MailRuleConditionType::Schedule => {
+                    *self = MailRuleCondition::Schedule(Default::default())
+                }
+                MailRuleConditionType::PrivateEvent => *self = MailRuleCondition::PrivateEvent,
+                MailRuleConditionType::Keyword => {
+                    *self = MailRuleCondition::Keyword(Default::default())
+                }
+                MailRuleConditionType::AnyKeyword => *self = MailRuleCondition::AnyKeyword,
+                MailRuleConditionType::Flagged => *self = MailRuleCondition::Flagged,
+                MailRuleConditionType::IsAway => *self = MailRuleCondition::IsAway,
+            }
+        }
+        match self {
+            MailRuleCondition::From(inner) => inner.patch(pointer, value),
+            MailRuleCondition::To(inner) => inner.patch(pointer, value),
+            MailRuleCondition::Cc(inner) => inner.patch(pointer, value),
+            MailRuleCondition::ToOrCc(inner) => inner.patch(pointer, value),
+            MailRuleCondition::SentToMe(inner) => inner.patch(pointer, value),
+            MailRuleCondition::Subject(inner) => inner.patch(pointer, value),
+            MailRuleCondition::Body(inner) => inner.patch(pointer, value),
+            MailRuleCondition::Header(inner) => inner.patch(pointer, value),
+            MailRuleCondition::SizeOver(inner) => inner.patch(pointer, value),
+            MailRuleCondition::SizeUnder(inner) => inner.patch(pointer, value),
+            MailRuleCondition::HasAttachment => pointer.assert_eof(),
+            MailRuleCondition::Importance(inner) => inner.patch(pointer, value),
+            MailRuleCondition::Sensitivity(inner) => inner.patch(pointer, value),
+            MailRuleCondition::MessageType(inner) => inner.patch(pointer, value),
+            MailRuleCondition::HeaderExists(inner) => inner.patch(pointer, value),
+            MailRuleCondition::AttachmentName(inner) => inner.patch(pointer, value),
+            MailRuleCondition::AttachmentType(inner) => inner.patch(pointer, value),
+            MailRuleCondition::MailingList => pointer.assert_eof(),
+            MailRuleCondition::RecipientAddress(inner) => inner.patch(pointer, value),
+            MailRuleCondition::RecipientDetail(inner) => inner.patch(pointer, value),
+            MailRuleCondition::SpamScore(inner) => inner.patch(pointer, value),
+            MailRuleCondition::SubjectOrBody(inner) => inner.patch(pointer, value),
+            MailRuleCondition::ReceivedAfter(inner) => inner.patch(pointer, value),
+            MailRuleCondition::ReceivedBefore(inner) => inner.patch(pointer, value),
+            MailRuleCondition::Schedule(inner) => inner.patch(pointer, value),
+            MailRuleCondition::PrivateEvent => pointer.assert_eof(),
+            MailRuleCondition::Keyword(inner) => inner.patch(pointer, value),
+            MailRuleCondition::AnyKeyword => pointer.assert_eof(),
+            MailRuleCondition::Flagged => pointer.assert_eof(),
+            MailRuleCondition::IsAway => pointer.assert_eof(),
+        }
+    }
+}
+
+impl MailRuleCondition {
+    pub fn object_type(&self) -> MailRuleConditionType {
+        match self {
+            MailRuleCondition::From(_) => MailRuleConditionType::From,
+            MailRuleCondition::To(_) => MailRuleConditionType::To,
+            MailRuleCondition::Cc(_) => MailRuleConditionType::Cc,
+            MailRuleCondition::ToOrCc(_) => MailRuleConditionType::ToOrCc,
+            MailRuleCondition::SentToMe(_) => MailRuleConditionType::SentToMe,
+            MailRuleCondition::Subject(_) => MailRuleConditionType::Subject,
+            MailRuleCondition::Body(_) => MailRuleConditionType::Body,
+            MailRuleCondition::Header(_) => MailRuleConditionType::Header,
+            MailRuleCondition::SizeOver(_) => MailRuleConditionType::SizeOver,
+            MailRuleCondition::SizeUnder(_) => MailRuleConditionType::SizeUnder,
+            MailRuleCondition::HasAttachment => MailRuleConditionType::HasAttachment,
+            MailRuleCondition::Importance(_) => MailRuleConditionType::Importance,
+            MailRuleCondition::Sensitivity(_) => MailRuleConditionType::Sensitivity,
+            MailRuleCondition::MessageType(_) => MailRuleConditionType::MessageType,
+            MailRuleCondition::HeaderExists(_) => MailRuleConditionType::HeaderExists,
+            MailRuleCondition::AttachmentName(_) => MailRuleConditionType::AttachmentName,
+            MailRuleCondition::AttachmentType(_) => MailRuleConditionType::AttachmentType,
+            MailRuleCondition::MailingList => MailRuleConditionType::MailingList,
+            MailRuleCondition::RecipientAddress(_) => MailRuleConditionType::RecipientAddress,
+            MailRuleCondition::RecipientDetail(_) => MailRuleConditionType::RecipientDetail,
+            MailRuleCondition::SpamScore(_) => MailRuleConditionType::SpamScore,
+            MailRuleCondition::SubjectOrBody(_) => MailRuleConditionType::SubjectOrBody,
+            MailRuleCondition::ReceivedAfter(_) => MailRuleConditionType::ReceivedAfter,
+            MailRuleCondition::ReceivedBefore(_) => MailRuleConditionType::ReceivedBefore,
+            MailRuleCondition::Schedule(_) => MailRuleConditionType::Schedule,
+            MailRuleCondition::PrivateEvent => MailRuleConditionType::PrivateEvent,
+            MailRuleCondition::Keyword(_) => MailRuleConditionType::Keyword,
+            MailRuleCondition::AnyKeyword => MailRuleConditionType::AnyKeyword,
+            MailRuleCondition::Flagged => MailRuleConditionType::Flagged,
+            MailRuleCondition::IsAway => MailRuleConditionType::IsAway,
+        }
+    }
+}
+
+impl MailRuleConditions {
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        let neb = errors.len();
+        let value = &self.match_all;
+        for value in value.values() {
+            value.validate(errors);
+        }
+        if value.len() > 32 {
+            errors.push(ValidationError::max_items(Property::MatchAll, 32));
+        }
+        let value = &self.match_any;
+        for value in value.values() {
+            value.validate(errors);
+        }
+        if value.len() > 32 {
+            errors.push(ValidationError::max_items(Property::MatchAny, 32));
+        }
+        let value = &self.match_none;
+        for value in value.values() {
+            value.validate(errors);
+        }
+        if value.len() > 32 {
+            errors.push(ValidationError::max_items(Property::MatchNone, 32));
+        }
+        errors.len() == neb
+    }
+}
+
+impl Default for MailRuleConditions {
+    fn default() -> Self {
+        Self {
+            match_all: Default::default(),
+            match_any: Default::default(),
+            match_none: Default::default(),
+        }
+    }
+}
+
+impl IntoValue for MailRuleConditions {
+    fn into_value(self) -> JmapValue<'static> {
+        self.into_value_with(ValueOptions::default())
+    }
+
+    fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
+        let mut map = jmap_tools::Map::with_capacity(5);
+        map.insert_unchecked(Property::MatchAll, self.match_all.into_value_with(opts));
+        map.insert_unchecked(Property::MatchAny, self.match_any.into_value_with(opts));
+        map.insert_unchecked(Property::MatchNone, self.match_none.into_value_with(opts));
+        JmapValue::Object(map)
+    }
+}
+
+impl RegistryJsonPropertyPatch for MailRuleConditions {
+    fn patch_property<'x>(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        match pointer.next_property() {
+            Some(Property::MatchAll) => self.match_all.patch(pointer, value),
+            Some(Property::MatchAny) => self.match_any.patch(pointer, value),
+            Some(Property::MatchNone) => self.match_none.patch(pointer, value),
+            Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
+                property: Property::Type,
+                value,
+            }),
+            _ => Err(PatchError::new(pointer, "Invalid property")),
+        }
+    }
+}
+
+impl MailRuleDate {
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        let neb = errors.len();
+        let value = &self.date;
+        if !value.is_valid() {
+            errors.push(ValidationError::invalid(Property::Date, value));
+        }
+        errors.len() == neb
+    }
+}
+
+impl Default for MailRuleDate {
+    fn default() -> Self {
+        Self {
+            date: Default::default(),
+        }
+    }
+}
+
+impl IntoValue for MailRuleDate {
+    fn into_value(self) -> JmapValue<'static> {
+        self.into_value_with(ValueOptions::default())
+    }
+
+    fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
+        let mut map = jmap_tools::Map::with_capacity(3);
+        map.insert_unchecked(Property::Date, self.date.into_value_with(opts));
+        JmapValue::Object(map)
+    }
+}
+
+impl RegistryJsonPropertyPatch for MailRuleDate {
+    fn patch_property<'x>(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        match pointer.next_property() {
+            Some(Property::Date) => self.date.patch(pointer, value),
+            Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
+                property: Property::Type,
+                value,
+            }),
+            _ => Err(PatchError::new(pointer, "Invalid property")),
+        }
+    }
+}
+
+impl MailRuleHeaderName {
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        let neb = errors.len();
+        let value = &self.header;
+        if value.is_empty() {
+            errors.push(ValidationError::required(Property::Header));
+        }
+        if value.len() > 255 {
+            errors.push(ValidationError::max_length(Property::Header, 255));
+        }
+        errors.len() == neb
+    }
+}
+
+impl Default for MailRuleHeaderName {
+    fn default() -> Self {
+        Self {
+            header: Default::default(),
+        }
+    }
+}
+
+impl IntoValue for MailRuleHeaderName {
+    fn into_value(self) -> JmapValue<'static> {
+        self.into_value_with(ValueOptions::default())
+    }
+
+    fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
+        let mut map = jmap_tools::Map::with_capacity(3);
+        map.insert_unchecked(Property::Header, self.header.into_value_with(opts));
+        JmapValue::Object(map)
+    }
+}
+
+impl RegistryJsonPropertyPatch for MailRuleHeaderName {
+    fn patch_property<'x>(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        match pointer.next_property() {
+            Some(Property::Header) => self.header.patch(
+                pointer.with_validators(&[StringValidator::Trim, StringValidator::RemoveSpaces]),
+                value,
+            ),
+            Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
+                property: Property::Type,
+                value,
+            }),
+            _ => Err(PatchError::new(pointer, "Invalid property")),
+        }
+    }
+}
+
+impl MailRuleHeaderTest {
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        let neb = errors.len();
+        let value = &self.header;
+        if value.is_empty() {
+            errors.push(ValidationError::required(Property::Header));
+        }
+        if value.len() > 255 {
+            errors.push(ValidationError::max_length(Property::Header, 255));
+        }
+        let value = &self.values;
+        for value in value.iter() {
+            if value.is_empty() {
+                errors.push(ValidationError::required(Property::Values));
+            }
+            if value.len() > 255 {
+                errors.push(ValidationError::max_length(Property::Values, 255));
+            }
+        }
+        if value.len() < 1 {
+            errors.push(ValidationError::min_items(Property::Values, 1));
+        }
+        if value.len() > 64 {
+            errors.push(ValidationError::max_items(Property::Values, 64));
+        }
+        errors.len() == neb
+    }
+}
+
+impl Default for MailRuleHeaderTest {
+    fn default() -> Self {
+        Self {
+            header: Default::default(),
+            operator: MailRuleTextOperator::Contains,
+            values: Default::default(),
+        }
+    }
+}
+
+impl IntoValue for MailRuleHeaderTest {
+    fn into_value(self) -> JmapValue<'static> {
+        self.into_value_with(ValueOptions::default())
+    }
+
+    fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
+        let mut map = jmap_tools::Map::with_capacity(5);
+        map.insert_unchecked(Property::Header, self.header.into_value_with(opts));
+        map.insert_unchecked(Property::Operator, self.operator.into_value_with(opts));
+        map.insert_unchecked(Property::Values, self.values.into_value_with(opts));
+        JmapValue::Object(map)
+    }
+}
+
+impl RegistryJsonPropertyPatch for MailRuleHeaderTest {
+    fn patch_property<'x>(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        match pointer.next_property() {
+            Some(Property::Header) => self.header.patch(
+                pointer.with_validators(&[StringValidator::Trim, StringValidator::RemoveSpaces]),
+                value,
+            ),
+            Some(Property::Operator) => self.operator.patch(pointer, value),
+            Some(Property::Values) => self.values.patch(pointer, value),
+            Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
+                property: Property::Type,
+                value,
+            }),
+            _ => Err(PatchError::new(pointer, "Invalid property")),
+        }
+    }
+}
+
+impl MailRuleImportance {
+    fn validate(&self, _: &mut Vec<ValidationError>) -> bool {
+        true
+    }
+}
+
+impl Default for MailRuleImportance {
+    fn default() -> Self {
+        Self {
+            level: MailRuleImportanceLevel::High,
+        }
+    }
+}
+
+impl IntoValue for MailRuleImportance {
+    fn into_value(self) -> JmapValue<'static> {
+        self.into_value_with(ValueOptions::default())
+    }
+
+    fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
+        let mut map = jmap_tools::Map::with_capacity(3);
+        map.insert_unchecked(Property::Level, self.level.into_value_with(opts));
+        JmapValue::Object(map)
+    }
+}
+
+impl RegistryJsonPropertyPatch for MailRuleImportance {
+    fn patch_property<'x>(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        match pointer.next_property() {
+            Some(Property::Level) => self.level.patch(pointer, value),
+            Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
+                property: Property::Type,
+                value,
+            }),
+            _ => Err(PatchError::new(pointer, "Invalid property")),
+        }
+    }
+}
+
+impl MailRuleKeywordTest {
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        let neb = errors.len();
+        let value = &self.keywords;
+        for value in value.iter() {
+            if value.is_empty() {
+                errors.push(ValidationError::required(Property::Keywords));
+            }
+        }
+        if value.len() < 1 {
+            errors.push(ValidationError::min_items(Property::Keywords, 1));
+        }
+        if value.len() > 64 {
+            errors.push(ValidationError::max_items(Property::Keywords, 64));
+        }
+        errors.len() == neb
+    }
+}
+
+impl Default for MailRuleKeywordTest {
+    fn default() -> Self {
+        Self {
+            keywords: Default::default(),
+        }
+    }
+}
+
+impl IntoValue for MailRuleKeywordTest {
+    fn into_value(self) -> JmapValue<'static> {
+        self.into_value_with(ValueOptions::default())
+    }
+
+    fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
+        let mut map = jmap_tools::Map::with_capacity(3);
+        map.insert_unchecked(Property::Keywords, self.keywords.into_value_with(opts));
+        JmapValue::Object(map)
+    }
+}
+
+impl RegistryJsonPropertyPatch for MailRuleKeywordTest {
+    fn patch_property<'x>(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        match pointer.next_property() {
+            Some(Property::Keywords) => self.keywords.patch(
+                pointer.with_validators(&[StringValidator::Trim, StringValidator::RemoveSpaces]),
+                value,
+            ),
+            Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
+                property: Property::Type,
+                value,
+            }),
+            _ => Err(PatchError::new(pointer, "Invalid property")),
+        }
+    }
+}
+
+impl MailRuleMessageType {
+    fn validate(&self, _: &mut Vec<ValidationError>) -> bool {
+        true
+    }
+}
+
+impl Default for MailRuleMessageType {
+    fn default() -> Self {
+        Self {
+            kind: MailRuleMessageKind::MeetingRequest,
+        }
+    }
+}
+
+impl IntoValue for MailRuleMessageType {
+    fn into_value(self) -> JmapValue<'static> {
+        self.into_value_with(ValueOptions::default())
+    }
+
+    fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
+        let mut map = jmap_tools::Map::with_capacity(3);
+        map.insert_unchecked(Property::Kind, self.kind.into_value_with(opts));
+        JmapValue::Object(map)
+    }
+}
+
+impl RegistryJsonPropertyPatch for MailRuleMessageType {
+    fn patch_property<'x>(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        match pointer.next_property() {
+            Some(Property::Kind) => self.kind.patch(pointer, value),
+            Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
+                property: Property::Type,
+                value,
+            }),
+            _ => Err(PatchError::new(pointer, "Invalid property")),
+        }
+    }
+}
+
+impl MailRuleRedirect {
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        let neb = errors.len();
+        let value = &self.addresses;
+        for value in value.iter() {
+            if value.is_empty() {
+                errors.push(ValidationError::required(Property::Addresses));
+            }
+        }
+        if value.len() < 1 {
+            errors.push(ValidationError::min_items(Property::Addresses, 1));
+        }
+        if value.len() > 64 {
+            errors.push(ValidationError::max_items(Property::Addresses, 64));
+        }
+        errors.len() == neb
+    }
+}
+
+impl Default for MailRuleRedirect {
+    fn default() -> Self {
+        Self {
+            addresses: Default::default(),
+            keep_copy: true,
+        }
+    }
+}
+
+impl IntoValue for MailRuleRedirect {
+    fn into_value(self) -> JmapValue<'static> {
+        self.into_value_with(ValueOptions::default())
+    }
+
+    fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
+        let mut map = jmap_tools::Map::with_capacity(4);
+        map.insert_unchecked(Property::Addresses, self.addresses.into_value_with(opts));
+        map.insert_unchecked(Property::KeepCopy, self.keep_copy.into_value_with(opts));
+        JmapValue::Object(map)
+    }
+}
+
+impl RegistryJsonPropertyPatch for MailRuleRedirect {
+    fn patch_property<'x>(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        match pointer.next_property() {
+            Some(Property::Addresses) => self
+                .addresses
+                .patch(pointer.with_validators(&[StringValidator::Email]), value),
+            Some(Property::KeepCopy) => self.keep_copy.patch(pointer, value),
+            Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
+                property: Property::Type,
+                value,
+            }),
+            _ => Err(PatchError::new(pointer, "Invalid property")),
+        }
+    }
+}
+
+impl MailRuleReject {
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        let neb = errors.len();
+        let value = &self.reason;
+        if value.is_empty() {
+            errors.push(ValidationError::required(Property::Reason));
+        }
+        if value.len() > 1024 {
+            errors.push(ValidationError::max_length(Property::Reason, 1024));
+        }
+        errors.len() == neb
+    }
+}
+
+impl Default for MailRuleReject {
+    fn default() -> Self {
+        Self {
+            reason: Default::default(),
+        }
+    }
+}
+
+impl IntoValue for MailRuleReject {
+    fn into_value(self) -> JmapValue<'static> {
+        self.into_value_with(ValueOptions::default())
+    }
+
+    fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
+        let mut map = jmap_tools::Map::with_capacity(3);
+        map.insert_unchecked(Property::Reason, self.reason.into_value_with(opts));
+        JmapValue::Object(map)
+    }
+}
+
+impl RegistryJsonPropertyPatch for MailRuleReject {
+    fn patch_property<'x>(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        match pointer.next_property() {
+            Some(Property::Reason) => self.reason.patch(pointer, value),
+            Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
+                property: Property::Type,
+                value,
+            }),
+            _ => Err(PatchError::new(pointer, "Invalid property")),
+        }
+    }
+}
+
+impl MailRuleReply {
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        let neb = errors.len();
+        if let Some(value) = &self.subject {
+            if value.is_empty() {
+                errors.push(ValidationError::required(Property::Subject));
+            }
+            if value.len() > 255 {
+                errors.push(ValidationError::max_length(Property::Subject, 255));
+            }
+        }
+        let value = &self.text_body;
+        if value.is_empty() {
+            errors.push(ValidationError::required(Property::TextBody));
+        }
+        if value.len() > 2048 {
+            errors.push(ValidationError::max_length(Property::TextBody, 2048));
+        }
+        if let Some(value) = &self.html_body {
+            if value.is_empty() {
+                errors.push(ValidationError::required(Property::HtmlBody));
+            }
+            if value.len() > 2048 {
+                errors.push(ValidationError::max_length(Property::HtmlBody, 2048));
+            }
+        }
+        let value = &self.days;
+        if *value > 365 {
+            errors.push(ValidationError::max_value(Property::Days, 365));
+        }
+        errors.len() == neb
+    }
+}
+
+impl Default for MailRuleReply {
+    fn default() -> Self {
+        Self {
+            subject: Default::default(),
+            text_body: Default::default(),
+            html_body: Default::default(),
+            days: 7u64,
+        }
+    }
+}
+
+impl IntoValue for MailRuleReply {
+    fn into_value(self) -> JmapValue<'static> {
+        self.into_value_with(ValueOptions::default())
+    }
+
+    fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
+        let mut map = jmap_tools::Map::with_capacity(6);
+        map.insert_unchecked(Property::Subject, self.subject.into_value_with(opts));
+        map.insert_unchecked(Property::TextBody, self.text_body.into_value_with(opts));
+        map.insert_unchecked(Property::HtmlBody, self.html_body.into_value_with(opts));
+        map.insert_unchecked(Property::Days, self.days.into_value_with(opts));
+        JmapValue::Object(map)
+    }
+}
+
+impl RegistryJsonPropertyPatch for MailRuleReply {
+    fn patch_property<'x>(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        match pointer.next_property() {
+            Some(Property::Subject) => self.subject.patch(pointer, value),
+            Some(Property::TextBody) => self.text_body.patch(pointer, value),
+            Some(Property::HtmlBody) => self.html_body.patch(pointer, value),
+            Some(Property::Days) => self.days.patch(pointer, value),
+            Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
+                property: Property::Type,
+                value,
+            }),
+            _ => Err(PatchError::new(pointer, "Invalid property")),
+        }
+    }
+}
+
+impl MailRuleSchedule {
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        let neb = errors.len();
+        let value = &self.slots;
+        for value in value.values() {
+            value.validate(errors);
+        }
+        if value.len() < 1 {
+            errors.push(ValidationError::min_items(Property::Slots, 1));
+        }
+        if value.len() > 14 {
+            errors.push(ValidationError::max_items(Property::Slots, 14));
+        }
+        errors.len() == neb
+    }
+}
+
+impl Default for MailRuleSchedule {
+    fn default() -> Self {
+        Self {
+            slots: Default::default(),
+            time_zone: Default::default(),
+        }
+    }
+}
+
+impl IntoValue for MailRuleSchedule {
+    fn into_value(self) -> JmapValue<'static> {
+        self.into_value_with(ValueOptions::default())
+    }
+
+    fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
+        let mut map = jmap_tools::Map::with_capacity(4);
+        map.insert_unchecked(Property::Slots, self.slots.into_value_with(opts));
+        map.insert_unchecked(Property::TimeZone, self.time_zone.into_value_with(opts));
+        JmapValue::Object(map)
+    }
+}
+
+impl RegistryJsonPropertyPatch for MailRuleSchedule {
+    fn patch_property<'x>(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        match pointer.next_property() {
+            Some(Property::Slots) => self.slots.patch(pointer, value),
+            Some(Property::TimeZone) => self.time_zone.patch(pointer, value),
+            Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
+                property: Property::Type,
+                value,
+            }),
+            _ => Err(PatchError::new(pointer, "Invalid property")),
+        }
+    }
+}
+
+impl MailRuleSensitivity {
+    fn validate(&self, _: &mut Vec<ValidationError>) -> bool {
+        true
+    }
+}
+
+impl Default for MailRuleSensitivity {
+    fn default() -> Self {
+        Self {
+            level: MailRuleSensitivityLevel::Confidential,
+        }
+    }
+}
+
+impl IntoValue for MailRuleSensitivity {
+    fn into_value(self) -> JmapValue<'static> {
+        self.into_value_with(ValueOptions::default())
+    }
+
+    fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
+        let mut map = jmap_tools::Map::with_capacity(3);
+        map.insert_unchecked(Property::Level, self.level.into_value_with(opts));
+        JmapValue::Object(map)
+    }
+}
+
+impl RegistryJsonPropertyPatch for MailRuleSensitivity {
+    fn patch_property<'x>(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        match pointer.next_property() {
+            Some(Property::Level) => self.level.patch(pointer, value),
+            Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
+                property: Property::Type,
+                value,
+            }),
+            _ => Err(PatchError::new(pointer, "Invalid property")),
+        }
+    }
+}
+
+impl MailRuleSentToMe {
+    fn validate(&self, _: &mut Vec<ValidationError>) -> bool {
+        true
+    }
+}
+
+impl Default for MailRuleSentToMe {
+    fn default() -> Self {
+        Self {
+            placement: MailRuleSentToMePlacement::ToOrCc,
+        }
+    }
+}
+
+impl IntoValue for MailRuleSentToMe {
+    fn into_value(self) -> JmapValue<'static> {
+        self.into_value_with(ValueOptions::default())
+    }
+
+    fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
+        let mut map = jmap_tools::Map::with_capacity(3);
+        map.insert_unchecked(Property::Placement, self.placement.into_value_with(opts));
+        JmapValue::Object(map)
+    }
+}
+
+impl RegistryJsonPropertyPatch for MailRuleSentToMe {
+    fn patch_property<'x>(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        match pointer.next_property() {
+            Some(Property::Placement) => self.placement.patch(pointer, value),
+            Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
+                property: Property::Type,
+                value,
+            }),
+            _ => Err(PatchError::new(pointer, "Invalid property")),
+        }
+    }
+}
+
+impl MailRuleSize {
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        let neb = errors.len();
+        let value = &self.kilobytes;
+        if *value < 1 {
+            errors.push(ValidationError::min_value(Property::Kilobytes, 1));
+        }
+        errors.len() == neb
+    }
+}
+
+impl Default for MailRuleSize {
+    fn default() -> Self {
+        Self { kilobytes: 100u64 }
+    }
+}
+
+impl IntoValue for MailRuleSize {
+    fn into_value(self) -> JmapValue<'static> {
+        self.into_value_with(ValueOptions::default())
+    }
+
+    fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
+        let mut map = jmap_tools::Map::with_capacity(3);
+        map.insert_unchecked(Property::Kilobytes, self.kilobytes.into_value_with(opts));
+        JmapValue::Object(map)
+    }
+}
+
+impl RegistryJsonPropertyPatch for MailRuleSize {
+    fn patch_property<'x>(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        match pointer.next_property() {
+            Some(Property::Kilobytes) => self.kilobytes.patch(pointer, value),
+            Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
+                property: Property::Type,
+                value,
+            }),
+            _ => Err(PatchError::new(pointer, "Invalid property")),
+        }
+    }
+}
+
+impl MailRuleSpamScore {
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        let neb = errors.len();
+        let value = &self.percent;
+        if *value < 1 {
+            errors.push(ValidationError::min_value(Property::Percent, 1));
+        }
+        if *value > 100 {
+            errors.push(ValidationError::max_value(Property::Percent, 100));
+        }
+        errors.len() == neb
+    }
+}
+
+impl Default for MailRuleSpamScore {
+    fn default() -> Self {
+        Self { percent: 50u64 }
+    }
+}
+
+impl IntoValue for MailRuleSpamScore {
+    fn into_value(self) -> JmapValue<'static> {
+        self.into_value_with(ValueOptions::default())
+    }
+
+    fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
+        let mut map = jmap_tools::Map::with_capacity(3);
+        map.insert_unchecked(Property::Percent, self.percent.into_value_with(opts));
+        JmapValue::Object(map)
+    }
+}
+
+impl RegistryJsonPropertyPatch for MailRuleSpamScore {
+    fn patch_property<'x>(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        match pointer.next_property() {
+            Some(Property::Percent) => self.percent.patch(pointer, value),
+            Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
+                property: Property::Type,
+                value,
+            }),
+            _ => Err(PatchError::new(pointer, "Invalid property")),
+        }
+    }
+}
+
+impl MailRuleTextTest {
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        let neb = errors.len();
+        let value = &self.values;
+        for value in value.iter() {
+            if value.is_empty() {
+                errors.push(ValidationError::required(Property::Values));
+            }
+            if value.len() > 255 {
+                errors.push(ValidationError::max_length(Property::Values, 255));
+            }
+        }
+        if value.len() < 1 {
+            errors.push(ValidationError::min_items(Property::Values, 1));
+        }
+        if value.len() > 64 {
+            errors.push(ValidationError::max_items(Property::Values, 64));
+        }
+        errors.len() == neb
+    }
+}
+
+impl Default for MailRuleTextTest {
+    fn default() -> Self {
+        Self {
+            operator: MailRuleTextOperator::Contains,
+            values: Default::default(),
+        }
+    }
+}
+
+impl IntoValue for MailRuleTextTest {
+    fn into_value(self) -> JmapValue<'static> {
+        self.into_value_with(ValueOptions::default())
+    }
+
+    fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
+        let mut map = jmap_tools::Map::with_capacity(4);
+        map.insert_unchecked(Property::Operator, self.operator.into_value_with(opts));
+        map.insert_unchecked(Property::Values, self.values.into_value_with(opts));
+        JmapValue::Object(map)
+    }
+}
+
+impl RegistryJsonPropertyPatch for MailRuleTextTest {
+    fn patch_property<'x>(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        match pointer.next_property() {
+            Some(Property::Operator) => self.operator.patch(pointer, value),
+            Some(Property::Values) => self.values.patch(pointer, value),
+            Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
+                property: Property::Type,
+                value,
+            }),
+            _ => Err(PatchError::new(pointer, "Invalid property")),
+        }
+    }
+}
+
 impl ObjectImpl for MailingList {
     const FLAGS: u64 = OBJ_FILTER_TENANT | OBJ_SEQ_ID;
     const VERSION: u8 = 0;
@@ -45633,6 +48277,7 @@ impl ObjectImpl for MetricsStore {
 
     fn validate_inline_secrets(&self, errors: &mut Vec<ValidationError>) {
         match self {
+            MetricsStore::FoundationDb(inner) => inner.validate_inline_secrets(errors),
             MetricsStore::PostgreSql(inner) => inner.validate_inline_secrets(errors),
             MetricsStore::MySql(inner) => inner.validate_inline_secrets(errors),
             _ => {}
@@ -55574,6 +58219,149 @@ impl PublicText {
     }
 }
 
+impl PublicTextOptional {
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        match self {
+            PublicTextOptional::None => true,
+            PublicTextOptional::Text(inner) => inner.validate(errors),
+            PublicTextOptional::EnvironmentVariable(inner) => inner.validate(errors),
+            PublicTextOptional::File(inner) => inner.validate(errors),
+        }
+    }
+
+    // SPDX-SnippetBegin
+    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+    // SPDX-License-Identifier: LicenseRef-SEL
+    #[cfg(feature = "enterprise")]
+    pub fn external_source(&self) -> Option<&'static str> {
+        match self {
+            PublicTextOptional::None => None,
+            PublicTextOptional::Text(_) => None,
+            PublicTextOptional::EnvironmentVariable(_) => Some("EnvironmentVariable"),
+            PublicTextOptional::File(_) => Some("File"),
+        }
+    }
+
+    // SPDX-SnippetEnd
+}
+
+impl Default for PublicTextOptional {
+    fn default() -> Self {
+        PublicTextOptional::None
+    }
+}
+
+impl Pickle for PublicTextOptional {
+    fn pickle(&self, out: &mut Vec<u8>) {
+        match self {
+            PublicTextOptional::None => {
+                0u16.pickle(out);
+            }
+            PublicTextOptional::Text(inner) => {
+                1u16.pickle(out);
+                inner.pickle(out);
+            }
+            PublicTextOptional::EnvironmentVariable(inner) => {
+                2u16.pickle(out);
+                inner.pickle(out);
+            }
+            PublicTextOptional::File(inner) => {
+                3u16.pickle(out);
+                inner.pickle(out);
+            }
+        }
+    }
+
+    fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
+        match u16::unpickle(stream)? {
+            0 => Some(PublicTextOptional::None),
+            1 => Pickle::unpickle(stream).map(PublicTextOptional::Text),
+            2 => Pickle::unpickle(stream).map(PublicTextOptional::EnvironmentVariable),
+            3 => Pickle::unpickle(stream).map(PublicTextOptional::File),
+            _ => None,
+        }
+    }
+}
+
+impl IntoValue for PublicTextOptional {
+    fn into_value(self) -> JmapValue<'static> {
+        self.into_value_with(ValueOptions::default())
+    }
+
+    fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
+        match self {
+            PublicTextOptional::None => {
+                let mut obj = jmap_tools::Map::new();
+                obj.insert_unchecked(Property::Type, JmapValue::Str("None".into()));
+                JmapValue::Object(obj)
+            }
+            PublicTextOptional::Text(obj) => {
+                let mut obj = obj.into_value_with(opts);
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("Text".into()));
+                obj
+            }
+            PublicTextOptional::EnvironmentVariable(obj) => {
+                let mut obj = obj.into_value_with(opts);
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("EnvironmentVariable".into()));
+                obj
+            }
+            PublicTextOptional::File(obj) => {
+                let mut obj = obj.into_value_with(opts);
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("File".into()));
+                obj
+            }
+        }
+    }
+}
+
+impl RegistryJsonPatch for PublicTextOptional {
+    fn patch<'x>(
+        &mut self,
+        pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        if !pointer.has_next() {
+            match object_type(&pointer, &value)? {
+                PublicTextOptionalType::None => *self = PublicTextOptional::None,
+                PublicTextOptionalType::Text => {
+                    *self = PublicTextOptional::Text(Default::default())
+                }
+                PublicTextOptionalType::EnvironmentVariable => {
+                    *self = PublicTextOptional::EnvironmentVariable(Default::default())
+                }
+                PublicTextOptionalType::File => {
+                    *self = PublicTextOptional::File(Default::default())
+                }
+            }
+        }
+        match self {
+            PublicTextOptional::None => pointer.assert_eof(),
+            PublicTextOptional::Text(inner) => inner.patch(pointer, value),
+            PublicTextOptional::EnvironmentVariable(inner) => inner.patch(pointer, value),
+            PublicTextOptional::File(inner) => inner.patch(pointer, value),
+        }
+    }
+}
+
+impl PublicTextOptional {
+    pub fn object_type(&self) -> PublicTextOptionalType {
+        match self {
+            PublicTextOptional::None => PublicTextOptionalType::None,
+            PublicTextOptional::Text(_) => PublicTextOptionalType::Text,
+            PublicTextOptional::EnvironmentVariable(_) => {
+                PublicTextOptionalType::EnvironmentVariable
+            }
+            PublicTextOptional::File(_) => PublicTextOptionalType::File,
+        }
+    }
+}
+
 impl PublicTextValue {
     fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
         let neb = errors.len();
@@ -57322,6 +60110,571 @@ impl RegistryJsonPropertyPatch for ReportSettings {
     }
 }
 
+impl ResourceAccount {
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        let neb = errors.len();
+        let value = &self.name;
+        if value.is_empty() {
+            errors.push(ValidationError::required(Property::Name));
+        }
+        let value = &self.domain_id;
+        if !value.is_valid() {
+            errors.push(ValidationError::required(Property::DomainId));
+        }
+        if let Some(value) = &self.description {
+            if value.is_empty() {
+                errors.push(ValidationError::required(Property::Description));
+            }
+        }
+        if let Some(value) = &self.location {
+            if value.is_empty() {
+                errors.push(ValidationError::required(Property::Location));
+            }
+        }
+        let value = &self.booking;
+        value.validate(errors);
+        let value = &self.delegate_ids;
+        for value in value.iter() {
+            if !value.is_valid() {
+                errors.push(ValidationError::required(Property::DelegateIds));
+            }
+        }
+        let value = &self.created_at;
+        if !value.is_valid() {
+            errors.push(ValidationError::invalid(Property::CreatedAt, value));
+        }
+        // SPDX-SnippetBegin
+        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+        // SPDX-License-Identifier: LicenseRef-SEL
+        #[cfg(feature = "enterprise")]
+        if let Some(value) = &self.member_tenant_id {
+            if !value.is_valid() {
+                errors.push(ValidationError::required(Property::MemberTenantId));
+            }
+        }
+        // SPDX-SnippetEnd
+        let value = &self.roles;
+        value.validate(errors);
+        let value = &self.permissions;
+        value.validate(errors);
+        let value = &self.aliases;
+        for value in value.values() {
+            value.validate(errors);
+        }
+        // SPDX-SnippetBegin
+        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+        // SPDX-License-Identifier: LicenseRef-SEL
+        #[cfg(feature = "enterprise")]
+        if let Some(value) = &self.external_id {
+            if value.is_empty() {
+                errors.push(ValidationError::required(Property::ExternalId));
+            }
+        }
+        // SPDX-SnippetEnd
+        errors.len() == neb
+    }
+
+    fn index<'x>(&'x self, i: &mut IndexBuilder<'x>) {
+        i.unique_global_composite(
+            Property::Email,
+            &self.name,
+            IndexValue::U32(self.domain_id.document_id()),
+        );
+        i.text(Property::Text, &self.name);
+        i.search(Property::Name, &self.name);
+        i.foreign_key(ObjectType::Domain, self.domain_id.into(), None);
+        i.search(Property::DomainId, &self.domain_id);
+        if let Some(value) = &self.description {
+            i.text(Property::Text, value);
+        }
+        i.search(Property::Kind, &self.kind);
+        for id in self.delegate_ids.iter() {
+            i.foreign_key(
+                ObjectType::Account,
+                Some(*id),
+                Some(AccountType::User.to_id()),
+            );
+        }
+        for value in self.delegate_ids.iter() {
+            i.search(Property::DelegateIds, value);
+        }
+        // SPDX-SnippetBegin
+        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+        // SPDX-License-Identifier: LicenseRef-SEL
+        #[cfg(feature = "enterprise")]
+        i.foreign_key(ObjectType::Tenant, self.member_tenant_id, None);
+        #[cfg(feature = "enterprise")]
+        if let Some(value) = &self.member_tenant_id {
+            i.search(Property::MemberTenantId, value);
+        }
+        // SPDX-SnippetEnd
+        self.roles.index(i);
+        for item in self.aliases.values() {
+            item.index(i);
+        }
+        // SPDX-SnippetBegin
+        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+        // SPDX-License-Identifier: LicenseRef-SEL
+        #[cfg(feature = "enterprise")]
+        if let Some(value) = &self.external_id {
+            i.search(Property::ExternalId, value);
+        }
+        // SPDX-SnippetEnd
+    }
+}
+
+impl Pickle for ResourceAccount {
+    fn pickle(&self, out: &mut Vec<u8>) {
+        let mut bitmap = 0u64;
+        if self.description.is_some() {
+            bitmap |= 1 << 0;
+        }
+        if self.capacity.is_some() {
+            bitmap |= 1 << 1;
+        }
+        if self.location.is_some() {
+            bitmap |= 1 << 2;
+        }
+        // SPDX-SnippetBegin
+        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+        // SPDX-License-Identifier: LicenseRef-SEL
+        #[cfg(feature = "enterprise")]
+        if self.member_tenant_id.is_some() {
+            bitmap |= 1 << 3;
+        }
+        // SPDX-SnippetEnd
+        if self.time_zone.is_some() {
+            bitmap |= 1 << 4;
+        }
+        // SPDX-SnippetBegin
+        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+        // SPDX-License-Identifier: LicenseRef-SEL
+        #[cfg(feature = "enterprise")]
+        if self.external_id.is_some() {
+            bitmap |= 1 << 5;
+        }
+        // SPDX-SnippetEnd
+        let block = crate::pickle::begin_block(out, 17, 6, bitmap);
+        self.name.pickle(out);
+        self.domain_id.pickle(out);
+        if let Some(value) = &self.description {
+            value.pickle(out);
+        }
+        self.kind.pickle(out);
+        if let Some(value) = &self.capacity {
+            value.pickle(out);
+        }
+        if let Some(value) = &self.location {
+            value.pickle(out);
+        }
+        self.booking.pickle(out);
+        self.delegate_ids.pickle(out);
+        self.created_at.pickle(out);
+        // SPDX-SnippetBegin
+        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+        // SPDX-License-Identifier: LicenseRef-SEL
+        #[cfg(feature = "enterprise")]
+        if let Some(value) = &self.member_tenant_id {
+            value.pickle(out);
+        }
+        // SPDX-SnippetEnd
+        self.roles.pickle(out);
+        self.quotas.pickle(out);
+        self.permissions.pickle(out);
+        self.aliases.pickle(out);
+        self.locale.pickle(out);
+        if let Some(value) = &self.time_zone {
+            value.pickle(out);
+        }
+        // SPDX-SnippetBegin
+        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+        // SPDX-License-Identifier: LicenseRef-SEL
+        #[cfg(feature = "enterprise")]
+        if let Some(value) = &self.external_id {
+            value.pickle(out);
+        }
+        // SPDX-SnippetEnd
+        crate::pickle::end_block(out, block);
+    }
+
+    fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
+        let block = stream.open_block()?;
+        let field0: String = if block.has(0) {
+            Pickle::unpickle(stream)?
+        } else {
+            Default::default()
+        };
+        let field1: Id = if block.has(1) {
+            Pickle::unpickle(stream)?
+        } else {
+            Default::default()
+        };
+        let field2: Option<String> = if block.has(2) {
+            if block.flag(0) {
+                Some(Pickle::unpickle(stream)?)
+            } else {
+                None
+            }
+        } else {
+            Default::default()
+        };
+        let field3: ResourceKind = if block.has(3) {
+            Pickle::unpickle(stream)?
+        } else {
+            ResourceKind::Room
+        };
+        let field4: Option<u64> = if block.has(4) {
+            if block.flag(1) {
+                Some(Pickle::unpickle(stream)?)
+            } else {
+                None
+            }
+        } else {
+            Default::default()
+        };
+        let field5: Option<String> = if block.has(5) {
+            if block.flag(2) {
+                Some(Pickle::unpickle(stream)?)
+            } else {
+                None
+            }
+        } else {
+            Default::default()
+        };
+        let field6: ResourceBooking = if block.has(6) {
+            Pickle::unpickle(stream)?
+        } else {
+            ResourceBooking::Automatic(Default::default())
+        };
+        let field7: Map<Id> = if block.has(7) {
+            Pickle::unpickle(stream)?
+        } else {
+            Default::default()
+        };
+        let field8: UTCDateTime = if block.has(8) {
+            Pickle::unpickle(stream)?
+        } else {
+            Default::default()
+        };
+        // SPDX-SnippetBegin
+        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+        // SPDX-License-Identifier: LicenseRef-SEL
+        #[cfg(feature = "enterprise")]
+        let field9: Option<Id> = if block.has(9) {
+            if block.flag(3) {
+                Some(Pickle::unpickle(stream)?)
+            } else {
+                None
+            }
+        } else {
+            Default::default()
+        };
+        // SPDX-SnippetEnd
+        let field10: Roles = if block.has(10) {
+            Pickle::unpickle(stream)?
+        } else {
+            Default::default()
+        };
+        let field11: VecMap<StorageQuota, u64> = if block.has(11) {
+            Pickle::unpickle(stream)?
+        } else {
+            Default::default()
+        };
+        let field12: Permissions = if block.has(12) {
+            Pickle::unpickle(stream)?
+        } else {
+            Default::default()
+        };
+        let field13: List<EmailAlias> = if block.has(13) {
+            Pickle::unpickle(stream)?
+        } else {
+            Default::default()
+        };
+        let field14: Locale = if block.has(14) {
+            Pickle::unpickle(stream)?
+        } else {
+            Locale::EnUS
+        };
+        let field15: Option<TimeZone> = if block.has(15) {
+            if block.flag(4) {
+                Some(Pickle::unpickle(stream)?)
+            } else {
+                None
+            }
+        } else {
+            Default::default()
+        };
+        // SPDX-SnippetBegin
+        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+        // SPDX-License-Identifier: LicenseRef-SEL
+        #[cfg(feature = "enterprise")]
+        let field16: Option<String> = if block.has(16) {
+            if block.flag(5) {
+                Some(Pickle::unpickle(stream)?)
+            } else {
+                None
+            }
+        } else {
+            Default::default()
+        };
+        // SPDX-SnippetEnd
+        stream.close_block(block);
+        Some(Self {
+            name: field0,
+            domain_id: field1,
+            description: field2,
+            kind: field3,
+            capacity: field4,
+            location: field5,
+            booking: field6,
+            delegate_ids: field7,
+            created_at: field8,
+            // SPDX-SnippetBegin
+            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+            // SPDX-License-Identifier: LicenseRef-SEL
+            #[cfg(feature = "enterprise")]
+            member_tenant_id: field9,
+            // SPDX-SnippetEnd
+            roles: field10,
+            quotas: field11,
+            permissions: field12,
+            aliases: field13,
+            locale: field14,
+            time_zone: field15,
+            // SPDX-SnippetBegin
+            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+            // SPDX-License-Identifier: LicenseRef-SEL
+            #[cfg(feature = "enterprise")]
+            external_id: field16,
+            // SPDX-SnippetEnd
+        })
+    }
+}
+
+impl Default for ResourceAccount {
+    fn default() -> Self {
+        Self {
+            name: Default::default(),
+            domain_id: Default::default(),
+            description: Default::default(),
+            kind: ResourceKind::Room,
+            capacity: Default::default(),
+            location: Default::default(),
+            booking: ResourceBooking::Automatic(Default::default()),
+            delegate_ids: Default::default(),
+            created_at: Default::default(),
+            // SPDX-SnippetBegin
+            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+            // SPDX-License-Identifier: LicenseRef-SEL
+            #[cfg(feature = "enterprise")]
+            member_tenant_id: Default::default(),
+            // SPDX-SnippetEnd
+            roles: Default::default(),
+            quotas: Default::default(),
+            permissions: Default::default(),
+            aliases: Default::default(),
+            locale: Locale::EnUS,
+            time_zone: Default::default(),
+            // SPDX-SnippetBegin
+            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+            // SPDX-License-Identifier: LicenseRef-SEL
+            #[cfg(feature = "enterprise")]
+            external_id: Default::default(),
+            // SPDX-SnippetEnd
+        }
+    }
+}
+
+impl IntoValue for ResourceAccount {
+    fn into_value(self) -> JmapValue<'static> {
+        self.into_value_with(ValueOptions::default())
+    }
+
+    fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
+        let mut map = jmap_tools::Map::with_capacity(19);
+        map.insert_unchecked(Property::Name, self.name.into_value_with(opts));
+        map.insert_unchecked(Property::DomainId, self.domain_id.into_value_with(opts));
+        map.insert_unchecked(
+            Property::Description,
+            self.description.into_value_with(opts),
+        );
+        map.insert_unchecked(Property::Kind, self.kind.into_value_with(opts));
+        map.insert_unchecked(Property::Capacity, self.capacity.into_value_with(opts));
+        map.insert_unchecked(Property::Location, self.location.into_value_with(opts));
+        map.insert_unchecked(Property::Booking, self.booking.into_value_with(opts));
+        map.insert_unchecked(
+            Property::DelegateIds,
+            self.delegate_ids.into_value_with(opts),
+        );
+        map.insert_unchecked(Property::CreatedAt, self.created_at.into_value_with(opts));
+        // SPDX-SnippetBegin
+        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+        // SPDX-License-Identifier: LicenseRef-SEL
+        #[cfg(feature = "enterprise")]
+        map.insert_unchecked(
+            Property::MemberTenantId,
+            self.member_tenant_id.into_value_with(opts),
+        );
+        // SPDX-SnippetEnd
+        map.insert_unchecked(Property::Roles, self.roles.into_value_with(opts));
+        map.insert_unchecked(Property::Quotas, self.quotas.into_value_with(opts));
+        map.insert_unchecked(
+            Property::Permissions,
+            self.permissions.into_value_with(opts),
+        );
+        map.insert_unchecked(Property::Aliases, self.aliases.into_value_with(opts));
+        map.insert_unchecked(Property::Locale, self.locale.into_value_with(opts));
+        map.insert_unchecked(Property::TimeZone, self.time_zone.into_value_with(opts));
+        // SPDX-SnippetBegin
+        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+        // SPDX-License-Identifier: LicenseRef-SEL
+        #[cfg(feature = "enterprise")]
+        map.insert_unchecked(Property::ExternalId, self.external_id.into_value_with(opts));
+        // SPDX-SnippetEnd
+        JmapValue::Object(map)
+    }
+}
+
+impl RegistryJsonPropertyPatch for ResourceAccount {
+    fn patch_property<'x>(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        match pointer.next_property() {
+            Some(Property::Name) => self.name.patch(
+                pointer.with_validators(&[StringValidator::EmailLocalPart]),
+                value,
+            ),
+            Some(Property::DomainId) => self.domain_id.patch(pointer, value),
+            Some(Property::EmailAddress) => pointer.assert_server_set(),
+            Some(Property::Description) => self.description.patch(pointer, value),
+            Some(Property::Kind) => self.kind.patch(pointer, value),
+            Some(Property::Capacity) => self.capacity.patch(pointer, value),
+            Some(Property::Location) => self.location.patch(pointer, value),
+            Some(Property::Booking) => self.booking.patch(pointer, value),
+            Some(Property::DelegateIds) => self.delegate_ids.patch(pointer, value),
+            Some(Property::CreatedAt) => pointer.assert_server_set(),
+            // SPDX-SnippetBegin
+            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+            // SPDX-License-Identifier: LicenseRef-SEL
+            #[cfg(feature = "enterprise")]
+            Some(Property::MemberTenantId) => self
+                .member_tenant_id
+                .patch(pointer.assert_can_set_tenant()?, value),
+            // SPDX-SnippetEnd
+            Some(Property::Roles) => self.roles.patch(pointer, value),
+            Some(Property::Quotas) => self.quotas.patch(pointer, value),
+            Some(Property::UsedDiskQuota) => pointer.assert_server_set(),
+            Some(Property::Permissions) => self.permissions.patch(pointer, value),
+            Some(Property::Aliases) => self.aliases.patch(pointer, value),
+            Some(Property::Locale) => self.locale.patch(pointer, value),
+            Some(Property::TimeZone) => self.time_zone.patch(pointer, value),
+            // SPDX-SnippetBegin
+            // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+            // SPDX-License-Identifier: LicenseRef-SEL
+            #[cfg(feature = "enterprise")]
+            Some(Property::ExternalId) => self.external_id.patch(pointer, value),
+            // SPDX-SnippetEnd
+            Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
+                property: Property::Type,
+                value,
+            }),
+            _ => Err(PatchError::new(pointer, "Invalid property")),
+        }
+    }
+}
+
+impl ResourceBooking {
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        match self {
+            ResourceBooking::Automatic(inner) => inner.validate(errors),
+            ResourceBooking::Manual => true,
+        }
+    }
+}
+
+impl Default for ResourceBooking {
+    fn default() -> Self {
+        ResourceBooking::Automatic(Default::default())
+    }
+}
+
+impl Pickle for ResourceBooking {
+    fn pickle(&self, out: &mut Vec<u8>) {
+        match self {
+            ResourceBooking::Automatic(inner) => {
+                0u16.pickle(out);
+                inner.pickle(out);
+            }
+            ResourceBooking::Manual => {
+                1u16.pickle(out);
+            }
+        }
+    }
+
+    fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
+        match u16::unpickle(stream)? {
+            0 => Pickle::unpickle(stream).map(ResourceBooking::Automatic),
+            1 => Some(ResourceBooking::Manual),
+            _ => None,
+        }
+    }
+}
+
+impl IntoValue for ResourceBooking {
+    fn into_value(self) -> JmapValue<'static> {
+        self.into_value_with(ValueOptions::default())
+    }
+
+    fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
+        match self {
+            ResourceBooking::Automatic(obj) => {
+                let mut obj = obj.into_value_with(opts);
+                obj.as_object_mut()
+                    .unwrap()
+                    .insert_unchecked(Property::Type, JmapValue::Str("Automatic".into()));
+                obj
+            }
+            ResourceBooking::Manual => {
+                let mut obj = jmap_tools::Map::new();
+                obj.insert_unchecked(Property::Type, JmapValue::Str("Manual".into()));
+                JmapValue::Object(obj)
+            }
+        }
+    }
+}
+
+impl RegistryJsonPatch for ResourceBooking {
+    fn patch<'x>(
+        &mut self,
+        pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        if !pointer.has_next() {
+            match object_type(&pointer, &value)? {
+                ResourceBookingType::Automatic => {
+                    *self = ResourceBooking::Automatic(Default::default())
+                }
+                ResourceBookingType::Manual => *self = ResourceBooking::Manual,
+            }
+        }
+        match self {
+            ResourceBooking::Automatic(inner) => inner.patch(pointer, value),
+            ResourceBooking::Manual => pointer.assert_eof(),
+        }
+    }
+}
+
+impl ResourceBooking {
+    pub fn object_type(&self) -> ResourceBookingType {
+        match self {
+            ResourceBooking::Automatic(_) => ResourceBookingType::Automatic,
+            ResourceBooking::Manual => ResourceBookingType::Manual,
+        }
+    }
+}
+
 impl RocksDbStore {
     fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
         let neb = errors.len();
@@ -58673,6 +62026,68 @@ impl S3StoreRegion {
     }
 }
 
+impl ObjectImpl for SafeSender {
+    const FLAGS: u64 = OBJ_FILTER_ACCOUNT | OBJ_NOT_STORED | OBJ_NO_UPDATE;
+    const VERSION: u8 = 0;
+    const OBJECT: ObjectType = ObjectType::SafeSender;
+
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        let neb = errors.len();
+        let value = &self.address;
+        if value.is_empty() {
+            errors.push(ValidationError::required(Property::Address));
+        }
+        if value.len() > 255 {
+            errors.push(ValidationError::max_length(Property::Address, 255));
+        }
+        errors.len() == neb
+    }
+
+    fn index<'x>(&'x self, _: &mut IndexBuilder<'x>) {}
+}
+
+impl Default for SafeSender {
+    fn default() -> Self {
+        Self {
+            address: Default::default(),
+        }
+    }
+}
+
+impl IntoValue for SafeSender {
+    fn into_value(self) -> JmapValue<'static> {
+        self.into_value_with(ValueOptions::default())
+    }
+
+    fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
+        let mut map = jmap_tools::Map::with_capacity(3);
+        map.insert_unchecked(Property::Address, self.address.into_value_with(opts));
+        JmapValue::Object(map)
+    }
+}
+
+impl RegistryJsonPropertyPatch for SafeSender {
+    fn patch_property<'x>(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        match pointer.next_property() {
+            Some(Property::Address) => self.address.patch(
+                pointer
+                    .assert_read_only()?
+                    .with_validators(&[StringValidator::Trim, StringValidator::Lowercase]),
+                value,
+            ),
+            Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
+                property: Property::Type,
+                value,
+            }),
+            _ => Err(PatchError::new(pointer, "Invalid property")),
+        }
+    }
+}
+
 impl ObjectImpl for Search {
     const FLAGS: u64 = OBJ_SINGLETON;
     const VERSION: u8 = 0;
@@ -59153,6 +62568,7 @@ impl ObjectImpl for SearchStore {
         match self {
             SearchStore::ElasticSearch(inner) => inner.validate_inline_secrets(errors),
             SearchStore::Meilisearch(inner) => inner.validate_inline_secrets(errors),
+            SearchStore::FoundationDb(inner) => inner.validate_inline_secrets(errors),
             SearchStore::PostgreSql(inner) => inner.validate_inline_secrets(errors),
             SearchStore::MySql(inner) => inner.validate_inline_secrets(errors),
             _ => {}
@@ -62133,12 +65549,12 @@ impl Pickle for SieveUserInterpreter {
         let field20: u64 = if block.has(20) {
             Pickle::unpickle(stream)?
         } else {
-            102400
+            524288
         };
         let field21: u64 = if block.has(21) {
             Pickle::unpickle(stream)?
         } else {
-            4096u64
+            8192u64
         };
         let field22: u64 = if block.has(22) {
             Pickle::unpickle(stream)?
@@ -62230,8 +65646,8 @@ impl Default for SieveUserInterpreter {
             max_out_messages: 3u64,
             max_received_headers: 50u64,
             max_redirects: 1u64,
-            max_script_size: 102400,
-            max_string_length: 4096u64,
+            max_script_size: 524288,
+            max_string_length: 8192u64,
             max_var_name_length: 32u64,
             max_var_size: 4096u64,
             max_scripts: Some(100u64),
@@ -77545,6 +80961,7 @@ impl ObjectImpl for TracingStore {
 
     fn validate_inline_secrets(&self, errors: &mut Vec<ValidationError>) {
         match self {
+            TracingStore::FoundationDb(inner) => inner.validate_inline_secrets(errors),
             TracingStore::PostgreSql(inner) => inner.validate_inline_secrets(errors),
             TracingStore::MySql(inner) => inner.validate_inline_secrets(errors),
             _ => {}
@@ -78599,6 +82016,206 @@ impl RegistryJsonPropertyPatch for WebHook {
                 .patch(pointer.with_validators(&[StringValidator::Trim]), value),
             Some(Property::Events) => self.events.patch(pointer, value),
             Some(Property::EventsPolicy) => self.events_policy.patch(pointer, value),
+            Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
+                property: Property::Type,
+                value,
+            }),
+            _ => Err(PatchError::new(pointer, "Invalid property")),
+        }
+    }
+}
+
+impl WorkingHours {
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        let neb = errors.len();
+        let value = &self.slots;
+        for value in value.values() {
+            value.validate(errors);
+        }
+        if value.len() > 14 {
+            errors.push(ValidationError::max_items(Property::Slots, 14));
+        }
+        errors.len() == neb
+    }
+}
+
+impl Pickle for WorkingHours {
+    fn pickle(&self, out: &mut Vec<u8>) {
+        let mut bitmap = 0u64;
+        if self.enable {
+            bitmap |= 1 << 0;
+        }
+        if self.time_zone.is_some() {
+            bitmap |= 1 << 1;
+        }
+        let block = crate::pickle::begin_block(out, 3, 2, bitmap);
+        if let Some(value) = &self.time_zone {
+            value.pickle(out);
+        }
+        self.slots.pickle(out);
+        crate::pickle::end_block(out, block);
+    }
+
+    fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
+        let block = stream.open_block()?;
+        let field0: bool = if block.has(0) { block.flag(0) } else { false };
+        let field1: Option<TimeZone> = if block.has(1) {
+            if block.flag(1) {
+                Some(Pickle::unpickle(stream)?)
+            } else {
+                None
+            }
+        } else {
+            Default::default()
+        };
+        let field2: List<WorkingHoursSlot> = if block.has(2) {
+            Pickle::unpickle(stream)?
+        } else {
+            Default::default()
+        };
+        stream.close_block(block);
+        Some(Self {
+            enable: field0,
+            time_zone: field1,
+            slots: field2,
+        })
+    }
+}
+
+impl Default for WorkingHours {
+    fn default() -> Self {
+        Self {
+            enable: false,
+            time_zone: Default::default(),
+            slots: Default::default(),
+        }
+    }
+}
+
+impl IntoValue for WorkingHours {
+    fn into_value(self) -> JmapValue<'static> {
+        self.into_value_with(ValueOptions::default())
+    }
+
+    fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
+        let mut map = jmap_tools::Map::with_capacity(5);
+        map.insert_unchecked(Property::Enable, self.enable.into_value_with(opts));
+        map.insert_unchecked(Property::TimeZone, self.time_zone.into_value_with(opts));
+        map.insert_unchecked(Property::Slots, self.slots.into_value_with(opts));
+        JmapValue::Object(map)
+    }
+}
+
+impl RegistryJsonPropertyPatch for WorkingHours {
+    fn patch_property<'x>(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        match pointer.next_property() {
+            Some(Property::Enable) => self.enable.patch(pointer, value),
+            Some(Property::TimeZone) => self.time_zone.patch(pointer, value),
+            Some(Property::Slots) => self.slots.patch(pointer, value),
+            Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
+                property: Property::Type,
+                value,
+            }),
+            _ => Err(PatchError::new(pointer, "Invalid property")),
+        }
+    }
+}
+
+impl WorkingHoursSlot {
+    fn validate(&self, errors: &mut Vec<ValidationError>) -> bool {
+        let neb = errors.len();
+        let value = &self.days;
+        if value.len() < 1 {
+            errors.push(ValidationError::min_items(Property::Days, 1));
+        }
+        if value.len() > 7 {
+            errors.push(ValidationError::max_items(Property::Days, 7));
+        }
+        let value = &self.start;
+        if !value.is_valid() {
+            errors.push(ValidationError::invalid(Property::Start, value));
+        }
+        let value = &self.end;
+        if !value.is_valid() {
+            errors.push(ValidationError::invalid(Property::End, value));
+        }
+        errors.len() == neb
+    }
+}
+
+impl Pickle for WorkingHoursSlot {
+    fn pickle(&self, out: &mut Vec<u8>) {
+        let block = crate::pickle::begin_block(out, 3, 0, 0);
+        self.days.pickle(out);
+        self.start.pickle(out);
+        self.end.pickle(out);
+        crate::pickle::end_block(out, block);
+    }
+
+    fn unpickle(stream: &mut crate::pickle::PickledStream<'_>) -> Option<Self> {
+        let block = stream.open_block()?;
+        let field0: Map<Weekday> = if block.has(0) {
+            Pickle::unpickle(stream)?
+        } else {
+            Default::default()
+        };
+        let field1: LocalTime = if block.has(1) {
+            Pickle::unpickle(stream)?
+        } else {
+            LocalTime::from_minutes(540)
+        };
+        let field2: LocalTime = if block.has(2) {
+            Pickle::unpickle(stream)?
+        } else {
+            LocalTime::from_minutes(1020)
+        };
+        stream.close_block(block);
+        Some(Self {
+            days: field0,
+            start: field1,
+            end: field2,
+        })
+    }
+}
+
+impl Default for WorkingHoursSlot {
+    fn default() -> Self {
+        Self {
+            days: Default::default(),
+            start: LocalTime::from_minutes(540),
+            end: LocalTime::from_minutes(1020),
+        }
+    }
+}
+
+impl IntoValue for WorkingHoursSlot {
+    fn into_value(self) -> JmapValue<'static> {
+        self.into_value_with(ValueOptions::default())
+    }
+
+    fn into_value_with(self, opts: ValueOptions) -> JmapValue<'static> {
+        let mut map = jmap_tools::Map::with_capacity(5);
+        map.insert_unchecked(Property::Days, self.days.into_value_with(opts));
+        map.insert_unchecked(Property::Start, self.start.into_value_with(opts));
+        map.insert_unchecked(Property::End, self.end.into_value_with(opts));
+        JmapValue::Object(map)
+    }
+}
+
+impl RegistryJsonPropertyPatch for WorkingHoursSlot {
+    fn patch_property<'x>(
+        &mut self,
+        mut pointer: JsonPointerPatch<'_>,
+        value: JmapValue<'x>,
+    ) -> PatchResult<'x> {
+        match pointer.next_property() {
+            Some(Property::Days) => self.days.patch(pointer, value),
+            Some(Property::Start) => self.start.patch(pointer, value),
+            Some(Property::End) => self.end.patch(pointer, value),
             Some(Property::Type) => Ok(MaybeUnpatched::Unpatched {
                 property: Property::Type,
                 value,

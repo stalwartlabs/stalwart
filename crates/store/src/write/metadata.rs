@@ -5,6 +5,8 @@
  */
 
 use super::{Archive, ArchiveBytes, ArchiveVersion, ValueClass};
+#[cfg(feature = "exchange")]
+use crate::U16_LEN;
 use crate::{Deserialize, SerializeInfallible, U32_LEN, U64_LEN};
 use types::metadata::{EncodedMetadata, MetadataKinds, MetadataView, STORAGE_TRAILER_CAPACITY};
 
@@ -16,9 +18,44 @@ const _: () = assert!(TRAILER_LEN == STORAGE_TRAILER_CAPACITY);
 #[derive(Debug, PartialEq, Clone, Copy, Eq, Hash)]
 pub enum MetadataClass {
     Shared,
-    Private { viewer: u32 },
-    Viewer { viewer: u32 },
-    Owner { owner: u32 },
+    Private {
+        viewer: u32,
+    },
+    Viewer {
+        viewer: u32,
+    },
+    Owner {
+        owner: u32,
+    },
+    #[cfg(feature = "exchange")]
+    Exchange(ExchangeClass),
+}
+
+#[cfg(feature = "exchange")]
+#[derive(Debug, PartialEq, Clone, Copy, Eq, Hash)]
+pub enum ExchangeClass {
+    Object,
+    Alias,
+    Account,
+    NamedProperties,
+    Device { slot: u16 },
+    DeviceFolder { slot: u16, folder: ExchangeFolder },
+    Fai { folder: ExchangeFolder, id: u32 },
+    Folder { id: u32 },
+    FolderTombstone { id: u32 },
+    FaiTombstone { folder: ExchangeFolder, id: u32 },
+    Categories,
+    TaskList,
+    Rules,
+    SpecialFolder { code: u8 },
+    OfflineAddressBook { tenant: u32 },
+}
+
+#[cfg(feature = "exchange")]
+#[derive(Debug, PartialEq, Clone, Copy, Eq, Hash)]
+pub struct ExchangeFolder {
+    pub kind: u8,
+    pub id: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,6 +83,68 @@ impl MetadataClass {
     pub(crate) const PRIVATE: u8 = 1;
     pub const VIEWER: u8 = 2;
     pub const OWNER: u8 = 3;
+    #[cfg(feature = "exchange")]
+    pub const EXCHANGE: u8 = 4;
+}
+
+#[cfg(feature = "exchange")]
+impl ExchangeClass {
+    pub const fn code(&self) -> u8 {
+        match self {
+            ExchangeClass::Object => 0,
+            ExchangeClass::Alias => 1,
+            ExchangeClass::Account => 2,
+            ExchangeClass::NamedProperties => 3,
+            ExchangeClass::Device { .. } => 4,
+            ExchangeClass::DeviceFolder { .. } => 5,
+            ExchangeClass::Fai { .. } => 6,
+            ExchangeClass::Folder { .. } => 7,
+            ExchangeClass::FolderTombstone { .. } => 8,
+            ExchangeClass::FaiTombstone { .. } => 9,
+            ExchangeClass::Categories => 10,
+            ExchangeClass::TaskList => 11,
+            ExchangeClass::Rules => 12,
+            ExchangeClass::SpecialFolder { .. } => 13,
+            ExchangeClass::OfflineAddressBook { .. } => 14,
+        }
+    }
+
+    pub(crate) const fn key_len(&self) -> usize {
+        match self {
+            ExchangeClass::Object | ExchangeClass::Alias => U32_LEN + 1,
+            ExchangeClass::Account
+            | ExchangeClass::NamedProperties
+            | ExchangeClass::Categories
+            | ExchangeClass::TaskList
+            | ExchangeClass::Rules => 0,
+            ExchangeClass::Device { .. } => U16_LEN,
+            ExchangeClass::DeviceFolder { .. } => U16_LEN + U32_LEN + 1,
+            ExchangeClass::Fai { .. } | ExchangeClass::FaiTombstone { .. } => (U32_LEN * 2) + 1,
+            ExchangeClass::Folder { .. }
+            | ExchangeClass::FolderTombstone { .. }
+            | ExchangeClass::OfflineAddressBook { .. } => U32_LEN,
+            ExchangeClass::SpecialFolder { .. } => 1,
+        }
+    }
+
+    pub(crate) const fn may_be_chunked(&self) -> bool {
+        !matches!(
+            self,
+            ExchangeClass::Alias
+                | ExchangeClass::TaskList
+                | ExchangeClass::Rules
+                | ExchangeClass::FolderTombstone { .. }
+                | ExchangeClass::FaiTombstone { .. }
+                | ExchangeClass::OfflineAddressBook { .. }
+        )
+    }
+}
+
+#[cfg(feature = "exchange")]
+impl From<ExchangeClass> for ValueClass {
+    fn from(class: ExchangeClass) -> Self {
+        ValueClass::Metadata(MetadataClass::Exchange(class))
+    }
 }
 
 impl From<MetadataClass> for ValueClass {

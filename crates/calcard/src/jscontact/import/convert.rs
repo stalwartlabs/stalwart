@@ -1074,18 +1074,33 @@ impl VCard {
                     }
                 }
                 VCardProperty::Socialprofile => {
+                    let is_text = entry.take_text_value_type() || entry.move_username_to_value();
                     state.map_named_entry(
                         &mut entry,
-                        &[
-                            VCardParameterName::Type,
-                            VCardParameterName::Pref,
-                            VCardParameterName::PropId,
-                            VCardParameterName::Label,
-                            VCardParameterName::ServiceType,
-                            VCardParameterName::Username,
-                        ],
+                        if is_text {
+                            &[
+                                VCardParameterName::Type,
+                                VCardParameterName::Pref,
+                                VCardParameterName::PropId,
+                                VCardParameterName::Label,
+                                VCardParameterName::ServiceType,
+                            ]
+                        } else {
+                            &[
+                                VCardParameterName::Type,
+                                VCardParameterName::Pref,
+                                VCardParameterName::PropId,
+                                VCardParameterName::Label,
+                                VCardParameterName::ServiceType,
+                                VCardParameterName::Username,
+                            ]
+                        },
                         JSContactProperty::OnlineServices,
-                        JSContactProperty::Uri,
+                        if is_text {
+                            JSContactProperty::User
+                        } else {
+                            JSContactProperty::Uri
+                        },
                         [None, None],
                     );
                 }

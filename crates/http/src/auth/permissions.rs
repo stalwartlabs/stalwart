@@ -96,6 +96,8 @@ impl AccountApiHandler for Server {
                     for p in [
                         Permission::SysAccountSettingsGet,
                         Permission::SysAccountSettingsUpdate,
+                        Permission::SysCalendarSettingsGet,
+                        Permission::SysCalendarSettingsUpdate,
                         Permission::SysApiKeyCreate,
                         Permission::SysApiKeyUpdate,
                         Permission::SysApiKeyDestroy,

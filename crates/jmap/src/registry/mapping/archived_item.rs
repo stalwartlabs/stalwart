@@ -150,6 +150,22 @@ pub(crate) async fn archived_item_set(
                 let item = ArchivedItem::from(item);
                 let account_id = item.account_id();
 
+                if set
+                    .server
+                    .registry()
+                    .get_fresh(ObjectId::new(ObjectType::Account, account_id))
+                    .await
+                    .caused_by(trc::location!())?
+                    .is_none()
+                {
+                    set.response.not_updated.append(
+                        id,
+                        SetError::forbidden()
+                            .with_description("The account no longer exists, recover it first"),
+                    );
+                    continue;
+                }
+
                 batch
                     .assert_value(
                         ValueClass::Registry(RegistryClass::Item { object_id, item_id }),

@@ -7,6 +7,7 @@
 use crate::{
     DavError, DavErrorCondition, DavMethod, DavResourceName,
     calendar::{
+        availability::CalendarAvailabilityRequestHandler,
         copy_move::CalendarCopyMoveRequestHandler, delete::CalendarDeleteRequestHandler,
         freebusy::CalendarFreebusyRequestHandler, get::CalendarGetRequestHandler,
         mkcol::CalendarMkColRequestHandler, proppatch::CalendarPropPatchRequestHandler,
@@ -234,6 +235,10 @@ impl DavRequestDispatcher for Server {
                                     ),
                                     "Calendar user address",
                                 ),
+                                PrincipalSearchProperty::new(
+                                    DavProperty::Principal(PrincipalProperty::CalendarUserType),
+                                    "Calendar user type",
+                                ),
                             ])
                             .with_namespace(Namespace::CalDav)
                             .to_string(),
@@ -347,7 +352,14 @@ impl DavRequestDispatcher for Server {
                         self.handle_file_proppatch_request(&access_token, headers, request)
                             .await
                     }
-                    DavResourceName::Principal | DavResourceName::Scheduling => {
+                    DavResourceName::Scheduling => {
+                        let access_token =
+                            access_token.assert_has_permission(Permission::DavCalPropPatch)?;
+
+                        self.handle_scheduling_proppatch_request(&access_token, headers, request)
+                            .await
+                    }
+                    DavResourceName::Principal => {
                         Err(DavError::Code(StatusCode::METHOD_NOT_ALLOWED))
                     }
                 }

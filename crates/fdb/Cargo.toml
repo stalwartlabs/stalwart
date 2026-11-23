@@ -1,0 +1,47 @@
+[package]
+name = "fdb"
+description = "Native async FoundationDB client"
+version = "1.2.0"
+edition = "2024"
+license = "AGPL-3.0-only OR LicenseRef-SEL"
+publish = false
+
+[dependencies]
+aws-lc-sys = "0.47"
+bytes = "1.12"
+crossbeam-utils = "0.8"
+fastrand = "2.5"
+futures-util = { version = "0.3.34", default-features = false, features = ["alloc"] }
+hashify = "0.3"
+memchr = "2.8"
+parking_lot = "0.13"
+pin-project-lite = "0.2"
+rustls = { version = "0.23.46", default-features = false, features = ["std", "aws_lc_rs", "tls12"] }
+rustls-pki-types = { version = "1", features = ["std"] }
+rustls-webpki = { version = "0.103", default-features = false, features = ["std", "aws-lc-rs"] }
+tokio = { version = "1.54", features = ["net", "rt", "time", "sync", "io-util", "macros", "parking_lot"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["aws_lc_rs", "tls12"] }
+x509-parser = "0.18"
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2.191"
+rustix = { version = "1.1.6", features = ["system", "time"] }
+
+[target.'cfg(any(target_os = "freebsd", target_os = "macos"))'.dependencies]
+libc = "0.2.191"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Media"] }
+
+[build-dependencies]
+hashify = "0.3"
+
+[dev-dependencies]
+tokio = { version = "1.54", features = ["rt-multi-thread", "test-util"] }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(stalwart_tests)'] }
+
+[lints.clippy]
+result_unit_err = "allow"

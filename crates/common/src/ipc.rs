@@ -326,6 +326,15 @@ impl BroadcastEvent {
     }
 }
 
+impl RegistryChange {
+    pub fn object(&self) -> ObjectType {
+        match self {
+            RegistryChange::Insert(id) | RegistryChange::Delete(id) => id.object(),
+            RegistryChange::Reload(object) => *object,
+        }
+    }
+}
+
 pub trait ToHash {
     fn to_hash(&self) -> u64;
 }

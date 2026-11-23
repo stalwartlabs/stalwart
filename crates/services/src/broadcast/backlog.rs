@@ -9,7 +9,6 @@ use common::ipc::{
     BroadcastEvent, CacheInvalidation, PushNotification, QueueNames, RegistryChange,
     ViewerStateChange,
 };
-use registry::schema::prelude::ObjectType;
 use std::{collections::VecDeque, mem::size_of};
 use store::{
     ahash::{AHashMap, AHashSet},
@@ -216,11 +215,11 @@ impl Backlog {
     }
 
     fn push_registry_change(&mut self, change: RegistryChange) {
-        let object = registry_object(&change);
+        let object = change.object();
         match self
             .registry_changes
             .iter_mut()
-            .find(|pending| registry_object(pending) == object)
+            .find(|pending| pending.object() == object)
         {
             Some(pending) if *pending != change => *pending = RegistryChange::Reload(object),
             Some(_) => {}
@@ -422,13 +421,6 @@ fn merge_state(states: &mut Vec<TypeState>, mut types: u64, change_id: u64) {
             Some(state) => state.types |= types,
             None => states.push(TypeState { types, change_id }),
         }
-    }
-}
-
-fn registry_object(change: &RegistryChange) -> ObjectType {
-    match change {
-        RegistryChange::Insert(id) | RegistryChange::Delete(id) => id.object(),
-        RegistryChange::Reload(object) => *object,
     }
 }
 

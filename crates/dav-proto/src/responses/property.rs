@@ -8,9 +8,9 @@ use super::{XmlCdataEscape, XmlEscape};
 use crate::schema::{
     Namespace, Namespaces,
     property::{
-        ActiveLock, CalDavProperty, CardDavProperty, Comp, DavProperty, DavValue, LockDiscovery,
-        LockEntry, PrincipalProperty, Privilege, ReportSet, ResourceType, Rfc1123DateTime,
-        SupportedCollation, SupportedLock, WebDavProperty,
+        ActiveLock, AvailabilityNamespace, CalDavProperty, CardDavProperty, Comp, DavProperty,
+        DavValue, LockDiscovery, LockEntry, PrincipalProperty, Privilege, ReportSet, ResourceType,
+        Rfc1123DateTime, SupportedCollation, SupportedLock, WebDavProperty,
     },
     request::DavPropertyValue,
     response::{Ace, AclRestrictions, Href, List, PropResponse, SupportedPrivilege},
@@ -143,8 +143,6 @@ impl DavValue {
             Comp(ICalendarComponentType::VAlarm),
             Comp(ICalendarComponentType::Standard),
             Comp(ICalendarComponentType::Daylight),
-            Comp(ICalendarComponentType::VAvailability),
-            Comp(ICalendarComponentType::Available),
             Comp(ICalendarComponentType::Participant),
             Comp(ICalendarComponentType::VLocation),
             Comp(ICalendarComponentType::VResource),
@@ -207,6 +205,12 @@ impl DavProperty {
                 CalDavProperty::ScheduleDefaultCalendarURL => "A:schedule-default-calendar-URL",
                 CalDavProperty::ScheduleTag => "A:schedule-tag",
                 CalDavProperty::ScheduleCalendarTransp => "A:schedule-calendar-transp",
+                CalDavProperty::CalendarAvailability(AvailabilityNamespace::CalDav) => {
+                    "A:calendar-availability"
+                }
+                CalDavProperty::CalendarAvailability(AvailabilityNamespace::CalendarServer) => {
+                    "C:calendar-availability"
+                }
             },
             DavProperty::Principal(prop) => match prop {
                 PrincipalProperty::AlternateURISet => "D:alternate-URI-set",
@@ -227,7 +231,10 @@ impl DavProperty {
 
     pub fn namespace(&self) -> Namespace {
         match self {
-            DavProperty::WebDav(WebDavProperty::GetCTag) => Namespace::CalendarServer,
+            DavProperty::WebDav(WebDavProperty::GetCTag)
+            | DavProperty::CalDav(CalDavProperty::CalendarAvailability(
+                AvailabilityNamespace::CalendarServer,
+            )) => Namespace::CalendarServer,
             DavProperty::CardDav(_)
             | DavProperty::Principal(
                 PrincipalProperty::AddressbookHomeSet | PrincipalProperty::PrincipalAddress,

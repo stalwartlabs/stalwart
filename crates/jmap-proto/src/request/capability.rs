@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use std::fmt;
+use compact_str::CompactString;
+use std::{borrow::Cow, fmt};
 
 use crate::{
     object::{
@@ -104,6 +105,8 @@ pub enum Capability {
     EmailPush = 1 << 19,
     #[serde(rename(serialize = "urn:ietf:params:jmap:metadata"))]
     Metadata = 1 << 20,
+    #[serde(rename(serialize = "urn:ietf:params:jmap:mdn"))]
+    Mdn = 1 << 21,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -362,6 +365,7 @@ impl Capability {
             Capability::WebPushVapid => "urn:ietf:params:jmap:webpush-vapid",
             Capability::EmailPush => "urn:ietf:params:jmap:emailpush",
             Capability::Metadata => "urn:ietf:params:jmap:metadata",
+            Capability::Mdn => "urn:ietf:params:jmap:mdn",
         }
     }
 
@@ -398,6 +402,7 @@ impl Capability {
             Capability::WebPushVapid,
             Capability::EmailPush,
             Capability::Metadata,
+            Capability::Mdn,
         ]
     }
 }
@@ -571,20 +576,27 @@ impl Capability {
             "urn:ietf:params:jmap:webpush-vapid" => Capability::WebPushVapid,
             "urn:ietf:params:jmap:emailpush" => Capability::EmailPush,
             "urn:ietf:params:jmap:metadata" => Capability::Metadata,
+            "urn:ietf:params:jmap:mdn" => Capability::Mdn,
         )
         .copied()
     }
 }
 
-impl<'de> Deserialize<'de> for CapabilityIds {
+#[derive(Debug, Default)]
+pub(crate) struct RequestedCapabilities {
+    pub ids: CapabilityIds,
+    pub unknown: Option<CompactString>,
+}
+
+impl<'de> Deserialize<'de> for RequestedCapabilities {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
-        struct CapabilityIdsVisitor;
+        struct RequestedCapabilitiesVisitor;
 
-        impl<'de> serde::de::Visitor<'de> for CapabilityIdsVisitor {
-            type Value = CapabilityIds;
+        impl<'de> serde::de::Visitor<'de> for RequestedCapabilitiesVisitor {
+            type Value = RequestedCapabilities;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
                 formatter.write_str("an array of capability strings")
@@ -594,24 +606,24 @@ impl<'de> Deserialize<'de> for CapabilityIds {
             where
                 A: serde::de::SeqAccess<'de>,
             {
-                let mut capability_flags = 0u32;
+                let mut requested = RequestedCapabilities::default();
 
-                while let Some(capability_str) = seq.next_element::<std::borrow::Cow<str>>()? {
-                    let capability =
-                        Capability::parse(capability_str.as_ref()).ok_or_else(|| {
-                            serde::de::Error::custom(format!(
-                                "Unknown capability: {capability_str:?}"
-                            ))
-                        })?;
-
-                    capability_flags |= capability as u32;
+                while let Some(capability_str) = seq.next_element::<Cow<str>>()? {
+                    match Capability::parse(capability_str.as_ref()) {
+                        Some(capability) => requested.ids.0 |= capability as u32,
+                        None => {
+                            requested
+                                .unknown
+                                .get_or_insert_with(|| CompactString::from(capability_str));
+                        }
+                    }
                 }
 
-                Ok(CapabilityIds(capability_flags))
+                Ok(requested)
             }
         }
 
-        deserializer.deserialize_seq(CapabilityIdsVisitor)
+        deserializer.deserialize_seq(RequestedCapabilitiesVisitor)
     }
 }
 

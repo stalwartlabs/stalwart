@@ -41,6 +41,11 @@ pub trait HttpLimitResponse: Sync + Send {
         self,
         limit: usize,
     ) -> impl std::future::Future<Output = reqwest::Result<Option<Vec<u8>>>> + Send;
+
+    fn bytes_prefix(
+        self,
+        limit: usize,
+    ) -> impl std::future::Future<Output = reqwest::Result<Vec<u8>>> + Send;
 }
 
 impl HttpLimitResponse for Response {
@@ -64,6 +69,23 @@ impl HttpLimitResponse for Response {
         }
 
         Ok(Some(bytes))
+    }
+
+    async fn bytes_prefix(self, limit: usize) -> reqwest::Result<Vec<u8>> {
+        let mut bytes = Vec::with_capacity(std::cmp::min(limit, 1024));
+        let mut stream = self.bytes_stream();
+
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk?;
+            let remaining = limit - bytes.len();
+            if let Some(head) = chunk.get(..remaining) {
+                bytes.extend_from_slice(head);
+                break;
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+
+        Ok(bytes)
     }
 }
 
@@ -260,8 +282,34 @@ impl<T: AsRef<[u8]>> HexEncode for T {
 
 static NIL_CHAR: char = char::from_u32(0).unwrap();
 
+const MAX_ADDRESS_LEN: usize = 256;
+const MAX_DOMAIN_LEN: usize = 255;
+const MAX_LABEL_LEN: usize = 63;
+
 // Basic email sanitizer
 pub fn sanitize_email(email: &str) -> Option<String> {
+    sanitize_address(email, is_valid_domain)
+}
+
+pub fn sanitize_envelope_address(address: &str) -> Option<String> {
+    sanitize_address(address, is_valid_envelope_domain)
+        .filter(|address| address.len() <= MAX_ADDRESS_LEN)
+}
+
+fn is_valid_envelope_domain(domain: &str) -> bool {
+    domain.len() <= MAX_DOMAIN_LEN
+        && domain.split('.').all(|label| {
+            (1..=MAX_LABEL_LEN).contains(&label.len())
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+        })
+        && match domain.rsplit_once('.') {
+            Some((_, tld)) => !tld.bytes().all(|byte| byte.is_ascii_digit()),
+            None => is_valid_domain(domain),
+        }
+}
+
+fn sanitize_address(email: &str, domain_is_valid: fn(&str) -> bool) -> Option<String> {
     let mut result = String::with_capacity(email.len());
     let mut last_ch = NIL_CHAR;
     let mut chars = email.chars();
@@ -350,10 +398,10 @@ pub fn sanitize_email(email: &str) -> Option<String> {
     }
 
     if domain_is_ascii {
-        is_valid_domain(&result[domain_start..]).then_some(result)
+        domain_is_valid(&result[domain_start..]).then_some(result)
     } else {
         let domain = idna::domain_to_ascii(&result[domain_start..]).ok()?;
-        if !is_valid_domain(&domain) {
+        if !domain_is_valid(&domain) {
             return None;
         }
         result.truncate(domain_start);

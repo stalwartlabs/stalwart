@@ -6,6 +6,7 @@
 
 use crate::scheduling::{
     Attendee, InstanceId, ItipError, ItipMessage, ItipSnapshot, ItipSnapshots, RecurrenceId,
+    busy_status::{adopt_if_accepted, cdo_status_names, new_instance_entries},
     organizer::organizer_request_full,
     recipient::{RecipientPolicy, itip_messages_per_recipient, series::Series},
 };
@@ -157,14 +158,17 @@ pub fn itip_process_message(
                                 changed_entries.insert(ICalendarProperty::Dtstamp);
                             }
                             changed_entries.insert(ICalendarProperty::Sequence);
+                            changed_entries
+                                .extend(cdo_status_names(itip_component, snapshot.comp).cloned());
 
                             if !changed_entries.is_empty() {
-                                let entries = itip_component
+                                let mut entries = itip_component
                                     .entries
                                     .iter()
                                     .filter(|entry| changed_entries.contains(&entry.name))
                                     .cloned()
                                     .collect();
+                                adopt_if_accepted(itip_snapshot, &mut entries);
                                 merge_actions.push(MergeAction::RemoveEntries {
                                     component_id: snapshot.comp_id,
                                     entries: changed_entries,
@@ -182,14 +186,7 @@ pub fn itip_process_message(
                         merge_actions.push(MergeAction::AddComponent {
                             components: vec![ICalendarComponent {
                                 component_type: itip_component.component_type.clone(),
-                                entries: itip_component
-                                    .entries
-                                    .iter()
-                                    .filter(|entry| {
-                                        !matches!(entry.name, ICalendarProperty::Other(_))
-                                    })
-                                    .cloned()
-                                    .collect(),
+                                entries: new_instance_entries(itip_snapshot),
                                 component_ids: vec![],
                             }],
                         });
@@ -216,14 +213,7 @@ pub fn itip_process_message(
                         merge_actions.push(MergeAction::AddComponent {
                             components: vec![ICalendarComponent {
                                 component_type: itip_component.component_type.clone(),
-                                entries: itip_component
-                                    .entries
-                                    .iter()
-                                    .filter(|entry| {
-                                        !matches!(entry.name, ICalendarProperty::Other(_))
-                                    })
-                                    .cloned()
-                                    .collect(),
+                                entries: new_instance_entries(itip_snapshot),
                                 component_ids: vec![],
                             }],
                         });
@@ -800,29 +790,22 @@ fn merge_timezones(ical: &mut ICalendar, itip: &ICalendar) {
         })
         .unwrap_or(root.component_ids.len());
 
-    for tz in itip.timezones() {
-        let Some(tz_id) = timezone_id(tz) else {
-            continue;
-        };
+    let mut defined: AHashSet<&str> = ical.timezones().filter_map(timezone_id).collect();
+    let referenced: AHashSet<&str> = ical
+        .components
+        .iter()
+        .filter(|component| component.component_type != ICalendarComponentType::VTimezone)
+        .flat_map(|component| &component.entries)
+        .filter_map(|entry| entry.tz_id())
+        .collect();
+    let missing: Vec<&ICalendarComponent> = itip
+        .timezones()
+        .filter(|tz| {
+            timezone_id(tz).is_some_and(|tz_id| referenced.contains(tz_id) && defined.insert(tz_id))
+        })
+        .collect();
 
-        let mut is_referenced = false;
-        for component in &ical.components {
-            if component.component_type == ICalendarComponentType::VTimezone {
-                if timezone_id(component) == Some(tz_id) {
-                    is_referenced = false;
-                    break;
-                }
-            } else if !is_referenced {
-                is_referenced = component
-                    .entries
-                    .iter()
-                    .any(|entry| entry.tz_id() == Some(tz_id));
-            }
-        }
-        if !is_referenced {
-            continue;
-        }
-
+    for tz in missing {
         let tz_component_id = ical.components.len() as u32;
         ical.components.reserve(tz.component_ids.len() + 1);
         ical.components.push(ICalendarComponent {

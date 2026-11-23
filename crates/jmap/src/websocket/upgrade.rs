@@ -13,7 +13,10 @@ use hyper_util::rt::TokioIo;
 use std::future::Future;
 use tokio_tungstenite::WebSocketStream;
 use trc::JmapEvent;
-use tungstenite::{handshake::derive_accept_key, protocol::Role};
+use tungstenite::{
+    handshake::derive_accept_key,
+    protocol::{Role, WebSocketConfig},
+};
 
 pub trait WebSocketUpgrade: Sync + Send {
     fn upgrade_websocket_connection(
@@ -77,6 +80,7 @@ impl WebSocketUpgrade for Server {
 
         // Spawn WebSocket connection
         let jmap = self.clone();
+        let max_size = self.core.jmap.request_max_size;
         tokio::spawn(async move {
             // Upgrade connection
             let session_id = session.session_id;
@@ -86,7 +90,11 @@ impl WebSocketUpgrade for Server {
                         WebSocketStream::from_raw_socket(
                             TokioIo::new(upgraded),
                             Role::Server,
-                            None,
+                            Some(
+                                WebSocketConfig::default()
+                                    .max_message_size(Some(max_size))
+                                    .max_frame_size(Some(max_size)),
+                            ),
                         )
                         .await,
                         access_token,

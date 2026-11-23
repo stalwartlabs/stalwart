@@ -23,7 +23,7 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc};
 use trc::SearchIndexEvent;
 
 pub fn spawn_index_queue_manager(inner: Arc<Inner>) {
-    let (concurrency, batch_size, is_bulk, is_clustered) = {
+    let (concurrency, batch_size, is_bulk) = {
         let server = inner.build_server();
 
         if !server.core.network.roles.search_indexing {
@@ -34,7 +34,6 @@ pub fn spawn_index_queue_manager(inner: Arc<Inner>) {
             server.core.email.index_concurrency,
             server.core.email.index_batch_size,
             server.search_store().internal_fts().is_none(),
-            server.core.storage.coordinator.is_enabled(),
         )
     };
 
@@ -80,7 +79,6 @@ pub fn spawn_index_queue_manager(inner: Arc<Inner>) {
                     &done_tx,
                     batch_size,
                     concurrency,
-                    is_clustered,
                 )
                 .await;
             let scanned_at = Instant::now();
@@ -108,7 +106,6 @@ pub(crate) trait IndexQueueManager: Sync + Send {
         done_tx: &mpsc::UnboundedSender<PartitionResult>,
         batch_size: usize,
         concurrency: usize,
-        is_clustered: bool,
     ) -> impl Future<Output = Duration> + Send;
 }
 
@@ -123,13 +120,12 @@ impl IndexQueueManager for Server {
         done_tx: &mpsc::UnboundedSender<PartitionResult>,
         batch_size: usize,
         concurrency: usize,
-        is_clustered: bool,
     ) -> Duration {
         let now_timestamp = now();
         let now_instant = Instant::now();
         let budget = concurrency * CANDIDATE_OVERSCAN;
 
-        // Drop the partitions that were deferred because another node held their lock
+        // Drop the partitions that were deferred because another node or task held their lock
         state
             .deferred
             .retain(|_, deferred_until| *deferred_until > now_instant);
@@ -270,7 +266,7 @@ impl IndexQueueManager for Server {
                 };
 
                 slot.outcome = server
-                    .process_partition(partition, sink.as_ref(), batch_size, is_clustered)
+                    .process_partition(partition, sink.as_ref(), batch_size)
                     .await;
                 drop(slot);
 
@@ -330,7 +326,7 @@ async fn update_partition_status(
         let partition = result.partition;
 
         match result.outcome {
-            PartitionOutcome::Completed => {
+            PartitionOutcome::Completed | PartitionOutcome::Yielded => {
                 if state.failed.remove(&partition).is_some() {
                     batch.clear(partition.status_class()).commit_point();
                 }
@@ -364,7 +360,7 @@ async fn update_partition_status(
                     .commit_point();
             }
             PartitionOutcome::Locked => {
-                // The partition is being processed by another node
+                // The partition is locked by another node or task
                 state
                     .deferred
                     .insert(partition, Instant::now() + LOCKED_BACKOFF);

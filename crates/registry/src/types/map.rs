@@ -132,6 +132,52 @@ impl<V: IntoValue + MapItem> IntoValue for Map<V> {
     }
 }
 
+impl<T: MapItem> Map<T> {
+    fn parse_key(pointer: &JsonPointerPatch<'_>, key: &str) -> Result<Option<T>, PatchError> {
+        pointer
+            .sanitize(Cow::Borrowed(key))
+            .map(|key| T::try_from_string(&key))
+    }
+
+    fn remove_key(&mut self, pointer: &JsonPointerPatch<'_>, key: &str) -> bool {
+        let raw = T::try_from_string(key);
+        let canonical = if pointer.has_validators() {
+            pointer
+                .sanitize(Cow::Borrowed(key))
+                .ok()
+                .and_then(|key| T::try_from_string(&key))
+                .filter(|canonical| raw.as_ref() != Some(canonical))
+        } else {
+            None
+        };
+
+        match (raw, canonical) {
+            (Some(raw), Some(canonical)) => {
+                self.0.retain(|item| item != &raw && item != &canonical);
+            }
+            (Some(key), None) | (None, Some(key)) => self.0.retain(|item| item != &key),
+            (None, None) => return false,
+        }
+        true
+    }
+
+    fn patch_key(
+        &mut self,
+        pointer: &JsonPointerPatch<'_>,
+        key: &str,
+        is_set: bool,
+    ) -> Result<bool, PatchError> {
+        if !is_set {
+            Ok(self.remove_key(pointer, key))
+        } else if let Some(key) = Self::parse_key(pointer, key)? {
+            self.push(key);
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+}
+
 impl<T: MapItem + Default> RegistryJsonPatch for Map<T> {
     fn patch<'x>(
         &mut self,
@@ -139,61 +185,43 @@ impl<T: MapItem + Default> RegistryJsonPatch for Map<T> {
         value: JmapValue<'x>,
     ) -> PatchResult<'x> {
         match (pointer.next(), value) {
-            (Some(JsonPointerItem::Number(idx)), Value::Null | Value::Bool(false)) => {
-                let key = T::try_from_integer(*idx);
+            (Some(JsonPointerItem::Number(idx)), value @ (Value::Null | Value::Bool(_))) => {
+                let is_set = matches!(value, Value::Bool(true));
 
-                if !pointer.has_next()
-                    && let Some(key) = key
-                {
-                    self.0.retain(|item| item != &key);
-                    return Ok(MaybeUnpatched::Patched);
-                }
-            }
-            (Some(JsonPointerItem::Key(key)), Value::Null | Value::Bool(false)) => {
-                let key = T::try_from_string(key.to_string().as_ref());
-
-                if !pointer.has_next()
-                    && let Some(key) = key
-                {
-                    self.0.retain(|item| item != &key);
-                    return Ok(MaybeUnpatched::Patched);
-                }
-            }
-            (Some(JsonPointerItem::Key(key)), Value::Bool(true)) => {
-                let key = T::try_from_string(key.to_string().as_ref());
-
-                if !pointer.has_next()
-                    && let Some(key) = key
-                {
-                    if !self.0.contains(&key) {
-                        self.0.push(key);
+                if !pointer.has_next() {
+                    if pointer.has_validators() {
+                        if self.patch_key(&pointer, &idx.to_string(), is_set)? {
+                            return Ok(MaybeUnpatched::Patched);
+                        }
+                    } else if let Some(key) = T::try_from_integer(*idx) {
+                        if is_set {
+                            self.push(key);
+                        } else {
+                            self.0.retain(|item| item != &key);
+                        }
+                        return Ok(MaybeUnpatched::Patched);
                     }
-
-                    return Ok(MaybeUnpatched::Patched);
                 }
             }
-            (Some(JsonPointerItem::Number(idx)), Value::Bool(true)) => {
-                let key = T::try_from_integer(*idx);
-                if !pointer.has_next()
-                    && let Some(key) = key
-                {
-                    if !self.0.contains(&key) {
-                        self.0.push(key);
-                    }
+            (Some(JsonPointerItem::Key(key)), value @ (Value::Null | Value::Bool(_))) => {
+                let key = key.to_string();
+                let is_set = matches!(value, Value::Bool(true));
 
+                if !pointer.has_next() && self.patch_key(&pointer, &key, is_set)? {
                     return Ok(MaybeUnpatched::Patched);
                 }
             }
             (None, Value::Object(items)) => {
                 self.0.clear();
                 for (key, value) in items.into_vec() {
-                    if let (Some(key), Value::Bool(is_set)) =
-                        (T::try_from_string(key.to_string().as_ref()), value)
-                    {
-                        if is_set && !self.0.contains(&key) {
-                            self.0.push(key);
-                        }
-                    } else {
+                    let key = key.to_string();
+                    let is_valid = match value {
+                        Value::Bool(true) => self.patch_key(&pointer, &key, true)?,
+                        Value::Bool(false) => T::try_from_string(&key).is_some(),
+                        _ => false,
+                    };
+
+                    if !is_valid {
                         return Err(PatchError::new(
                             pointer.clone(),
                             "Invalid key for object property",

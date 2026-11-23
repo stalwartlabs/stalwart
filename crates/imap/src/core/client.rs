@@ -360,13 +360,17 @@ pub fn group_requests(
 impl<T: SessionStream> Session<T> {
     async fn is_allowed(&self, request: Request<Command>) -> trc::Result<Request<Command>> {
         let state = &self.state;
-        if let State::Authenticated { data } | State::Selected { data, .. } = state
-            && let Err(err) = self
+        if let State::Authenticated { data } | State::Selected { data, .. } = state {
+            if let Err(err) = data.assert_session_access().await {
+                return Err(err.id(request.tag));
+            }
+            if let Err(err) = self
                 .server
                 .is_imap_request_allowed(&data.access_token)
                 .await
-        {
-            return Err(err.id(request.tag));
+            {
+                return Err(err.id(request.tag));
+            }
         }
 
         match &request.command {

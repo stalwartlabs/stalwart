@@ -6,8 +6,10 @@
 
 use ahash::{AHashMap, AHashSet};
 use sieve::{Context, runtime::Variable};
+use smallvec::SmallVec;
 
 const MAX_PRESIZE: usize = 2048;
+const LINEAR_DEDUP_MAX: usize = 16;
 
 pub fn fn_count<'x>(_: &Context<'x>, v: &[Variable<'x>]) -> Variable<'x> {
     match &v[0] {
@@ -36,15 +38,47 @@ pub fn fn_sort<'x>(_: &Context<'x>, v: &[Variable<'x>]) -> Variable<'x> {
 
 pub fn fn_dedup<'x>(_: &Context<'x>, v: &[Variable<'x>]) -> Variable<'x> {
     let arr = v[0].to_array();
-    let mut result = Vec::with_capacity(arr.len());
+    let capacity = arr.len().min(MAX_PRESIZE);
+    let mut result = Vec::with_capacity(capacity);
 
-    for item in arr.iter() {
-        if !result.contains(item) {
-            result.push(item.clone());
+    if arr.len() <= LINEAR_DEDUP_MAX {
+        let mut seen: SmallVec<[DedupKey<'_>; LINEAR_DEDUP_MAX]> = SmallVec::new();
+        for item in arr.iter() {
+            let key = DedupKey::from(item);
+            if !seen.contains(&key) {
+                seen.push(key);
+                result.push(item.clone());
+            }
+        }
+    } else {
+        let mut seen = AHashSet::with_capacity(capacity);
+        for item in arr.iter() {
+            if seen.insert(DedupKey::from(item)) {
+                result.push(item.clone());
+            }
         }
     }
 
     result.into()
+}
+
+#[derive(PartialEq, Eq, Hash)]
+enum DedupKey<'a> {
+    Text(&'a str),
+    Integer(i64),
+    Float(u64),
+    Array(&'a [Variable<'a>]),
+}
+
+impl<'a> From<&'a Variable<'a>> for DedupKey<'a> {
+    fn from(value: &'a Variable<'a>) -> Self {
+        match value {
+            Variable::String(text) => DedupKey::Text(text),
+            Variable::Integer(number) => DedupKey::Integer(*number),
+            Variable::Float(number) => DedupKey::Float(number.to_bits()),
+            Variable::Array(items) => DedupKey::Array(items),
+        }
+    }
 }
 
 pub fn fn_cosine_similarity<'x>(_: &Context<'x>, v: &[Variable<'x>]) -> Variable<'x> {
@@ -168,3 +202,8 @@ pub fn fn_winnow<'x>(_: &Context<'x>, v: &[Variable<'x>]) -> Variable<'x> {
         v => v.clone(),
     }
 }
+
+#[cfg(all(test, stalwart_tests))]
+#[rustfmt::skip]
+#[path = "../../../../../../stalwart-tests/unit/common/src/scripts/functions/array/tests.rs"]
+mod tests;

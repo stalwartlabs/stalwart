@@ -243,6 +243,15 @@ impl JmapConfig {
             }),
         );
 
+        self.capabilities.session.append(
+            Capability::Mdn,
+            Capabilities::Empty(EmptyCapabilities::default()),
+        );
+        self.capabilities.account.insert(
+            Capability::Mdn,
+            Capabilities::Empty(EmptyCapabilities::default()),
+        );
+
         // Add vacation response capabilities
         self.capabilities.session.append(
             Capability::VacationResponse,

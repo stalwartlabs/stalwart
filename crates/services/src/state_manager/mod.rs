@@ -39,6 +39,7 @@ pub enum Event {
     Update { account_id: u32 },
     DeliverySuccess { id: Id },
     DeliveryFailure { id: Id, failed: PushBatch },
+    DeliveryGone { id: Id },
     Reset,
 }
 

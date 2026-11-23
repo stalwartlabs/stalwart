@@ -10,7 +10,8 @@ use super::{
 };
 use crate::request::{
     CopyRequestMethod, GetRequestMethod, ParseRequestMethod, QueryChangesRequestMethod,
-    QueryRequestMethod, SetRequestMethod, deserialize::DeserializeArguments,
+    QueryRequestMethod, SetRequestMethod, capability::RequestedCapabilities,
+    deserialize::DeserializeArguments,
 };
 use compact_str::{CompactString, ToCompactString};
 use registry::schema::prelude::ObjectType;
@@ -29,25 +30,42 @@ use utils::text::utf8_lossy;
 
 const MAX_ERROR_EXCERPT: usize = 1024;
 
+pub(crate) fn json_error_event(text: &str) -> trc::JmapEvent {
+    if serde_json::from_str::<IgnoredAny>(text).is_ok() {
+        trc::JmapEvent::NotRequest
+    } else {
+        trc::JmapEvent::NotJson
+    }
+}
+
 impl<'x> Request<'x> {
     pub fn parse(json: &'x [u8], max_calls: usize, max_size: usize) -> trc::Result<Self> {
         if json.len() <= max_size {
             let request = match from_utf8(json) {
                 Ok(text) => serde_json::from_str::<Request>(text)
                     .or_else(|err| Self::parse_lenient(text, err)),
-                Err(err) => Err(err.to_compact_string()),
+                Err(err) => Err((trc::JmapEvent::NotJson, err.to_compact_string())),
             };
             match request {
-                Ok(request) => {
-                    if request.method_calls.len() <= max_calls {
+                Ok(mut request) => {
+                    if let Some(capability) = request.unknown_capability.take() {
+                        Err(trc::JmapEvent::UnknownCapability
+                            .into_err()
+                            .details(capability))
+                    } else if request.method_calls.len() <= max_calls {
                         Ok(request)
                     } else {
                         Err(trc::LimitEvent::CallsIn.into_err())
                     }
                 }
-                Err(err) => Err(trc::JmapEvent::NotRequest.into_err().reason(err).details(
-                    CompactString::from(utf8_lossy(json.get(..MAX_ERROR_EXCERPT).unwrap_or(json))),
-                )),
+                Err((event, err)) => {
+                    Err(event
+                        .into_err()
+                        .reason(err)
+                        .details(CompactString::from(utf8_lossy(
+                            json.get(..MAX_ERROR_EXCERPT).unwrap_or(json),
+                        ))))
+                }
             }
         } else {
             Err(trc::LimitEvent::SizeRequest.into_err())
@@ -56,10 +74,13 @@ impl<'x> Request<'x> {
 
     #[cold]
     #[inline(never)]
-    fn parse_lenient(text: &'x str, err: serde_json::Error) -> Result<Self, CompactString> {
+    fn parse_lenient(
+        text: &'x str,
+        err: serde_json::Error,
+    ) -> Result<Self, (trc::JmapEvent, CompactString)> {
         serde_json::from_str::<LenientRequest>(text)
             .map(|request| request.0)
-            .map_err(|_| err.to_compact_string())
+            .map_err(|_| (json_error_event(text), err.to_compact_string()))
     }
 
     pub(crate) fn deserialize_field<A, C>(&mut self, key: &str, map: &mut A) -> Result<(), A::Error>
@@ -69,7 +90,9 @@ impl<'x> Request<'x> {
     {
         hashify::fnc_map!(key.as_bytes(),
             b"using" => {
-                self.using = map.next_value()?;
+                let requested = map.next_value::<RequestedCapabilities>()?;
+                self.using = requested.ids;
+                self.unknown_capability = requested.unknown;
             },
             b"methodCalls" => {
                 self.method_calls = map.next_value::<C>()?.into_calls();
@@ -362,6 +385,12 @@ impl<'de> DeserializeSeed<'de> for MethodArguments {
             (MethodFunction::Parse, MethodObject::ContactCard) => RequestMethod::Parse(
                 ParseRequestMethod::ContactCard(Deserialize::deserialize(deserializer)?),
             ),
+            (MethodFunction::Send, MethodObject::Mdn) => {
+                RequestMethod::MdnSend(Deserialize::deserialize(deserializer)?)
+            }
+            (MethodFunction::Parse, MethodObject::Mdn) => {
+                RequestMethod::MdnParse(Deserialize::deserialize(deserializer)?)
+            }
             (MethodFunction::GetAvailability, MethodObject::Principal) => RequestMethod::Get(
                 GetRequestMethod::PrincipalAvailability(Deserialize::deserialize(deserializer)?),
             ),

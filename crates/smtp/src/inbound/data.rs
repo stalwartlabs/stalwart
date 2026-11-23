@@ -9,7 +9,8 @@ use crate::{
     core::{Session, SessionAddress, SessionData, State},
     inbound::{dkim::DkimSign, milter::Modification, session::INSUFFICIENT_STORAGE},
     queue::{
-        self, Message, MessageSource, MessageWrapper, Metadata, QueueEnvelope, RCPT_SPAM_MASK,
+        self, FROM_VERIFIED_RETURN_PATH, Message, MessageSource, MessageWrapper, Metadata,
+        QueueEnvelope, RCPT_SPAM_MASK,
         dsn::PropagateDsn,
         quota::HasQueueQuota,
         rcpt_spam_flag,
@@ -852,9 +853,17 @@ impl<T: SessionStream> Session<T> {
         } else {
             MessageSource::Authenticated
         };
+        let has_verified_return_path = self.data.spf_mail_from.as_ref().is_some_and(|spf| {
+            matches!(spf.result(), SpfResult::Pass)
+                && !mail_from.address.is_empty()
+                && spf.domain().eq_ignore_ascii_case(&mail_from.domain)
+        });
         let mut message = self
             .build_message(mail_from, rcpt_to, source, message_id, self.data.session_id)
             .await;
+        if has_verified_return_path {
+            message.message.flags |= FROM_VERIFIED_RETURN_PATH;
+        }
 
         // Add Return-Path
         if self.eval_if(&dc.add_return_path).await.unwrap_or(true) {

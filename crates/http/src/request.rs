@@ -21,6 +21,7 @@ use crate::{
         },
     },
     form::FormHandler,
+    is_exchange_enabled,
     stream::InFlightStream,
 };
 use common::{
@@ -38,6 +39,11 @@ use common::{
 };
 use compact_str::{CompactString, ToCompactString};
 use dav::{DavMethod, request::DavRequestHandler};
+#[cfg(feature = "exchange")]
+use exchange::{
+    ExchangeRequestHandler,
+    request::{AUTODISCOVER_CAPABILITY_HEADERS, AutodiscoverDocument},
+};
 use groupware::DavResourceName;
 use http_proto::{
     DownloadResponse, HttpContext, HttpRequest, HttpResponse, HttpResponseBody, HttpSessionData,
@@ -116,6 +122,12 @@ pub trait ParseHttp: Sync + Send {
         req: HttpRequest,
         session: HttpSessionData,
     ) -> impl Future<Output = trc::Result<HttpResponse>> + Send;
+
+    fn ban_scanned_path(
+        &self,
+        req: &HttpRequest,
+        session: &HttpSessionData,
+    ) -> impl Future<Output = trc::Result<bool>> + Send;
 }
 
 impl ParseHttp for Server {
@@ -170,11 +182,7 @@ impl ParseHttp for Server {
 
                         let bytes = fetch_body(
                             &mut req,
-                            if !access_token.has_permission(Permission::UnlimitedUploads) {
-                                self.core.jmap.upload_max_size
-                            } else {
-                                0
-                            },
+                            self.core.jmap.request_max_size,
                             session.session_id,
                         )
                         .await
@@ -276,12 +284,14 @@ impl ParseHttp for Server {
                         let HttpAuthenticated {
                             in_flight: _in_flight,
                             access_token,
-                            ..
+                            epoch,
                         } = self.authenticate_headers(&req, &session).await?;
                         let access_token =
                             access_token.assert_allows_oauth_scopes(OAuthScopes::INTEROPERABLE)?;
 
-                        return self.handle_event_source(req, access_token).await;
+                        return self
+                            .handle_event_source(req, access_token, epoch, session.remote_ip)
+                            .await;
                     }
                     ("ws", &Method::GET) => {
                         // Authenticate request
@@ -336,7 +346,8 @@ impl ParseHttp for Server {
                             "DAV",
                             concat!(
                                 "1, 2, 3, access-control, extended-mkcol, calendar-access, ",
-                                "calendar-auto-schedule, calendar-no-timezone, addressbook"
+                                "calendar-auto-schedule, calendar-no-timezone, calendar-availability, ",
+                                "inbox-availability, addressbook"
                             ),
                         )
                         .with_header(
@@ -647,8 +658,56 @@ impl ParseHttp for Server {
                         .with_no_store());
                 }
             }
-            "autodiscover" | "Autodiscover" | "AutoDiscover" => {
+            segment
+                if matches!(segment, "autodiscover" | "Autodiscover" | "AutoDiscover")
+                    || (is_exchange_enabled(&self.core)
+                        && segment.eq_ignore_ascii_case("autodiscover")) =>
+            {
                 let document_name = path.next().unwrap_or_default();
+                #[cfg(feature = "exchange")]
+                if self.core.exchange.enabled
+                    && let Some(document) = AutodiscoverDocument::parse(document_name)
+                    && document.is_routed(req.method())
+                {
+                    let challenge = AuthChallenge::exchange(req.authorization());
+                    let resource_metadata = (challenge != AuthChallenge::Basic).then(|| {
+                        resource_metadata_url(
+                            self,
+                            request_origin(&req, &session),
+                            req.uri().path(),
+                        )
+                    });
+                    let result = async {
+                        let (_in_flight, access_token) = if req.authorization().is_some() {
+                            let HttpAuthenticated {
+                                in_flight,
+                                access_token,
+                                ..
+                            } = self.authenticate_headers(&req, &session).await?;
+                            (in_flight, Some(access_token))
+                        } else {
+                            self.is_http_anonymous_request_allowed(session.remote_ip)
+                                .await?;
+                            (None, None)
+                        };
+                        self.handle_exchange_autodiscover(req, document, access_token, &session)
+                            .await
+                    }
+                    .await;
+                    return Ok(match result {
+                        Ok(response) => response,
+                        Err(err) => {
+                            let response = AUTODISCOVER_CAPABILITY_HEADERS.iter().fold(
+                                err.into_http_response(challenge, || {
+                                    resource_metadata.unwrap_or_default()
+                                }),
+                                |response, (name, value)| response.with_header(*name, *value),
+                            );
+                            trc::error!(err.span_id(session.session_id));
+                            response
+                        }
+                    });
+                }
                 if req.method() == Method::POST
                     && document_name.eq_ignore_ascii_case("autodiscover.xml")
                 {
@@ -818,6 +877,33 @@ impl ParseHttp for Server {
                     .with_binary_body(LOGIN_PAGE));
             }
             external => {
+                #[cfg(feature = "exchange")]
+                if let Some(endpoint) = self.core.exchange.endpoint(external) {
+                    let HttpAuthenticated {
+                        in_flight: _in_flight,
+                        access_token,
+                        ..
+                    } = match self.authenticate_headers(&req, &session).await {
+                        Ok(authenticated) => authenticated,
+                        Err(err) => {
+                            let response = err.into_http_response(
+                                AuthChallenge::exchange(req.authorization()),
+                                || {
+                                    resource_metadata_url(
+                                        self,
+                                        request_origin(&req, &session),
+                                        req.uri().path(),
+                                    )
+                                },
+                            );
+                            trc::error!(err.span_id(session.session_id));
+                            return Ok(response);
+                        }
+                    };
+                    return self
+                        .handle_exchange_request(req, endpoint, access_token, &session)
+                        .await;
+                }
                 if path.next().is_none() {
                     if let Some((content_type, body)) = external
                         .strip_prefix(UI_ASSET_PREFIX)
@@ -837,7 +923,7 @@ impl ParseHttp for Server {
                             .with_binary_body(*body));
                     } else if !external.is_empty() {
                         if !self.inner.data.applications.has_prefix(external)
-                            && ban_scanned_path(self, req.uri().path(), &session).await?
+                            && self.ban_scanned_path(&req, &session).await?
                         {
                             return Err(trc::ResourceEvent::NotFound.into_err());
                         }
@@ -886,35 +972,48 @@ impl ParseHttp for Server {
         }
 
         // Block dangerous URLs
-        ban_scanned_path(self, req.uri().path(), &session).await?;
+        self.ban_scanned_path(&req, &session).await?;
 
         Err(trc::ResourceEvent::NotFound.into_err())
     }
-}
 
-async fn ban_scanned_path(
-    server: &Server,
-    path: &str,
-    session: &HttpSessionData,
-) -> trc::Result<bool> {
-    let banned = server.is_http_banned_path(path, session.remote_ip).await?;
-    if banned {
-        trc::event!(
-            Security(SecurityEvent::ScanBan),
-            SpanId = session.session_id,
-            RemoteIp = session.remote_ip,
-            Path = CompactString::from(path),
-        );
+    async fn ban_scanned_path(
+        &self,
+        req: &HttpRequest,
+        session: &HttpSessionData,
+    ) -> trc::Result<bool> {
+        if req
+            .headers()
+            .get("sec-fetch-site")
+            .is_some_and(|site| hashify::set!(site.as_bytes(), "cross-site", "same-site"))
+        {
+            return Ok(false);
+        }
+        let path = req.uri().path();
+        let banned = self.is_http_banned_path(path, session.remote_ip).await?;
+        if banned {
+            trc::event!(
+                Security(SecurityEvent::ScanBan),
+                SpanId = session.session_id,
+                RemoteIp = session.remote_ip,
+                Path = CompactString::from(path),
+            );
+        }
+        Ok(banned)
     }
-    Ok(banned)
 }
 
 async fn handle_session<T: SessionStream>(inner: Arc<Inner>, session: SessionData<T>) {
     let is_tls = session.stream.is_tls();
+    #[cfg(feature = "exchange")]
+    let title_case_headers = inner.shared_core.load().exchange.enabled;
+    #[cfg(not(feature = "exchange"))]
+    let title_case_headers = false;
 
     if let Err(http_err) = http1::Builder::new()
         .timer(TokioTimer::new())
         .keep_alive(true)
+        .title_case_headers(title_case_headers)
         .serve_connection(
             TokioIo::new(InFlightStream::new(session.stream, session.in_flight)),
             service_fn(|req: hyper::Request<body::Incoming>| {

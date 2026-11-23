@@ -17,11 +17,14 @@ use groupware::{
     cache::GroupwareCache,
     calendar::{
         CalendarEventContent,
-        availability::{AvailabilityCalendars, BusyLevel, ComponentBusy, PrincipalRole},
+        availability::{
+            AvailabilityCalendars, BusyLevel, ComponentBusy, DefaultFreeBusy, PrincipalRole,
+        },
         expand::{MAX_UTC_OFFSET, RecurrenceKey},
         identity::ParticipantIdentityAddresses,
         privacy::EventPrivacy,
         user::BASE_INSTANCE,
+        working_hours::WorkingHoursHandler,
     },
 };
 use jmap_proto::{
@@ -110,19 +113,20 @@ impl PrincipalGetAvailability for Server {
                 .details("Too many availability requests, please try again later"));
         }
         let principal_id = request.id.document_id();
-        if self
+        let Some(principal_cache) = self
             .try_account(principal_id)
             .await
             .caused_by(trc::location!())?
-            .is_none_or(|account| {
-                !account.is_same_tenant(access_token)
-                    && !access_token.has_permission(Permission::SysAccountQuery)
+            .filter(|account| {
+                account.is_same_tenant(access_token)
+                    || access_token.has_permission(Permission::SysAccountQuery)
             })
-        {
+        else {
             return Err(trc::JmapEvent::ObjectNotFound
                 .into_err()
                 .details("Principal not found."));
-        }
+        };
+        let is_resource = principal_cache.resource_kind().is_some();
         let show_details =
             request.show_details && access_token.has_permission(Permission::JmapCalendarEventGet);
         let max_instances = self.core.groupware.max_ical_instances;
@@ -146,6 +150,7 @@ impl PrincipalGetAvailability for Server {
         let mut intervals = Vec::new();
         let mut components = Vec::new();
         let mut events = AHashMap::new();
+        let mut can_read_principal = false;
         let projection = show_details
             .then(|| {
                 ProjectionRequest::new(
@@ -170,11 +175,30 @@ impl PrincipalGetAvailability for Server {
                 )
                 .await
                 .caused_by(trc::location!())?;
-            let Some(mut calendars) =
-                AvailabilityCalendars::new(&resources, account_id, access_token, &principal)
-            else {
+            let calendars = if is_resource && account_id == principal_id {
+                Some(AvailabilityCalendars::published(
+                    &resources,
+                    account_id,
+                    access_token,
+                ))
+            } else {
+                let default = if principal.is_member(account_id) {
+                    DefaultFreeBusy::resolve(self, access_token, account_id).await?
+                } else {
+                    DefaultFreeBusy::Denied
+                };
+                AvailabilityCalendars::new(
+                    &resources,
+                    account_id,
+                    access_token,
+                    &principal,
+                    default,
+                )
+            };
+            let Some(mut calendars) = calendars else {
                 continue;
             };
+            can_read_principal |= account_id == principal_id;
             let mut projector = match &projection {
                 Some(projection) => {
                     Some(EventProjector::new(self, access_token, account_id, projection).await?)
@@ -317,6 +341,23 @@ impl PrincipalGetAvailability for Server {
 
         let mut busy_periods = Vec::with_capacity(intervals.len());
         let mut timeline = BusyTimeline::default();
+        if can_read_principal
+            && let Some(schedule) = self
+                .working_schedule(&principal_cache)
+                .await
+                .caused_by(trc::location!())?
+        {
+            let mut total_instances = intervals.len();
+            for (start, end) in schedule.unavailable(filter.start, filter.end) {
+                total_instances += 1;
+                if total_instances > max_instances {
+                    return Err(trc::JmapEvent::TooLarge
+                        .into_err()
+                        .details("The number of expanded instances exceeds the server limit"));
+                }
+                timeline.insert(start, end, BusyStatus::Unavailable);
+            }
+        }
         for interval in intervals {
             match interval
                 .event

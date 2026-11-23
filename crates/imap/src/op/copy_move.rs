@@ -139,7 +139,7 @@ impl<T: SessionStream> SessionData<T> {
             .fetch(&self.server, src_mailbox.id.account_id)
             .await
             .imap_ctx(&arguments.tag, trc::location!())?;
-        self.sync_and_announce(&src_mailbox, &cache)
+        self.sync_view(&src_mailbox, &cache, None)
             .await
             .imap_ctx(&arguments.tag, trc::location!())?;
 
@@ -741,7 +741,6 @@ impl<T: SessionStream> SessionData<T> {
                     .broadcast_push_notification(PushNotification::StateChange(
                         StateChange::new(dest_account_id)
                             .with_change_id(change_id)
-                            .with_change(DataType::EmailDelivery)
                             .with_change(DataType::Email)
                             .with_change(DataType::Thread)
                             .with_change(DataType::Mailbox),
@@ -852,7 +851,6 @@ impl<T: SessionStream> SessionData<T> {
                 }),
                 None => response,
             }
-            .into_bytes()
         } else {
             response
                 .with_tag(arguments.tag)
@@ -861,10 +859,11 @@ impl<T: SessionStream> SessionData<T> {
                     src_uids,
                     dest_uids,
                 })
-                .into_bytes()
         };
 
-        self.write_bytes(response).await
+        let mut buf = Vec::new();
+        src_mailbox.announce_appended(&mut buf);
+        self.write_bytes(response.serialize(buf)).await
     }
 
     pub async fn get_message_data(

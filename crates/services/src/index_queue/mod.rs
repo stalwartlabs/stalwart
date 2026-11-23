@@ -18,8 +18,9 @@ pub mod index;
 pub mod manager;
 pub mod reindex;
 
-const LOCK_EXPIRY: u64 = 10 * 60;
+pub(crate) const LOCK_EXPIRY: u64 = 10 * 60;
 const LOCK_MARGIN: Duration = Duration::from_secs(60);
+const PARTITION_SLICE: Duration = Duration::from_secs(60);
 const FULL_SCAN_INTERVAL: Duration = Duration::from_secs(5 * 60);
 const MIN_SCAN_INTERVAL: Duration = Duration::from_millis(100);
 const BULK_LINGER: Duration = Duration::from_millis(50);
@@ -69,6 +70,7 @@ pub(crate) struct Deletion {
 #[derive(Debug)]
 pub(crate) enum PartitionOutcome {
     Completed,
+    Yielded,
     Locked,
     Incomplete,
     Failed(PartitionFailure),

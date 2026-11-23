@@ -16,7 +16,7 @@ use jmap_proto::{
     types::state::State,
 };
 use jmap_tools::{Key, Map, Value};
-use registry::schema::prelude::{ObjectType, Permission};
+use registry::schema::prelude::{ObjectType, Permission, ResourceKind};
 use std::{future::Future, sync::Arc};
 use store::{registry::RegistryQuery, roaring::RoaringBitmap};
 use trc::AddContext;
@@ -112,10 +112,11 @@ impl PrincipalGet for Server {
                 let value = match property {
                     PrincipalProperty::Id => Value::Element(PrincipalValue::Id(id)),
                     PrincipalProperty::Type => {
-                        Value::Element(PrincipalValue::Type(if principal.is_user_account() {
-                            PrincipalType::Individual
-                        } else {
-                            PrincipalType::Group
+                        Value::Element(PrincipalValue::Type(match principal.resource_kind() {
+                            Some(ResourceKind::Room) => PrincipalType::Location,
+                            Some(ResourceKind::Equipment) => PrincipalType::Resource,
+                            None if principal.is_user_account() => PrincipalType::Individual,
+                            None => PrincipalType::Group,
                         }))
                     }
                     PrincipalProperty::Name => Value::Str(principal.name().to_string().into()),

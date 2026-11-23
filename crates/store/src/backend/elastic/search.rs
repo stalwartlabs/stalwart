@@ -6,7 +6,8 @@
 
 use crate::{
     backend::elastic::{
-        DeleteByQueryResponse, ElasticSearchStore, SearchResponse, main::assert_success,
+        BulkResponse, DeleteByQueryResponse, ElasticSearchStore, SearchResponse,
+        main::assert_success,
     },
     search::{
         IndexDocument, KeyValueMatch, SearchField, SearchFilter, SearchQuery, SearchResults,
@@ -16,6 +17,11 @@ use crate::{
 };
 use serde_json::{Map, Value, json};
 use std::{cmp::Ordering, fmt::Write};
+
+#[cfg(not(stalwart_tests))]
+const SEARCH_PAGE_SIZE: usize = 10_000;
+#[cfg(stalwart_tests)]
+const SEARCH_PAGE_SIZE: usize = 100;
 
 impl ElasticSearchStore {
     pub async fn index(&self, documents: Vec<IndexDocument>) -> trc::Result<()> {
@@ -43,15 +49,39 @@ impl ElasticSearchStore {
             request.push('\n');
         }
 
-        assert_success(
+        let response = assert_success(
             self.client
                 .post(format!("{}/_bulk", self.url))
                 .body(request)
                 .send()
                 .await,
         )
-        .await
-        .map(|_| ())
+        .await?;
+
+        let text = response
+            .text()
+            .await
+            .map_err(|err| trc::StoreEvent::ElasticsearchError.reason(err))?;
+
+        let response = serde_json::from_str::<BulkResponse>(&text).map_err(|err| {
+            trc::StoreEvent::ElasticsearchError
+                .reason(err)
+                .details(text)
+        })?;
+
+        if response.errors {
+            let mut errors = response
+                .items
+                .into_iter()
+                .filter_map(|item| item.index.and_then(|result| result.error));
+            let first = errors.next().unwrap_or_default();
+            Err(trc::StoreEvent::ElasticsearchError
+                .reason(first)
+                .details("Bulk index request rejected documents")
+                .ctx(trc::Key::Total, errors.count() as u64 + 1))
+        } else {
+            Ok(())
+        }
     }
 
     pub async fn query<R: SearchResults>(
@@ -59,27 +89,28 @@ impl ElasticSearchStore {
         index: SearchIndex,
         filters: &[SearchFilter],
     ) -> trc::Result<R> {
-        let mut search_after: Option<Value> = None;
+        let sort = index
+            .primary_keys()
+            .iter()
+            .map(|field| json!({ field.field_name(): "asc" }))
+            .collect::<Vec<_>>();
+        let mut query = Map::from_iter([
+            ("query".to_string(), build_query(filters)),
+            ("size".to_string(), Value::from(SEARCH_PAGE_SIZE)),
+            ("_source".to_string(), Value::from(false)),
+            ("sort".to_string(), Value::from(sort)),
+        ]);
+        let url = format!(
+            "{}/{}/_search?allow_partial_search_results=false",
+            self.url,
+            index.index_name()
+        );
         let mut results = R::default();
-        let mut has_more = true;
 
-        while has_more {
-            let query = Map::from_iter(
-                [
-                    Some(("query".to_string(), build_query(filters))),
-                    Some(("size".to_string(), Value::from(10_000))),
-                    Some(("_source".to_string(), Value::from(false))),
-                    search_after
-                        .take()
-                        .map(|sa| ("search_after".to_string(), sa)),
-                ]
-                .into_iter()
-                .flatten(),
-            );
-
+        loop {
             let response = assert_success(
                 self.client
-                    .post(format!("{}/{}/_search", self.url, index.index_name()))
+                    .post(&url)
                     .body(serde_json::to_string(&query).unwrap_or_default())
                     .send()
                     .await,
@@ -97,13 +128,21 @@ impl ElasticSearchStore {
                     .details(text)
             })?;
 
-            has_more = response.hits.hits.len() == 10_000
-                && response.hits.hits.last().unwrap().sort.is_some();
-
+            let is_last_page = response.hits.hits.len() < SEARCH_PAGE_SIZE;
+            let mut search_after = None;
             for hit in response.hits.hits {
-                search_after = hit.sort;
                 results.insert(hit.id);
+                search_after = hit.sort;
             }
+
+            if is_last_page {
+                break;
+            }
+            let search_after = search_after.ok_or_else(|| {
+                trc::StoreEvent::ElasticsearchError
+                    .reason("Search response is missing the pagination cursor")
+            })?;
+            query.insert("search_after".to_string(), search_after);
         }
 
         Ok(results)
@@ -345,3 +384,8 @@ fn json_serialize_str(request: &mut String, value: &str) {
     }
     request.push('"');
 }
+
+#[cfg(all(test, stalwart_tests))]
+#[rustfmt::skip]
+#[path = "../../../../../../stalwart-tests/unit/store/src/backend/elastic/search/tests.rs"]
+mod tests;

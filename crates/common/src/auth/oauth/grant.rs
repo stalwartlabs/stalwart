@@ -64,6 +64,17 @@ pub enum GrantRotation {
 }
 
 impl StoredOAuthGrant {
+    fn from_object(id: u64, object: Option<Object>) -> Option<Self> {
+        object.and_then(|object| match object.inner {
+            ObjectInner::OAuthGrant(grant) => Some(StoredOAuthGrant {
+                id,
+                revision: object.revision,
+                grant,
+            }),
+            _ => None,
+        })
+    }
+
     pub fn account_id(&self) -> u32 {
         self.grant.account_id.document_id()
     }
@@ -159,19 +170,18 @@ enum RotationStep {
 impl Server {
     pub async fn oauth_grant(&self, grant_id: u64) -> trc::Result<Option<StoredOAuthGrant>> {
         self.registry()
+            .get_fresh(ObjectId::new(ObjectType::OAuthGrant, Id::new(grant_id)))
+            .await
+            .caused_by(trc::location!())
+            .map(|object| StoredOAuthGrant::from_object(grant_id, object))
+    }
+
+    async fn oauth_grant_cached(&self, grant_id: u64) -> trc::Result<Option<StoredOAuthGrant>> {
+        self.registry()
             .get(ObjectId::new(ObjectType::OAuthGrant, Id::new(grant_id)))
             .await
             .caused_by(trc::location!())
-            .map(|object| {
-                object.and_then(|object| match object.inner {
-                    ObjectInner::OAuthGrant(grant) => Some(StoredOAuthGrant {
-                        id: grant_id,
-                        revision: object.revision,
-                        grant,
-                    }),
-                    _ => None,
-                })
-            })
+            .map(|object| StoredOAuthGrant::from_object(grant_id, object))
     }
 
     pub async fn oauth_grant_scope(
@@ -179,15 +189,15 @@ impl Server {
         grant_id: u64,
         account_id: u32,
     ) -> trc::Result<TokenScope> {
+        if account_id == RECOVERY_ADMIN_ID && grant_id == RECOVERY_ADMIN_GRANT_ID {
+            return Ok(TokenScope::Grant {
+                grant_id,
+                scopes: OAuthScopes::ALL,
+            });
+        }
         match self.oauth_grant(grant_id).await? {
             Some(stored) if stored.account_id() == account_id => {
                 Ok(TokenScope::from_grant(grant_id, &stored.grant))
-            }
-            None if account_id == RECOVERY_ADMIN_ID && grant_id == RECOVERY_ADMIN_GRANT_ID => {
-                Ok(TokenScope::Grant {
-                    grant_id,
-                    scopes: OAuthScopes::ALL,
-                })
             }
             _ => Err(trc::AuthEvent::TokenExpired
                 .into_err()
@@ -210,7 +220,7 @@ impl Server {
             }
             token_scope => token_scope,
         };
-        AccessToken::renew(inner, access_token.credential_id(), token_scope, remote_ip)
+        access_token.renew_session(inner, token_scope, remote_ip)
     }
 
     pub async fn refresh_access_token(
@@ -222,13 +232,34 @@ impl Server {
         if access_token.is_built_from(&inner) {
             Ok(None)
         } else {
-            AccessToken::renew(
-                inner,
-                access_token.credential_id(),
-                access_token.token_scope(),
-                remote_ip,
-            )
-            .map(Some)
+            access_token
+                .renew_session(inner, access_token.token_scope(), remote_ip)
+                .map(Some)
+        }
+    }
+
+    pub async fn assert_session_access(
+        &self,
+        access_token: &AccessToken,
+        remote_ip: StdIpAddr,
+    ) -> trc::Result<()> {
+        match self.refresh_access_token(access_token, remote_ip).await {
+            Ok(Some(renewed))
+                if renewed.effective_permissions() != access_token.effective_permissions() =>
+            {
+                Err(trc::SecurityEvent::Unauthorized
+                    .into_err()
+                    .account_id(access_token.account_id())
+                    .reason("Account permissions changed"))
+            }
+            Ok(_) => Ok(()),
+            Err(err) if matches!(err.as_ref(), trc::EventType::Auth(_)) => {
+                Err(trc::SecurityEvent::Unauthorized
+                    .into_err()
+                    .account_id(access_token.account_id())
+                    .caused_by(err))
+            }
+            Err(err) => Err(err),
         }
     }
 
@@ -290,7 +321,7 @@ impl Server {
 
         let mut grants = Vec::with_capacity(ids.len());
         for id in ids {
-            if let Some(stored) = self.oauth_grant(id.id()).await? {
+            if let Some(stored) = self.oauth_grant_cached(id.id()).await? {
                 grants.push(stored);
             }
         }
@@ -333,13 +364,17 @@ impl Server {
             .await
             .caused_by(trc::location!())?
         {
-            if self.oauth_grant(id.id()).await?.is_some_and(|stored| {
-                let grant = &stored.grant;
-                grant.client_id == client_id
-                    && grant.client_kind == client_kind
-                    && grant.last_used_at.timestamp() > idle_since
-                    && OAuthScopes::from_registry(grant.scopes.iter()).contains(scopes)
-            }) {
+            if self
+                .oauth_grant_cached(id.id())
+                .await?
+                .is_some_and(|stored| {
+                    let grant = &stored.grant;
+                    grant.client_id == client_id
+                        && grant.client_kind == client_kind
+                        && grant.last_used_at.timestamp() > idle_since
+                        && OAuthScopes::from_registry(grant.scopes.iter()).contains(scopes)
+                })
+            {
                 return Ok(true);
             }
         }
@@ -357,7 +392,7 @@ impl Server {
             .await
             .caused_by(trc::location!())?
         {
-            if let Some(stored) = self.oauth_grant(id.id()).await? {
+            if let Some(stored) = self.oauth_grant_cached(id.id()).await? {
                 self.delete_oauth_grant(stored, GrantDeletion::Unconditional, invalidator)
                     .await?;
             }

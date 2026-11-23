@@ -12,7 +12,7 @@ pub mod form;
 pub mod request;
 mod stream;
 
-use common::Inner;
+use common::{Core, Inner};
 use std::sync::Arc;
 
 #[derive(Clone)]
@@ -24,4 +24,14 @@ impl HttpSessionManager {
     pub fn new(inner: Arc<Inner>) -> Self {
         Self { inner }
     }
+}
+
+#[cfg(feature = "exchange")]
+pub(crate) fn is_exchange_enabled(core: &Core) -> bool {
+    core.exchange.enabled
+}
+
+#[cfg(not(feature = "exchange"))]
+pub(crate) fn is_exchange_enabled(_core: &Core) -> bool {
+    false
 }

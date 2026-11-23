@@ -1,0 +1,14 @@
+fdb: native FoundationDB client for Stalwart
+Copyright 2020 Stalwart Labs LLC
+
+This crate contains logic ported from or derived from the following projects,
+both licensed under the Apache License, Version 2.0
+(https://www.apache.org/licenses/LICENSE-2.0):
+
+FoundationDB
+Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
+https://github.com/apple/foundationdb
+
+fdb-go (native Go FoundationDB client, itself derived from FoundationDB)
+Copyright the fdb-go authors
+https://github.com/birdayz/fdb-go

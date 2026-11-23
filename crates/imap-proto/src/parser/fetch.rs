@@ -17,6 +17,8 @@ use std::vec::IntoIter;
 
 const ATTRIBUTES_INIT_LEN: usize = 8;
 const FIELDS_INIT_LEN: usize = 32;
+const MAX_FETCH_ATTRIBUTES: usize = 128;
+const MAX_HEADER_FIELDS: usize = 256;
 
 impl Request<Command> {
     #[allow(clippy::while_let_on_iterator)]
@@ -36,9 +38,13 @@ impl Request<Command> {
         .map_err(|v| bad(self.tag.clone(), v))?;
 
         let mut in_parentheses = false;
+        let mut header_fields_left = MAX_HEADER_FIELDS;
 
         while let Some(token) = tokens.next() {
             match token {
+                Token::Argument(_) if attributes.len() == MAX_FETCH_ATTRIBUTES => {
+                    return Err(bad(self.tag, "Too many fetch attributes."));
+                }
                 Token::Argument(value) => {
                     hashify::fnc_map_ignore_case!(value.as_slice(),
                         "ALL" => {
@@ -149,7 +155,7 @@ impl Request<Command> {
                                 }
                             };
 
-                            let sections = Section::parse_section_spec(&mut tokens)
+                            let sections = Section::parse_section_spec(&mut tokens, &mut header_fields_left)
                                 .map_err(|v| bad(self.tag.clone(), v))?;
 
                             attributes.push_unique(Attribute::BodySection {
@@ -352,7 +358,10 @@ enum SectionPosition {
 }
 
 impl Section {
-    fn parse_section_spec(tokens: &mut Peekable<IntoIter<Token>>) -> super::Result<Vec<Section>> {
+    fn parse_section_spec(
+        tokens: &mut Peekable<IntoIter<Token>>,
+        header_fields_left: &mut usize,
+    ) -> super::Result<Vec<Section>> {
         let mut sections = Vec::new();
         let mut position = SectionPosition::Start;
         loop {
@@ -378,7 +387,11 @@ impl Section {
                         sections.push(Section::Mime);
                         SectionPosition::AfterText
                     } else {
-                        sections.push(Section::parse_section_msgtext(&value, tokens)?);
+                        sections.push(Section::parse_section_msgtext(
+                            &value,
+                            tokens,
+                            header_fields_left,
+                        )?);
                         SectionPosition::AfterText
                     }
                 }
@@ -394,6 +407,7 @@ impl Section {
     fn parse_section_msgtext(
         value: &[u8],
         tokens: &mut Peekable<IntoIter<Token>>,
+        header_fields_left: &mut usize,
     ) -> super::Result<Section> {
         if value.eq_ignore_ascii_case(b"TEXT") {
             return Ok(Section::Text);
@@ -434,10 +448,15 @@ impl Section {
                 Some(Token::ParenthesisClose) if !fields.is_empty() => {
                     return Ok(Section::HeaderFields { not, fields });
                 }
-                Some(Token::Argument(value)) if Section::is_field_name(&value) => fields.push(
-                    String::from_utf8(value.into_vec())
-                        .map_err(|_| Cow::from("Invalid UTF-8 in header field name."))?,
-                ),
+                Some(Token::Argument(value)) if Section::is_field_name(&value) => {
+                    *header_fields_left = header_fields_left
+                        .checked_sub(1)
+                        .ok_or_else(|| Cow::from("Too many header field names."))?;
+                    fields.push(
+                        String::from_utf8(value.into_vec())
+                            .map_err(|_| Cow::from("Invalid UTF-8 in header field name."))?,
+                    );
+                }
                 Some(Token::Argument(_) | Token::Nil) => {
                     return Err(
                         "Header field names must be RFC 5322 field-names (printable US-ASCII except ':').".into(),

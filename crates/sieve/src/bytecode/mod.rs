@@ -10,6 +10,7 @@ pub(crate) mod header_id;
 pub(crate) mod ops;
 pub(crate) mod rec;
 pub(crate) mod verify;
+pub mod view;
 
 use crate::LoadError;
 

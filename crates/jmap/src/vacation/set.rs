@@ -4,36 +4,20 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::get::VacationResponseGet;
 use crate::changes::state::StateManager;
-use common::{
-    Server, auth::AccessToken, ipc::CacheInvalidation, storage::index::ObjectIndexBuilder,
-};
-use email::sieve::{SieveScript, VacationResponse, ingest::SieveScriptIngest};
+use common::{Server, auth::AccessToken};
+use email::sieve::rules::managed::{ManagedSieveScript, SaveError};
 use jmap_proto::{
     error::set::{SetError, SetErrorType},
     method::set::{SetRequest, SetResponse},
     object::vacation_response::{self, VacationResponseProperty, VacationResponseValue},
     references::resolve::ResolveCreatedReference,
     request::IntoValid,
-    types::{date::UTCDate, state::State},
+    types::state::State,
 };
-use jmap_tools::{Key, Map, Value};
-use mail_builder::MessageBuilder;
-use mail_parser::decoders::html::html_to_text;
-use std::borrow::Cow;
+use jmap_tools::{Key, Value};
 use std::future::Future;
-use store::{
-    ValueKey,
-    write::{Archive, ArchiveBytes, BatchBuilder, PendingId},
-};
-use trc::AddContext;
-use types::{
-    blob_hash::BlobHash,
-    collection::{Collection, SyncCollection},
-    field::PrincipalField,
-    id::Id,
-};
+use types::{collection::SyncCollection, id::Id};
 
 pub trait VacationResponseSet: Sync + Send {
     fn vacation_response_set(
@@ -41,8 +25,6 @@ pub trait VacationResponseSet: Sync + Send {
         request: SetRequest<'_, vacation_response::VacationResponse>,
         access_token: &AccessToken,
     ) -> impl Future<Output = trc::Result<SetResponse<vacation_response::VacationResponse>>> + Send;
-
-    fn build_script(&self, obj: &mut SieveScript) -> trc::Result<Vec<u8>>;
 }
 
 impl VacationResponseSet for Server {
@@ -97,353 +79,113 @@ impl VacationResponseSet for Server {
             }
         }
 
-        // Prepare write batch
-        let mut batch = BatchBuilder::new();
-        batch
-            .with_account_id(account_id)
-            .with_collection(Collection::SieveScript);
+        let Some(changes) = changes else {
+            return Ok(response);
+        };
+        let mut state = self.managed_script_load(account_id).await?;
+        let mut vacation = state.script.vacation.take().unwrap_or_default();
 
-        // Process changes
-        let active_script_id = self.sieve_script_get_active_id(account_id).await?;
-        if let Some(changes) = changes {
-            // Obtain current script
-            let document_id = self.get_vacation_sieve_script_id(account_id).await?;
-
-            let (mut sieve, prev_sieve) = if let Some(document_id) = document_id {
-                let prev_sieve = self
-                    .store()
-                    .get_value::<Archive<ArchiveBytes>>(ValueKey::archive(
-                        account_id,
-                        Collection::SieveScript,
-                        document_id,
-                    ))
-                    .await?
-                    .ok_or_else(|| {
-                        trc::StoreEvent::NotFound
-                            .into_err()
-                            .caused_by(trc::location!())
-                    })?
-                    .into_deserialized::<SieveScript>()
-                    .caused_by(trc::location!())?;
-                let mut sieve = prev_sieve.inner.clone();
-                if sieve.vacation_response.is_none() {
-                    sieve.vacation_response = VacationResponse::default().into();
-                }
-
-                (sieve, Some(prev_sieve))
-            } else {
-                (
-                    SieveScript {
-                        name: "vacation".into(),
-                        vacation_response: VacationResponse::default().into(),
-                        ..Default::default()
-                    },
-                    None,
-                )
+        for (property, mut value) in changes.into_expanded_object() {
+            if let Err(err) = response.resolve_self_references(&mut value, 0, false) {
+                return Ok(set_error(response, create_id, err));
             };
 
-            // Parse properties
-            let mut is_active = document_id.is_some_and(|id| active_script_id == Some(id));
-            let mut build_script = create_id.is_some() || sieve.blob_hash.is_empty();
-            let vacation = sieve.vacation_response.as_mut().unwrap();
-
-            for (property, mut value) in changes.into_expanded_object() {
-                if let Err(err) = response.resolve_self_references(&mut value, 0, false) {
-                    return Ok(set_error(response, create_id, err));
-                };
-
-                match (&property, value) {
-                    (Key::Property(VacationResponseProperty::Subject), Value::Str(value))
-                        if value.len() < 512 =>
-                    {
-                        build_script = true;
-                        vacation.subject = Some(value.into_owned());
-                    }
-                    (Key::Property(VacationResponseProperty::HtmlBody), Value::Str(value))
-                        if value.len() < 2048 =>
-                    {
-                        build_script = true;
-                        vacation.html_body = Some(value.into_owned());
-                    }
-                    (Key::Property(VacationResponseProperty::TextBody), Value::Str(value))
-                        if value.len() < 2048 =>
-                    {
-                        build_script = true;
-                        vacation.text_body = Some(value.into_owned());
-                    }
-                    (
-                        Key::Property(VacationResponseProperty::FromDate),
-                        Value::Element(VacationResponseValue::Date(date)),
-                    ) => {
-                        vacation.from_date = Some(date.timestamp() as u64);
-                        build_script = true;
-                    }
-                    (
-                        Key::Property(VacationResponseProperty::ToDate),
-                        Value::Element(VacationResponseValue::Date(date)),
-                    ) => {
-                        vacation.to_date = Some(date.timestamp() as u64);
-                        build_script = true;
-                    }
-                    (Key::Property(VacationResponseProperty::IsEnabled), Value::Bool(value)) => {
-                        is_active = value;
-                    }
-                    (Key::Property(VacationResponseProperty::IsEnabled), Value::Null) => {
-                        is_active = false;
-                    }
-                    (
-                        Key::Property(
-                            VacationResponseProperty::Subject
-                            | VacationResponseProperty::HtmlBody
-                            | VacationResponseProperty::TextBody
-                            | VacationResponseProperty::ToDate
-                            | VacationResponseProperty::FromDate,
-                        ),
-                        Value::Null,
-                    ) => {
-                        if create_id.is_none() {
-                            build_script = true;
-                            match property {
-                                Key::Property(VacationResponseProperty::Subject) => {
-                                    vacation.subject = None;
-                                }
-                                Key::Property(VacationResponseProperty::HtmlBody) => {
-                                    vacation.html_body = None;
-                                }
-                                Key::Property(VacationResponseProperty::TextBody) => {
-                                    vacation.text_body = None;
-                                }
-                                Key::Property(VacationResponseProperty::FromDate) => {
-                                    vacation.from_date = None;
-                                }
-                                Key::Property(VacationResponseProperty::ToDate) => {
-                                    vacation.to_date = None;
-                                }
-                                _ => unreachable!(),
-                            }
-                        }
-                    }
-                    (Key::Property(VacationResponseProperty::Id), value) => {
-                        if create_id.is_some() || !crate::matches_id(&value, Id::singleton()) {
-                            return Ok(set_error(
-                                response,
-                                create_id,
-                                SetError::invalid_properties()
-                                    .with_property(VacationResponseProperty::Id)
-                                    .with_description("The id property is immutable."),
-                            ));
-                        }
-                    }
-                    _ => {
+            match (&property, value) {
+                (Key::Property(VacationResponseProperty::Subject), Value::Str(value))
+                    if value.len() < 512 =>
+                {
+                    vacation.subject = Some(value.into_owned());
+                }
+                (Key::Property(VacationResponseProperty::HtmlBody), Value::Str(value))
+                    if value.len() < 2048 =>
+                {
+                    vacation.html_body = Some(value.into_owned());
+                }
+                (Key::Property(VacationResponseProperty::TextBody), Value::Str(value))
+                    if value.len() < 2048 =>
+                {
+                    vacation.text_body = Some(value.into_owned());
+                }
+                (
+                    Key::Property(VacationResponseProperty::FromDate),
+                    Value::Element(VacationResponseValue::Date(date)),
+                ) => {
+                    vacation.from_date = u64::try_from(date.timestamp()).ok();
+                }
+                (
+                    Key::Property(VacationResponseProperty::ToDate),
+                    Value::Element(VacationResponseValue::Date(date)),
+                ) => {
+                    vacation.to_date = u64::try_from(date.timestamp()).ok();
+                }
+                (Key::Property(VacationResponseProperty::IsEnabled), Value::Bool(value)) => {
+                    vacation.is_enabled = value;
+                }
+                (Key::Property(VacationResponseProperty::IsEnabled), Value::Null) => {
+                    vacation.is_enabled = false;
+                }
+                (Key::Property(VacationResponseProperty::Subject), Value::Null) => {
+                    vacation.subject = None;
+                }
+                (Key::Property(VacationResponseProperty::HtmlBody), Value::Null) => {
+                    vacation.html_body = None;
+                }
+                (Key::Property(VacationResponseProperty::TextBody), Value::Null) => {
+                    vacation.text_body = None;
+                }
+                (Key::Property(VacationResponseProperty::FromDate), Value::Null) => {
+                    vacation.from_date = None;
+                }
+                (Key::Property(VacationResponseProperty::ToDate), Value::Null) => {
+                    vacation.to_date = None;
+                }
+                (Key::Property(VacationResponseProperty::Id), value) => {
+                    if !crate::matches_id(&value, Id::singleton()) {
                         return Ok(set_error(
                             response,
                             create_id,
                             SetError::invalid_properties()
-                                .with_property(property.into_owned())
-                                .with_description("Field could not be set."),
+                                .with_property(VacationResponseProperty::Id)
+                                .with_description("The id property is immutable."),
                         ));
                     }
                 }
-            }
-
-            let mut obj = ObjectIndexBuilder::new()
-                .with_current_opt(prev_sieve)
-                .with_changes(sieve)
-                .with_changed_by(access_token.changed_by());
-
-            // Update id
-            let document_id = match document_id {
-                Some(document_id) => {
-                    batch.with_document(document_id);
-                    PendingId::Assigned(document_id)
-                }
-                None => {
-                    let slot = batch.reserve_document_id(account_id, Collection::SieveScript);
-                    batch.create_document(slot);
-                    PendingId::Slot(slot)
-                }
-            };
-
-            // Create sieve script only if there are changes
-            if build_script {
-                // Upload new blob
-                let script = self.build_script(obj.changes_mut().unwrap())?;
-                let (blob_hash, blob_hold) = self
-                    .hold_blob(
-                        account_id,
-                        BlobHash::generate(&script),
-                        &script,
-                        60,
-                        &self.core.blob.email,
-                    )
-                    .await?;
-                obj.changes_mut().unwrap().blob_hash = blob_hash;
-                blob_hold.release(&mut batch);
-            };
-            batch.custom(obj).caused_by(trc::location!())?;
-
-            // Deactivate other sieve scripts
-            let was_active = document_id
-                .assigned()
-                .filter(|document_id| active_script_id == Some(*document_id));
-            let mut active_script_changed = false;
-            if is_active {
-                if was_active.is_none() {
-                    batch
-                        .with_collection(Collection::Principal)
-                        .with_document(0);
-                    batch.set(PrincipalField::ActiveScriptId, document_id);
-                    active_script_changed = true;
-                }
-            } else if let Some(active_id) = was_active {
-                batch
-                    .with_collection(Collection::Principal)
-                    .with_document(0)
-                    .clear_if_equals(PrincipalField::ActiveScriptId, active_id);
-                active_script_changed = true;
-            }
-
-            // Write changes
-            if !batch.is_empty() {
-                response.new_state = Some(State::Exact(
-                    self.commit_batch(batch)
-                        .await
-                        .map(|ids| ids.last_change_id(account_id, SyncCollection::SieveScript))
-                        .caused_by(trc::location!())?,
-                ));
-                if active_script_changed {
-                    self.invalidate_caches(CacheInvalidation::ActiveSieveScript(account_id).into())
-                        .await
-                        .caused_by(trc::location!())?;
+                _ => {
+                    return Ok(set_error(
+                        response,
+                        create_id,
+                        SetError::invalid_properties()
+                            .with_property(property.into_owned())
+                            .with_description("Field could not be set."),
+                    ));
                 }
             }
+        }
 
-            // Add result
-            if let Some(create_id) = create_id {
-                response.created.insert(
-                    create_id,
-                    Map::with_capacity(1)
-                        .with_key_value(VacationResponseProperty::Id, Id::singleton())
-                        .into(),
-                );
-            } else {
+        state.script.set_vacation(vacation);
+        match self
+            .managed_script_save(access_token, account_id, state)
+            .await?
+        {
+            Ok(change_id) => {
+                if let Some(change_id) = change_id {
+                    response.new_state = Some(State::Exact(change_id));
+                }
                 response.updated.append(Id::singleton(), None);
+                Ok(response)
             }
-        }
-
-        Ok(response)
-    }
-
-    fn build_script(&self, obj: &mut SieveScript) -> trc::Result<Vec<u8>> {
-        // Build Sieve script
-        let mut script = Vec::with_capacity(1024);
-        script.extend_from_slice(b"require [\"vacation\", \"relational\", \"date\"];\r\n\r\n");
-        let mut num_blocks = 0;
-
-        // Add start date
-        if let Some(value) = obj.vacation_response.as_ref().and_then(|v| v.from_date) {
-            script.extend_from_slice(b"if currentdate :value \"ge\" \"iso8601\" \"");
-            script.extend_from_slice(UTCDate::from(value).to_string().as_bytes());
-            script.extend_from_slice(b"\" {\r\n");
-            num_blocks += 1;
-        }
-
-        // Add end date
-        if let Some(value) = obj.vacation_response.as_ref().and_then(|v| v.to_date) {
-            script.extend_from_slice(b"if currentdate :value \"le\" \"iso8601\" \"");
-            script.extend_from_slice(UTCDate::from(value).to_string().as_bytes());
-            script.extend_from_slice(b"\" {\r\n");
-            num_blocks += 1;
-        }
-
-        script.extend_from_slice(b"vacation :mime ");
-        if let Some(value) = obj
-            .vacation_response
-            .as_ref()
-            .and_then(|v| v.subject.as_ref())
-        {
-            script.extend_from_slice(b":subject \"");
-            for &ch in value.as_bytes().iter() {
-                match ch {
-                    b'\\' | b'\"' => {
-                        script.push(b'\\');
-                    }
-                    b'\r' | b'\n' => {
-                        continue;
-                    }
-                    _ => (),
-                }
-                script.push(ch);
-            }
-            script.extend_from_slice(b"\" ");
-        }
-
-        let mut text_body = if let Some(value) = obj
-            .vacation_response
-            .as_ref()
-            .and_then(|v| v.text_body.as_ref())
-        {
-            Cow::from(value.as_str()).into()
-        } else {
-            None
-        };
-        let html_body = if let Some(value) = obj
-            .vacation_response
-            .as_ref()
-            .and_then(|v| v.html_body.as_ref())
-        {
-            Cow::from(value.as_str()).into()
-        } else {
-            None
-        };
-        match (&html_body, &text_body) {
-            (Some(html_body), None) => {
-                text_body = Cow::from(html_to_text(html_body.as_ref())).into();
-            }
-            (None, None) => {
-                text_body = Cow::from("I am away.").into();
-            }
-            _ => (),
-        }
-
-        let mut builder = MessageBuilder::new();
-        let mut body_len = 0;
-        if let Some(html_body) = html_body {
-            body_len = html_body.len();
-            builder = builder.html_body(html_body);
-        }
-        if let Some(text_body) = text_body {
-            body_len += text_body.len();
-            builder = builder.text_body(text_body);
-        }
-        let mut message_body = Vec::with_capacity(body_len + 128);
-        builder.write_body(&mut message_body).ok();
-
-        script.push(b'\"');
-        for ch in message_body {
-            if b"\\\"".contains(&ch) {
-                script.push(b'\\');
-            }
-            script.push(ch);
-        }
-        script.extend_from_slice(b"\";\r\n");
-
-        // Close blocks
-        for _ in 0..num_blocks {
-            script.extend_from_slice(b"}\r\n");
-        }
-
-        match self.core.sieve.untrusted_compiler.compile(&script) {
-            Ok(compiled_script) => {
-                obj.size = script.len() as u32;
-                obj.set_script(&compiled_script);
-
-                Ok(script)
-            }
-            Err(err) => Err(trc::StoreEvent::UnexpectedError
-                .caused_by(trc::location!())
-                .reason(err)
-                .details("Vacation Sieve Script failed to compile.")),
+            Err(SaveError::Conflict) => Ok(set_error(
+                response,
+                create_id,
+                SetError::forbidden().with_description(
+                    "Another process modified the vacation response, please try again.",
+                ),
+            )),
+            Err(SaveError::Invalid(err)) => Ok(set_error(
+                response,
+                create_id,
+                SetError::invalid_properties().with_description(err.to_string()),
+            )),
         }
     }
 }

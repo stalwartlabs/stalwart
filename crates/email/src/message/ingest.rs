@@ -26,7 +26,7 @@ use groupware::{
     calendar::itip::{ItipIngest, ItipIngestError, ItipOrigin},
     scheduling::{ItipError, ItipMessages},
 };
-use mail_parser::{Message, MessageParser, thread_name};
+use mail_parser::{HeaderName, Message, MessageParser, thread_name};
 use recheck::PendingThread;
 use registry::{
     schema::{
@@ -92,6 +92,12 @@ pub struct PendingEmail {
     message_id: Option<String>,
     session_id: u64,
     start_time: Instant,
+}
+
+impl PendingEmail {
+    pub fn document_id(&self) -> PendingId {
+        PendingId::Slot(self.document_slot)
+    }
 }
 
 pub struct IngestEmail<'x> {
@@ -356,7 +362,11 @@ impl EmailIngest for Server {
 
         // Skip duplicate messages for SMTP ingestion
         if !thread_result.duplicate_ids.is_empty()
-            && params.source.is_smtp()
+            && let IngestSource::Smtp {
+                envelope_from,
+                sender_authentication,
+                ..
+            } = params.source
             && Box::pin(checks::has_duplicate_in(
                 self,
                 account_id,
@@ -365,6 +375,11 @@ impl EmailIngest for Server {
             ))
             .await
             .caused_by(trc::location!())?
+            && !(sender_authentication == SenderAuthentication::Submission
+                && matches!(
+                    self.account_id_from_email(envelope_from, false).await,
+                    Ok(Some(id)) if id == account_id
+                ))
         {
             trc::event!(
                 MessageIngest(MessageIngestEvent::Duplicate),
@@ -395,6 +410,10 @@ impl EmailIngest for Server {
                 sender_authentication,
                 mut is_spam,
             } => {
+                if !message.headers().contains(HeaderName::ReturnPath) {
+                    extra_headers.push(HeaderId::RETURN_PATH, &format!("<{envelope_from}>"));
+                }
+
                 // Add delivered to header
                 if self.core.smtp.session.data.add_delivered_to {
                     extra_headers.push(HeaderId::DELIVERED_TO, deliver_to);
@@ -403,6 +422,11 @@ impl EmailIngest for Server {
                 // Spam training on confirmed false positives
                 if self.core.spam.enabled {
                     let mut overridden = None;
+                    if is_spam && params.keywords.contains(&Keyword::NotJunk) {
+                        is_spam = false;
+                        overridden = Some("trusted-sender");
+                    }
+
                     // If the message is classified as spam, check whether the
                     // sender address is present in the user's address book.
                     if is_spam
@@ -495,15 +519,21 @@ impl EmailIngest for Server {
                     } else {
                         ItipOrigin::Delivery
                     };
-                    for part in message.root().parts() {
-                        if part.content_type().is_some_and(|ct| {
-                            ct.ctype().eq_ignore_ascii_case("text")
-                                && ct
-                                    .subtype()
-                                    .is_some_and(|st| st.eq_ignore_ascii_case("calendar"))
-                                && ct.has_attribute("method")
-                        }) && let Some(itip_message) = part.text()
-                        {
+                    for part in message
+                        .root()
+                        .parts()
+                        .filter(|part| {
+                            part.content_type().is_some_and(|ct| {
+                                ct.ctype().eq_ignore_ascii_case("text")
+                                    && ct
+                                        .subtype()
+                                        .is_some_and(|st| st.eq_ignore_ascii_case("calendar"))
+                                    && ct.has_attribute("method")
+                            })
+                        })
+                        .take(MAX_ITIP_PARTS)
+                    {
+                        if let Some(itip_message) = part.text() {
                             if itip_message.len() < self.core.groupware.itip_inbound_max_ical_size {
                                 if let Some(sender) = sender.get_or_insert_with(|| {
                                     if sender_authentication == SenderAuthentication::Submission {
@@ -1287,6 +1317,7 @@ impl From<ThreadInfo<'_>> for SizedSetValue {
 }
 
 const THREAD_SCAN_WINDOW: usize = 256;
+const MAX_ITIP_PARTS: usize = 4;
 
 pub struct ThreadMerge {
     entries: AHashMap<u32, Vec<u32>>,

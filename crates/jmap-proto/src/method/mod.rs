@@ -18,6 +18,7 @@ pub mod copy;
 pub mod get;
 pub mod import;
 pub mod lookup;
+pub mod mdn;
 pub mod parse;
 pub mod passkey;
 pub mod query;

@@ -7,7 +7,7 @@
 use crate::core::{Command, ResponseCode, Session, StatusResponse};
 use common::{network::SessionStream, storage::index::ObjectIndexBuilder};
 use compact_str::ToCompactString;
-use email::sieve::SieveScript;
+use email::sieve::{SieveScript, rules::is_managed_script};
 use imap_proto::receiver::Request;
 use registry::schema::enums::{Permission, StorageQuota};
 use sieve::compiler::ErrorType;
@@ -231,10 +231,10 @@ impl<T: SessionStream> Session<T> {
             Err(trc::ManageSieveEvent::Error
                 .into_err()
                 .details("Script name is too long."))
-        } else if name.eq_ignore_ascii_case("vacation") {
+        } else if is_managed_script(name) {
             Err(trc::ManageSieveEvent::Error
                 .into_err()
-                .details("The 'vacation' name is reserved, please use a different name."))
+                .details("The 'managed' name is reserved, please use a different name."))
         } else {
             Ok(self
                 .server

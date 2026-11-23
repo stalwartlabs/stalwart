@@ -5,7 +5,7 @@
 </p>
 
 <h3 align="center">
-  Secure, scalable mail & collaboration server with comprehensive protocol support 🛡️ <br/>(IMAP, JMAP, SMTP, CalDAV, CardDAV, WebDAV)
+  Secure, scalable mail & collaboration server with comprehensive protocol support 🛡️ <br/>(IMAP, JMAP, SMTP, CalDAV, CardDAV, WebDAV, Microsoft Exchange)
 </h3>
 
 <br>
@@ -30,7 +30,7 @@
 
 ## Features
 
-**Stalwart** is an open-source mail & collaboration server with JMAP, IMAP4, POP3, SMTP, CalDAV, CardDAV and WebDAV support and a wide range of modern features. It is written in Rust and designed to be secure, fast, robust and scalable.
+**Stalwart** is an open-source mail & collaboration server with JMAP, IMAP4, POP3, SMTP, CalDAV, CardDAV, WebDAV and Microsoft Exchange support and a wide range of modern features. It is written in Rust and designed to be secure, fast, robust and scalable.
 
 Key features:
 
@@ -54,6 +54,11 @@ Key features:
     * Inbound throttling and filtering with granular configuration rules, sieve scripting, MTA hooks and milter integration.
     * Distributed virtual queues with delayed delivery, priority delivery, quotas, routing rules and throttling support.
     * Envelope rewriting and message modification.
+  - Microsoft Exchange (drop-in replacement for Outlook and ActiveSync clients):
+    * [MAPI over HTTP](https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcmapihttp/d502edcf-0b22-42f2-8500-019f00d60245) for classic Outlook for Windows, in cached and online mode.
+    * Exchange Web Services (EWS) for Outlook for Mac and Apple Mail, Calendar and Contacts.
+    * [Exchange ActiveSync](https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-ashttp/4cbf28dc-2876-41c6-9d87-ba9db86cd40d) 14.1 and 16.1 for phones and tablets.
+    * Autodiscover, global address list and offline address book.
 - **Collaboration** server:
   - Calendaring and scheduling:
     - [CalDAV](https://datatracker.ietf.org/doc/html/rfc4791) and [CalDAV Scheduling](https://datatracker.ietf.org/doc/html/rfc6638) support.
@@ -85,7 +90,7 @@ Key features:
   - Sieve scripting language with support for all [registered extensions](https://www.iana.org/assignments/sieve-extensions/sieve-extensions.xhtml).
   - Email aliases, mailing lists, subaddressing and catch-all addresses support.
   - Automated DNS management.
-  - Automatic account configuration and discovery with [PACC](https://datatracker.ietf.org/doc/draft-ietf-mailmaint-pacc/), [autoconfig](https://datatracker.ietf.org/doc/draft-ietf-mailmaint-autoconfig/) and [autodiscover](https://learn.microsoft.com/en-us/exchange/architecture/client-access/autodiscover?view=exchserver-2019). 
+  - Automatic account configuration and discovery with [PACC](https://datatracker.ietf.org/doc/draft-ietf-mailmaint-pacc/), [autoconfig](https://datatracker.ietf.org/doc/draft-ietf-mailmaint-autoconfig/) and [autodiscover](https://learn.microsoft.com/en-us/exchange/architecture/client-access/autodiscover?view=exchserver-2019) for Exchange and Outlook clients.
   - Multi-tenancy support with domain and tenant isolation.
   - Disk quotas per user and tenant.
 - **Encryption** with **OpenPGP** and **S/MIME**:

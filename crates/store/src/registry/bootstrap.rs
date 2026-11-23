@@ -24,6 +24,7 @@ pub struct Bootstrap {
     pub data_store: Store,
     pub errors: Vec<Error>,
     pub warnings: Vec<Warning>,
+    pub notices: Vec<trc::Error>,
     pub has_fatal_errors: bool,
     pub role: Option<ClusterRole>,
 }
@@ -57,6 +58,7 @@ impl Bootstrap {
             registry,
             errors: Vec::new(),
             warnings: Vec::new(),
+            notices: Vec::new(),
             has_fatal_errors: false,
             role: None,
         }
@@ -192,6 +194,12 @@ impl Bootstrap {
     pub fn log_warnings(&self) {
         for warning in &self.warnings {
             warning.log();
+        }
+    }
+
+    pub fn log_notices(&mut self) {
+        for notice in self.notices.drain(..) {
+            trc::error!(notice);
         }
     }
 }

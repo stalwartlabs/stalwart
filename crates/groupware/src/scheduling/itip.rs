@@ -132,22 +132,11 @@ fn itip_unreachable_entries(
                 continue;
             }
 
-            let rsvp = !entry.params.iter().any(|param| {
-                matches!(
-                    (&param.name, &param.value),
-                    (
-                        ICalendarParameterName::Rsvp,
-                        ICalendarParameterValue::Bool(false)
-                    )
-                )
-            });
-
-            if rsvp
-                && entry
-                    .values
-                    .first()
-                    .and_then(|value| value.as_text())
-                    .is_some_and(|value| Email::new(value, account_emails).is_none())
+            if entry
+                .values
+                .first()
+                .and_then(|value| value.as_text())
+                .is_some_and(|value| Email::new(value, account_emails).is_none())
             {
                 unreachable.push((comp_id, entry_id));
             }

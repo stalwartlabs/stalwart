@@ -274,7 +274,7 @@ impl<T: SessionStream> SessionData<T> {
             .get_cached_messages(account_id)
             .await
             .imap_ctx(&arguments.tag, trc::location!())?;
-        self.sync_and_announce(&mailbox, &cache)
+        self.sync_view(&mailbox, &cache, None)
             .await
             .imap_ctx(&arguments.tag, trc::location!())?;
 
@@ -602,12 +602,10 @@ impl<T: SessionStream> SessionData<T> {
         );
 
         // Send response
-        Ok(if untagged.is_empty() {
-            response.serialize_after(&items)
-        } else {
-            items.serialize_into(&mut untagged);
-            response.serialize(untagged)
-        })
+        untagged.reserve(items.size_hint());
+        items.serialize_into(&mut untagged);
+        mailbox.announce_appended(&mut untagged);
+        Ok(response.serialize(untagged))
     }
 }
 

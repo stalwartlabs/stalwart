@@ -6,7 +6,13 @@
 
 use super::*;
 use crate::cache::{MessageCacheFetch, mailbox::MailboxCacheAccess};
-use common::{Server, storage::index::ObjectIndexBuilder};
+use common::{
+    Server,
+    storage::{
+        create_lock::{CREATE_LOCK_ATTEMPTS, CreateLock},
+        index::ObjectIndexBuilder,
+    },
+};
 use registry::schema::enums::StorageQuota;
 use std::future::Future;
 use store::write::BatchBuilder;
@@ -24,9 +30,43 @@ pub trait MailboxFnc: Sync + Send {
         account_id: u32,
         path: &str,
     ) -> impl Future<Output = trc::Result<Option<u32>>> + Send;
+
+    fn lock_mailbox_names(
+        &self,
+        account_id: u32,
+    ) -> impl Future<Output = trc::Result<CreateLock>> + Send;
+
+    fn unlock_mailbox_names(&self, lock: CreateLock) -> impl Future<Output = ()> + Send;
+
+    fn create_mailbox_path(
+        &self,
+        account_id: u32,
+        path: &str,
+    ) -> impl Future<Output = trc::Result<Option<u32>>> + Send;
 }
 
 impl MailboxFnc for Server {
+    async fn lock_mailbox_names(&self, account_id: u32) -> trc::Result<CreateLock> {
+        let lock = CreateLock::new(account_id, Collection::Mailbox.into(), &[]);
+        for _ in 1..CREATE_LOCK_ATTEMPTS {
+            if self.try_create_lock(&lock).await? {
+                return Ok(lock);
+            }
+            self.create_lock_backoff().await;
+        }
+        if self.try_create_lock(&lock).await? {
+            Ok(lock)
+        } else {
+            Err(trc::LimitEvent::ConcurrentRequest
+                .into_err()
+                .details("Mailboxes are being changed by another session"))
+        }
+    }
+
+    async fn unlock_mailbox_names(&self, lock: CreateLock) {
+        self.release_create_lock(&lock).await;
+    }
+
     async fn create_system_folders(&self, account_id: u32) -> trc::Result<()> {
         #[cfg(stalwart_tests)]
         if account_id == 0 {
@@ -80,8 +120,15 @@ impl MailboxFnc for Server {
     }
 
     async fn mailbox_create_path(&self, account_id: u32, path: &str) -> trc::Result<Option<u32>> {
+        let lock = self.lock_mailbox_names(account_id).await?;
+        let result = self.create_mailbox_path(account_id, path).await;
+        self.unlock_mailbox_names(lock).await;
+        result
+    }
+
+    async fn create_mailbox_path(&self, account_id: u32, path: &str) -> trc::Result<Option<u32>> {
         let cache = self
-            .get_cached_messages(account_id)
+            .get_current_messages(account_id)
             .await
             .caused_by(trc::location!())?;
 

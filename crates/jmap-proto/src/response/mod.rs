@@ -11,7 +11,6 @@ pub mod serialize;
 mod sonic_tests;
 pub mod status;
 
-use self::serialize::serialize_hex;
 use crate::{
     error::method::MethodErrorWrapper,
     method::{
@@ -21,6 +20,7 @@ use crate::{
         get::GetResponse,
         import::ImportEmailResponse,
         lookup::BlobLookupResponse,
+        mdn::{MdnParseResponse, MdnSendResponse},
         parse::ParseResponse,
         passkey::PasskeyRegistrationOptionsResponse,
         query::QueryResponse,
@@ -59,6 +59,7 @@ use crate::{
 };
 use ahash::AHashMap;
 use jmap_tools::{Null, Value};
+use serde::{Serialize, Serializer, ser::SerializeStruct};
 
 #[derive(Debug, serde::Serialize)]
 #[serde(untagged)]
@@ -69,6 +70,8 @@ pub enum ResponseMethod<'x> {
     Copy(CopyResponseMethod),
     ImportEmail(ImportEmailResponse),
     Parse(ParseResponseMethod),
+    MdnSend(MdnSendResponse),
+    MdnParse(MdnParseResponse),
     QueryChanges(QueryChangesResponse),
     Query(QueryResponse),
     SearchSnippet(GetSearchSnippetResponse),
@@ -164,18 +167,27 @@ pub enum ParseResponseMethod {
     CalendarEvent(ParseResponse<CalendarEvent>),
 }
 
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug)]
 pub struct Response<'x> {
-    #[serde(rename = "methodResponses")]
     pub method_responses: Vec<Call<ResponseMethod<'x>>>,
-
-    #[serde(rename = "sessionState")]
-    #[serde(serialize_with = "serialize_hex")]
     pub session_state: u32,
-
-    #[serde(rename = "createdIds")]
-    #[serde(skip_serializing_if = "crate::method::ahash_is_empty")]
     pub created_ids: AHashMap<String, AnyId>,
+    pub echo_created_ids: bool,
+}
+
+impl Serialize for Response<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut response =
+            serializer.serialize_struct("Response", 2 + usize::from(self.echo_created_ids))?;
+        response.serialize_field("methodResponses", &self.method_responses)?;
+        response.serialize_field("sessionState", &format_args!("{:x}", self.session_state))?;
+        if self.echo_created_ids {
+            response.serialize_field("createdIds", &self.created_ids)?;
+        } else {
+            response.skip_field("createdIds")?;
+        }
+        response.end()
+    }
 }
 
 impl<'x> Response<'x> {
@@ -183,10 +195,15 @@ impl<'x> Response<'x> {
         sonic_rs::to_string(self)
     }
 
-    pub fn new(session_state: u32, created_ids: AHashMap<String, AnyId>, capacity: usize) -> Self {
+    pub fn new(
+        session_state: u32,
+        created_ids: Option<AHashMap<String, AnyId>>,
+        capacity: usize,
+    ) -> Self {
         Response {
             session_state,
-            created_ids,
+            echo_created_ids: created_ids.is_some(),
+            created_ids: created_ids.unwrap_or_default(),
             method_responses: Vec::with_capacity(capacity),
         }
     }
@@ -433,6 +450,18 @@ impl<'x> From<CopyBlobResponse> for ResponseMethod<'x> {
 impl<'x> From<CopyResponse<ContactCard>> for ResponseMethod<'x> {
     fn from(value: CopyResponse<ContactCard>) -> Self {
         ResponseMethod::Copy(CopyResponseMethod::ContactCard(value))
+    }
+}
+
+impl<'x> From<MdnSendResponse> for ResponseMethod<'x> {
+    fn from(value: MdnSendResponse) -> Self {
+        ResponseMethod::MdnSend(value)
+    }
+}
+
+impl<'x> From<MdnParseResponse> for ResponseMethod<'x> {
+    fn from(value: MdnParseResponse) -> Self {
+        ResponseMethod::MdnParse(value)
     }
 }
 

@@ -220,8 +220,19 @@ async fn dkim_management(
 
         // Build key
         let private_key = SecretText::Text(SecretTextValue { secret });
+        let replaced = retiring_signatures
+            .iter()
+            .map(|key| &key.object)
+            .find(|key| key.object_type() == algorithm);
         let mut signature = match algorithm {
             DkimSignatureType::Dkim1Ed25519Sha256 | DkimSignatureType::Dkim1RsaSha256 => {
+                let settings = match replaced {
+                    Some(
+                        DkimSignature::Dkim1Ed25519Sha256(replaced)
+                        | DkimSignature::Dkim1RsaSha256(replaced),
+                    ) => replaced.clone(),
+                    _ => Dkim1Signature::default(),
+                };
                 let signature = Dkim1Signature {
                     stage: DkimRotationStage::Active,
                     domain_id: task.domain_id,
@@ -233,7 +244,9 @@ async fn dkim_management(
                     // SPDX-SnippetEnd
                     selector: selector.clone(),
                     private_key,
-                    ..Default::default()
+                    created_at: Default::default(),
+                    next_transition_at: None,
+                    ..settings
                 };
                 if algorithm == DkimSignatureType::Dkim1Ed25519Sha256 {
                     DkimSignature::Dkim1Ed25519Sha256(signature)
@@ -244,6 +257,14 @@ async fn dkim_management(
             DkimSignatureType::Dkim2Ed25519Sha256
             | DkimSignatureType::Dkim2RsaSha256
             | DkimSignatureType::Dkim2MlDsa44 => {
+                let settings = match replaced {
+                    Some(
+                        DkimSignature::Dkim2Ed25519Sha256(replaced)
+                        | DkimSignature::Dkim2RsaSha256(replaced)
+                        | DkimSignature::Dkim2MlDsa44(replaced),
+                    ) => replaced.clone(),
+                    _ => Dkim2Signature::default(),
+                };
                 let signature = Dkim2Signature {
                     stage: DkimRotationStage::Active,
                     domain_id: task.domain_id,
@@ -255,7 +276,9 @@ async fn dkim_management(
                     // SPDX-SnippetEnd
                     selector: selector.clone(),
                     private_key,
-                    ..Default::default()
+                    created_at: Default::default(),
+                    next_transition_at: None,
+                    ..settings
                 };
                 match algorithm {
                     DkimSignatureType::Dkim2Ed25519Sha256 => {

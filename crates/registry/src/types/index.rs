@@ -6,7 +6,7 @@
 
 use crate::{
     schema::{
-        enums::{ExternalPublicKeyStatus, PublicKeyKind},
+        enums::{ExternalPublicKeyStatus, PublicKeyKind, ResourceKind},
         prelude::{ObjectType, Property},
     },
     types::{EnumImpl, datetime::UTCDateTime, id::ObjectId, ipmask::IpAddrOrMask},
@@ -237,6 +237,12 @@ impl From<&UTCDateTime> for IndexValue<'_> {
 
 impl From<&ExternalPublicKeyStatus> for IndexValue<'_> {
     fn from(value: &ExternalPublicKeyStatus) -> Self {
+        IndexValue::U16(value.to_id())
+    }
+}
+
+impl From<&ResourceKind> for IndexValue<'_> {
+    fn from(value: &ResourceKind) -> Self {
         IndexValue::U16(value.to_id())
     }
 }

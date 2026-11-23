@@ -442,6 +442,7 @@ pub(crate) async fn bootstrap_set(
                     dns_server_id,
                     origin: None,
                     publish_records: publish_records.clone(),
+                    allow_subdomain_signing: true,
                 })
             } else {
                 DnsManagement::Manual

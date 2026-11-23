@@ -5,9 +5,10 @@
  */
 
 use super::{Command, ResponseCode, SerializeResponse, Session, State};
-use common::network::{SessionResult, SessionStream};
+use common::network::{SessionResult, SessionStream, ready_or_timeout};
 use compact_str::format_compact;
 use imap_proto::receiver::{self, Request};
+use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use trc::{AddContext, SecurityEvent};
 use types::{collection::Collection, field::SieveField};
@@ -226,6 +227,13 @@ impl<T: SessionStream> Session<T> {
             | Command::CheckScript
             | Command::Unauthenticate => {
                 if let State::Authenticated { access_token, .. } = &self.state {
+                    if !self.server.is_access_token_current(access_token) {
+                        Box::pin(
+                            self.server
+                                .assert_session_access(access_token, self.remote_addr),
+                        )
+                        .await?;
+                    }
                     self.server
                         .is_imap_request_allowed(access_token)
                         .await
@@ -241,6 +249,14 @@ impl<T: SessionStream> Session<T> {
 }
 
 impl<T: AsyncWrite + AsyncRead + Unpin> Session<T> {
+    pub(crate) fn timeout(&self) -> Duration {
+        if !matches!(self.state, State::NotAuthenticated { .. }) {
+            self.server.core.imap.timeout_auth
+        } else {
+            self.server.core.imap.timeout_unauth
+        }
+    }
+
     #[inline(always)]
     pub async fn write(&mut self, bytes: &[u8]) -> trc::Result<()> {
         trc::event!(
@@ -250,20 +266,29 @@ impl<T: AsyncWrite + AsyncRead + Unpin> Session<T> {
             Contents = trc::Value::from_maybe_string(bytes),
         );
 
-        self.stream.write_all(bytes).await.map_err(|err| {
-            trc::NetworkEvent::WriteError
+        let timeout = self.timeout();
+        let stream = &mut self.stream;
+        ready_or_timeout(timeout, async {
+            stream.write_all(bytes).await.map_err(|err| {
+                trc::NetworkEvent::WriteError
+                    .into_err()
+                    .reason(err)
+                    .caused_by(trc::location!())
+            })?;
+            stream.flush().await.map_err(|err| {
+                trc::NetworkEvent::FlushError
+                    .into_err()
+                    .reason(err)
+                    .caused_by(trc::location!())
+            })
+        })
+        .await
+        .unwrap_or_else(|| {
+            Err(trc::NetworkEvent::Timeout
                 .into_err()
-                .reason(err)
-                .caused_by(trc::location!())
-        })?;
-        self.stream.flush().await.map_err(|err| {
-            trc::NetworkEvent::FlushError
-                .into_err()
-                .reason(err)
-                .caused_by(trc::location!())
-        })?;
-
-        Ok(())
+                .details("Write timed out")
+                .caused_by(trc::location!()))
+        })
     }
 
     pub async fn write_error(&mut self, error: trc::Error) -> trc::Result<()> {

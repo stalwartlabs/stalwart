@@ -14,7 +14,7 @@ use dav_proto::schema::{
 use groupware::strip_mailto_scheme;
 use http_proto::HttpResponse;
 use hyper::StatusCode;
-use registry::schema::prelude::{ObjectType, Permission, Property};
+use registry::schema::prelude::{AccountType, ObjectType, Permission, Property, ResourceKind};
 use store::{registry::RegistryQuery, roaring::RoaringBitmap};
 use trc::AddContext;
 use types::collection::Collection;
@@ -127,6 +127,31 @@ impl PrincipalPropSearch for Server {
                     return Ok(matches);
                 }
                 address
+            }
+            DavProperty::Principal(PrincipalProperty::CalendarUserType) => {
+                let Some((property, value)) = hashify::map_ignore_case!(
+                    text.trim().as_bytes(),
+                    (Property, u16),
+                    b"INDIVIDUAL" => (Property::Type, AccountType::User as u16),
+                    b"GROUP" => (Property::Type, AccountType::Group as u16),
+                    b"ROOM" => (Property::Kind, ResourceKind::Room as u16),
+                    b"RESOURCE" => (Property::Kind, ResourceKind::Equipment as u16),
+                ) else {
+                    return Ok(RoaringBitmap::new());
+                };
+                let query = RegistryQuery::new(ObjectType::Account);
+                // SPDX-SnippetBegin
+                // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+                // SPDX-License-Identifier: LicenseRef-SEL
+                #[cfg(feature = "enterprise")]
+                let query = query.with_tenant(access_token.tenant_id());
+                // SPDX-SnippetEnd
+                return self
+                    .registry()
+                    .query::<RoaringBitmap>(query.equal(*property, *value))
+                    .await
+                    .caused_by(trc::location!())
+                    .map_err(Into::into);
             }
             _ => return Ok(RoaringBitmap::new()),
         };

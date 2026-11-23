@@ -173,10 +173,12 @@ impl Server {
                 }
                 EmailCache::MailingList(id) => {
                     if let Some(list) = self.try_list(id).await? {
-                        return Ok(RcptResolution::Expand(
-                            self.expand_nested_lists(id, list.recipients.clone())
-                                .await?,
-                        ));
+                        let members = self
+                            .expand_nested_lists(id, list.recipients.clone())
+                            .await?;
+                        if !members.is_empty() {
+                            return Ok(RcptResolution::Expand(members));
+                        }
                     } else {
                         self.inner
                             .cache

@@ -6,7 +6,7 @@
 
 // This file is auto-generated. Do not edit directly.
 
-pub const TOTAL_EVENT_COUNT: usize = 672;
+pub const TOTAL_EVENT_COUNT: usize = 673;
 pub const TOTAL_METRIC_COUNT: usize = 399;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -886,6 +886,7 @@ pub enum SpfEvent {
 pub enum StoreEvent {
     AssertValueFailed = 488,
     FoundationdbError = 501,
+    FoundationdbClusterOpened = 672,
     MysqlError = 505,
     PostgresqlError = 510,
     RocksdbError = 512,

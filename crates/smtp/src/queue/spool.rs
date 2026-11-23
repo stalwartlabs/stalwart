@@ -47,7 +47,7 @@ pub const QUEUE_REFRESH: u64 = 5 * 60; // 5 minutes
 pub const DSN_RETRY: u64 = 5 * 60; // 5 minutes
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum QueueOutcome {
+pub enum QueueOutcome {
     Queued,
     QuotaExceeded,
     Failed,

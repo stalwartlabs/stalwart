@@ -15,6 +15,7 @@ use crate::{
     },
     runtime::{RuntimeError, handler::Handler},
 };
+use ahash::AHashSet;
 use mail_parser::{
     AddressList, HeaderForm, HeaderValue, Mailbox, parse_address_detail_part, parse_address_domain,
     parse_address_local_part, parse_address_user_part,
@@ -139,6 +140,7 @@ impl<'x> Context<'x> {
             }
             MatchType::List => {
                 let mut values: Vec<&str> = Vec::new();
+                let mut seen: AHashSet<&str> = AHashSet::new();
                 let mut meter = self.scan_meter(1);
                 self.find_headers(
                     &header_list,
@@ -147,8 +149,10 @@ impl<'x> Context<'x> {
                     &mut meter,
                     |header, _| {
                         self.find_addresses(header, &address_part, |value| {
-                            if !value.is_empty() && !values.contains(&value) {
-                                values.push(self.alloc_str(value));
+                            if !value.is_empty() && !seen.contains(value) {
+                                let value = self.alloc_str(value);
+                                seen.insert(value);
+                                values.push(value);
                             }
                             false
                         })

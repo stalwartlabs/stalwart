@@ -5,6 +5,7 @@
  */
 
 use super::super::tests::TestResult;
+use super::action_editheader::RemoveCrLf;
 use crate::runtime::platform;
 use crate::{
     Context, Envelope, Sieve,
@@ -20,12 +21,13 @@ use crate::{
 };
 use mail_builder::headers::date::Date;
 use mail_parser::HeaderName;
+use memchr::memchr2;
 use std::borrow::Cow;
 
 pub(crate) const MAX_SUBJECT_LEN: usize = 256;
 
-const PERIOD_DAYS: u8 = 0;
-const PERIOD_SECONDS: u8 = 1;
+pub(crate) const PERIOD_DAYS: u8 = 0;
+pub(crate) const PERIOD_SECONDS: u8 = 1;
 
 impl<'x> Context<'x> {
     pub(crate) fn test_vacation<H: Handler<'x>>(
@@ -37,7 +39,7 @@ impl<'x> Context<'x> {
         let mut from = String::new();
         let mut user_addresses: Vec<Cow<'_, str>> = Vec::new();
 
-        if self.num_out_messages >= self.runtime.max_out_messages {
+        if self.has_replied || self.num_out_messages >= self.runtime.max_out_messages {
             return Ok(TestResult::Bool(false));
         }
 
@@ -139,7 +141,7 @@ impl<'x> Context<'x> {
             }
         }
 
-        if found_rcpt && received_count <= self.runtime.max_received_headers {
+        if found_rcpt && received_count < self.runtime.max_received_headers {
             let suffix = match self.eval_opt(script, test.handle)? {
                 Some(handle) => handle,
                 None => self.eval_value(script, test.reason)?,
@@ -169,7 +171,9 @@ impl<'x> Context<'x> {
 
         let mut vacation_subject = self
             .eval_opt(script, vacation.subject)?
-            .map_or(Cow::Borrowed(""), |subject| subject.into_string());
+            .map_or(Cow::Borrowed(""), |subject| {
+                header_safe(subject.into_string(), self.runtime.max_header_size)
+            });
 
         let mut message_id = None;
         let mut vacation_to_full = None;
@@ -178,6 +182,11 @@ impl<'x> Context<'x> {
             match header.name() {
                 HeaderName::Subject if vacation_subject.is_empty() => {
                     if let Some(subject) = header.value().as_text() {
+                        let subject = if memchr2(b'\r', b'\n', subject.as_bytes()).is_some() {
+                            Cow::Owned(subject.replace(['\r', '\n'], ""))
+                        } else {
+                            Cow::Borrowed(subject)
+                        };
                         let mut vacation_subject_ = String::with_capacity(MAX_SUBJECT_LEN);
                         let mut iter = self
                             .runtime
@@ -223,7 +232,7 @@ impl<'x> Context<'x> {
         }
 
         let vacation_from = if let Some(from) = self.eval_opt(script, vacation.from)? {
-            from.into_string()
+            header_safe(from.into_string(), self.runtime.max_header_size)
         } else if !self.user_address.is_empty() {
             self.user_from_field().into()
         } else if let Some(addr) = self
@@ -287,6 +296,7 @@ impl<'x> Context<'x> {
         let recipient = self.intern_cow(vacation_to);
         self.last_message_id += 1;
         self.num_out_messages += 1;
+        self.has_replied = true;
         self.actions.push(Action::CreatedMessage {
             message_id: self.last_message_id,
             message,
@@ -320,4 +330,12 @@ fn write_header(buf: &mut Vec<u8>, name: &str, value: &str) {
     buf.extend_from_slice(name.as_bytes());
     buf.extend_from_slice(value.as_bytes());
     buf.extend_from_slice(b"\r\n");
+}
+
+pub(crate) fn header_safe(value: Cow<'_, str>, max_len: usize) -> Cow<'_, str> {
+    if value.len() <= max_len && memchr2(b'\r', b'\n', value.as_bytes()).is_none() {
+        value
+    } else {
+        value.as_ref().remove_crlf(max_len).into()
+    }
 }

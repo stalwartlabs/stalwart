@@ -179,6 +179,14 @@ pub trait Handler<'x> {
         Reply::Ready(false)
     }
 
+    fn valid_ext_lists(&mut self, ctx: &Context<'x>, lists: &[&str]) -> Reply<bool> {
+        Reply::Ready(
+            lists
+                .iter()
+                .all(|list| ctx.runtime.valid_ext_lists.contains(*list)),
+        )
+    }
+
     fn duplicate_id(
         &mut self,
         ctx: &Context<'x>,

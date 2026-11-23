@@ -600,6 +600,7 @@ impl EventType {
             b"spf.none" => EventType::Spf(SpfEvent::None),
             b"store.assert-value-failed" => EventType::Store(StoreEvent::AssertValueFailed),
             b"store.foundationdb-error" => EventType::Store(StoreEvent::FoundationdbError),
+            b"store.foundationdb-cluster-opened" => EventType::Store(StoreEvent::FoundationdbClusterOpened),
             b"store.mysql-error" => EventType::Store(StoreEvent::MysqlError),
             b"store.postgresql-error" => EventType::Store(StoreEvent::PostgresqlError),
             b"store.rocksdb-error" => EventType::Store(StoreEvent::RocksdbError),
@@ -1262,6 +1263,7 @@ impl EventType {
             b"spf.none" => EventType::Spf(SpfEvent::None),
             b"store.assert-value-failed" => EventType::Store(StoreEvent::AssertValueFailed),
             b"store.foundationdb-error" => EventType::Store(StoreEvent::FoundationdbError),
+            b"store.foundationdb-cluster-opened" => EventType::Store(StoreEvent::FoundationdbClusterOpened),
             b"store.mysql-error" => EventType::Store(StoreEvent::MysqlError),
             b"store.postgresql-error" => EventType::Store(StoreEvent::PostgresqlError),
             b"store.rocksdb-error" => EventType::Store(StoreEvent::RocksdbError),
@@ -2111,6 +2113,9 @@ impl EventType {
             EventType::Spf(SpfEvent::None) => "spf.none",
             EventType::Store(StoreEvent::AssertValueFailed) => "store.assert-value-failed",
             EventType::Store(StoreEvent::FoundationdbError) => "store.foundationdb-error",
+            EventType::Store(StoreEvent::FoundationdbClusterOpened) => {
+                "store.foundationdb-cluster-opened"
+            }
             EventType::Store(StoreEvent::MysqlError) => "store.mysql-error",
             EventType::Store(StoreEvent::PostgresqlError) => "store.postgresql-error",
             EventType::Store(StoreEvent::RocksdbError) => "store.rocksdb-error",
@@ -2853,6 +2858,7 @@ impl EventType {
             EventType::Spf(SpfEvent::None) => 483,
             EventType::Store(StoreEvent::AssertValueFailed) => 488,
             EventType::Store(StoreEvent::FoundationdbError) => 501,
+            EventType::Store(StoreEvent::FoundationdbClusterOpened) => 672,
             EventType::Store(StoreEvent::MysqlError) => 505,
             EventType::Store(StoreEvent::PostgresqlError) => 510,
             EventType::Store(StoreEvent::RocksdbError) => 512,
@@ -3615,6 +3621,7 @@ impl EventType {
             483 => Some(EventType::Spf(SpfEvent::None)),
             488 => Some(EventType::Store(StoreEvent::AssertValueFailed)),
             501 => Some(EventType::Store(StoreEvent::FoundationdbError)),
+            672 => Some(EventType::Store(StoreEvent::FoundationdbClusterOpened)),
             505 => Some(EventType::Store(StoreEvent::MysqlError)),
             510 => Some(EventType::Store(StoreEvent::PostgresqlError)),
             512 => Some(EventType::Store(StoreEvent::RocksdbError)),
@@ -4003,6 +4010,7 @@ impl EventType {
             EventType::Spam(SpamEvent::ModelNotReady) => Level::Info,
             EventType::Spam(SpamEvent::ModelNotFound) => Level::Info,
             EventType::Spam(SpamEvent::RulesUpdated) => Level::Info,
+            EventType::Store(StoreEvent::FoundationdbClusterOpened) => Level::Info,
             EventType::Store(StoreEvent::BlobStorePurged) => Level::Info,
             EventType::Store(StoreEvent::BlobStoreRecoded) => Level::Info,
             EventType::Store(StoreEvent::DataStorePurged) => Level::Info,
@@ -4914,6 +4922,9 @@ impl EventType {
                 "Another process modified the record"
             }
             EventType::Store(StoreEvent::FoundationdbError) => "FoundationDB error",
+            EventType::Store(StoreEvent::FoundationdbClusterOpened) => {
+                "FoundationDB cluster opened"
+            }
             EventType::Store(StoreEvent::MysqlError) => "MySQL error",
             EventType::Store(StoreEvent::PostgresqlError) => "PostgreSQL error",
             EventType::Store(StoreEvent::RocksdbError) => "RocksDB error",
@@ -5305,6 +5316,9 @@ impl EventType {
                 "Another process has modified the value"
             }
             EventType::Store(StoreEvent::FoundationdbError) => "FoundationDB error",
+            EventType::Store(StoreEvent::FoundationdbClusterOpened) => {
+                "FoundationDB cluster opened"
+            }
             EventType::Store(StoreEvent::MysqlError) => "MySQL error",
             EventType::Store(StoreEvent::PostgresqlError) => "PostgreSQL error",
             EventType::Store(StoreEvent::RocksdbError) => "RocksDB error",
@@ -7290,6 +7304,7 @@ impl EventType {
             EventType::Spf(SpfEvent::None),
             EventType::Store(StoreEvent::AssertValueFailed),
             EventType::Store(StoreEvent::FoundationdbError),
+            EventType::Store(StoreEvent::FoundationdbClusterOpened),
             EventType::Store(StoreEvent::MysqlError),
             EventType::Store(StoreEvent::PostgresqlError),
             EventType::Store(StoreEvent::RocksdbError),

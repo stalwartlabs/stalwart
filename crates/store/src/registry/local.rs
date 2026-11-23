@@ -5,7 +5,8 @@
  */
 
 use crate::{RegistryStore, RegistryStoreInner, Store};
-use registry::schema::structs::DataStore;
+use registry::schema::structs::{DataStore, FoundationDbCluster, FoundationDbClusterFile};
+use serde::{Deserialize, de::IgnoredAny};
 use std::{io, net::IpAddr, path::PathBuf};
 use tokio::{fs::OpenOptions, io::AsyncWriteExt};
 use utils::snowflake::SnowflakeIdGenerator;
@@ -16,8 +17,15 @@ use std::{fs::Permissions, os::unix::fs::PermissionsExt};
 #[cfg(unix)]
 const DATA_STORE_FILE_MODE: u32 = 0o600;
 
+#[derive(Deserialize)]
+struct LegacyFoundationDbStore {
+    #[serde(rename = "clusterFile")]
+    cluster_file: Option<String>,
+    cluster: Option<IgnoredAny>,
+}
+
 pub(crate) enum RegistryInit {
-    Ok(DataStore),
+    Ok(Box<DataStore>),
     Err(String),
     Bootstrap,
 }
@@ -82,8 +90,8 @@ impl RegistryStoreInner {
 
     pub(crate) async fn read_data_store(&self) -> RegistryInit {
         match tokio::fs::read_to_string(&self.local_path).await {
-            Ok(contents) => match serde_json::from_str::<DataStore>(&contents) {
-                Ok(data_store) => RegistryInit::Ok(data_store),
+            Ok(contents) => match parse_data_store(&contents) {
+                Ok(data_store) => RegistryInit::Ok(Box::new(data_store)),
                 Err(err) => RegistryInit::Err(format!(
                     "Failed to parse data store settings at {}: {}",
                     self.local_path.display(),
@@ -98,6 +106,21 @@ impl RegistryStoreInner {
             )),
         }
     }
+}
+
+fn parse_data_store(contents: &str) -> Result<DataStore, String> {
+    let mut data_store =
+        serde_json::from_str::<DataStore>(contents).map_err(|err| err.to_string())?;
+    if let DataStore::FoundationDb(store) = &mut data_store
+        && let Ok(LegacyFoundationDbStore {
+            cluster_file: Some(path),
+            cluster: None,
+        }) = serde_json::from_str(contents)
+        && !path.trim().is_empty()
+    {
+        store.cluster = FoundationDbCluster::File(FoundationDbClusterFile { path: Some(path) });
+    }
+    Ok(data_store)
 }
 
 impl RegistryStore {

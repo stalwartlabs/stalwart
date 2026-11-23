@@ -66,18 +66,11 @@ impl<const N: usize> Bitset<N> {
     }
 
     pub fn clear_all(&mut self) {
-        for i in 0..N {
-            self.0[i] = 0;
-        }
+        self.0 = [0; N];
     }
 
     pub fn is_empty(&self) -> bool {
-        for i in 0..N {
-            if self.0[i] != 0 {
-                return false;
-            }
-        }
-        true
+        self.0.iter().all(|&word| word == 0)
     }
 
     pub fn inner(&self) -> &[usize; N] {

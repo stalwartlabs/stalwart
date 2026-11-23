@@ -122,6 +122,17 @@ pub enum CalDavProperty {
     ScheduleDefaultCalendarURL,
     ScheduleTag,
     ScheduleCalendarTransp,
+    CalendarAvailability(AvailabilityNamespace),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(
+    all(test, stalwart_tests),
+    derive(serde::Serialize, serde::Deserialize)
+)]
+pub enum AvailabilityNamespace {
+    CalDav,
+    CalendarServer,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

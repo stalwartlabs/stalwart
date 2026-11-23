@@ -8,14 +8,15 @@ use crate::queue::{MessageWrapper, Metadata, spool::QueueParams};
 use ahash::AHashSet;
 use common::{
     Server,
+    auth::{DOMAIN_FLAG_DKIM2_STRICT, DOMAIN_FLAG_DNS_MANAGED},
     config::smtp::auth::{Dkim1Signer, Dkim2Signers, DkimSigners},
     expr::{Bump, functions::ResolveVariable, if_block::IfBlock},
 };
 use mail_auth::{
     AuthenticatedMessage, Dkim2Result,
     dkim2::{
-        ChainBinding, Dkim2Error, Dkim2Output, Envelope, Hop, MessageInstance, Signature,
-        Verification,
+        ChainBinding, Dkim2Error, Dkim2Output, Dkim2Signed, Envelope, Hop, MessageInstance,
+        Signature, Verification,
     },
     headers::HeaderWriter,
 };
@@ -69,6 +70,23 @@ pub(crate) trait DkimSign: Sync + Send {
         &self,
         domains: impl Iterator<Item = &'x str> + Send,
     ) -> impl Future<Output = bool> + Send;
+
+    fn dkim2_policy_permits(
+        &self,
+        signed: &Dkim2Signed,
+    ) -> impl Future<Output = Result<(), Dkim2Error>> + Send;
+
+    #[allow(clippy::too_many_arguments)]
+    fn dkim2_sign_checked(
+        &self,
+        message: &MessageWrapper,
+        params: &mut QueueParams<'_, '_>,
+        dkim2: &Dkim2Signers,
+        modified: &AuthenticatedMessage<'_>,
+        original: Option<&AuthenticatedMessage<'_>>,
+        verified: Option<&Dkim2Output<'_>>,
+        headers: &mut Vec<u8>,
+    ) -> impl Future<Output = mail_auth::Result<()>> + Send;
 }
 
 impl DkimSign for Server {
@@ -208,9 +226,12 @@ impl DkimSign for Server {
                 }
                 None => None,
             };
-            match dkim2_sign(
-                message, params, dkim2, &modified, original, verified, headers,
-            ) {
+            match self
+                .dkim2_sign_checked(
+                    message, params, dkim2, &modified, original, verified, headers,
+                )
+                .await
+            {
                 Ok(()) => return None,
                 Err(mail_auth::Error::Dkim2(Dkim2Error::NotFullyVerified)) => {}
                 Err(err) => {
@@ -251,7 +272,9 @@ impl DkimSign for Server {
             stripped.as_deref().unwrap_or(params.raw_message),
             params.raw_headers,
             true,
-        ) && let Err(err) = dkim2_sign(message, params, dkim2, &fresh, None, None, headers)
+        ) && let Err(err) = self
+            .dkim2_sign_checked(message, params, dkim2, &fresh, None, None, headers)
+            .await
         {
             log_dkim2_error(err, params.session_id);
         }
@@ -265,6 +288,58 @@ impl DkimSign for Server {
             }
         }
         false
+    }
+
+    async fn dkim2_sign_checked(
+        &self,
+        message: &MessageWrapper,
+        params: &mut QueueParams<'_, '_>,
+        dkim2: &Dkim2Signers,
+        modified: &AuthenticatedMessage<'_>,
+        original: Option<&AuthenticatedMessage<'_>>,
+        verified: Option<&Dkim2Output<'_>>,
+        headers: &mut Vec<u8>,
+    ) -> mail_auth::Result<()> {
+        let signatures = dkim2_sign(message, params, dkim2, modified, original, verified)?;
+        if let Some(signed) = signatures.policy_signature() {
+            self.dkim2_policy_permits(signed)
+                .await
+                .map_err(mail_auth::Error::Dkim2)?;
+        }
+        signatures.write(params, headers);
+        Ok(())
+    }
+
+    async fn dkim2_policy_permits(&self, signed: &Dkim2Signed) -> Result<(), Dkim2Error> {
+        let Some(domain) = signed.policy_domain() else {
+            return Ok(());
+        };
+        match self.domain(domain).await {
+            Ok(Some(local)) if local.flags & DOMAIN_FLAG_DKIM2_STRICT != 0 => {
+                Err(Dkim2Error::FromSubdomainForbidden {
+                    i: signed.signature.i,
+                    domain: domain.into(),
+                })
+            }
+            Ok(Some(local)) if local.flags & DOMAIN_FLAG_DNS_MANAGED != 0 => Ok(()),
+            Ok(_) => {
+                Box::pin(
+                    self.core
+                        .smtp
+                        .resolvers
+                        .dns
+                        .dkim2_check_policy(signed, Some(&self.inner.cache.dns_txt)),
+                )
+                .await
+            }
+            Err(err) => {
+                trc::error!(err.caused_by(trc::location!()));
+                Err(Dkim2Error::PolicyFetch {
+                    i: signed.signature.i,
+                    domain: domain.into(),
+                })
+            }
+        }
     }
 
     async fn eval_signers(
@@ -310,15 +385,57 @@ fn log_dkim2_error(err: mail_auth::Error, session_id: u64) {
     trc::error!(err.span_id(session_id).caused_by(trc::location!()));
 }
 
+struct Dkim2Signatures {
+    instance: Option<MessageInstance>,
+    disclosed: Option<Dkim2Signed>,
+    undisclosed: Vec<(u64, Dkim2Signed)>,
+}
+
+impl Dkim2Signatures {
+    fn policy_signature(&self) -> Option<&Dkim2Signed> {
+        self.disclosed
+            .as_ref()
+            .or_else(|| self.undisclosed.first().map(|(_, signed)| signed))
+            .filter(|signed| signed.policy_domain().is_some())
+    }
+
+    fn write(self, params: &mut QueueParams<'_, '_>, headers: &mut Vec<u8>) {
+        let Dkim2Signatures {
+            instance,
+            disclosed,
+            mut undisclosed,
+        } = self;
+        if let Some(instance) = &instance {
+            instance.write_header(headers);
+        }
+        if let Some(signed) = disclosed {
+            if undisclosed.is_empty() {
+                headers.reserve(signature_header_capacity(&signed.signature));
+                signed.signature.write_header(headers);
+            } else {
+                undisclosed.push((u64::MAX, signed));
+            }
+        }
+        for (id, signed) in undisclosed {
+            let mut header = Vec::with_capacity(signature_header_capacity(&signed.signature));
+            signed.signature.write_header(&mut header);
+            params.metadata.push(Metadata::Headers {
+                value: header.into_boxed_slice(),
+                id,
+            });
+        }
+        params.dkim2_signed = true;
+    }
+}
+
 fn dkim2_sign(
     message: &MessageWrapper,
-    params: &mut QueueParams<'_, '_>,
+    params: &QueueParams<'_, '_>,
     dkim2: &Dkim2Signers,
     modified: &AuthenticatedMessage<'_>,
     original: Option<&AuthenticatedMessage<'_>>,
     verified: Option<&Dkim2Output<'_>>,
-    headers: &mut Vec<u8>,
-) -> mail_auth::Result<()> {
+) -> mail_auth::Result<Dkim2Signatures> {
     let instance = MessageInstance::from_message(modified, original, &dkim2.hashes)?;
     let signer = &dkim2.signer;
     let exploded = params.exploded || message.message.recipients.len() > 1;
@@ -355,28 +472,11 @@ fn dkim2_sign(
         ));
     }
 
-    if let Some(instance) = &instance {
-        instance.write_header(headers);
-    }
-    if let Some(signed) = disclosed {
-        if undisclosed.is_empty() {
-            headers.reserve(signature_header_capacity(&signed.signature));
-            signed.signature.write_header(headers);
-        } else {
-            undisclosed.push((u64::MAX, signed));
-        }
-    }
-    for (id, signed) in undisclosed {
-        let mut header = Vec::with_capacity(signature_header_capacity(&signed.signature));
-        signed.signature.write_header(&mut header);
-        params.metadata.push(Metadata::Headers {
-            value: header.into_boxed_slice(),
-            id,
-        });
-    }
-    params.dkim2_signed = true;
-
-    Ok(())
+    Ok(Dkim2Signatures {
+        instance,
+        disclosed,
+        undisclosed,
+    })
 }
 
 fn dkim2_hop<'x, R>(return_path: &'x str, rcpt_to: R, exploded: bool) -> Hop<&'x str, R, String>

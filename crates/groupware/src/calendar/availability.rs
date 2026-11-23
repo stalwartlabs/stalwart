@@ -16,8 +16,10 @@ use calcard::{
         ArchivedICalendarTransparency, ArchivedICalendarValue, ICalendarParameterName,
     },
 };
-use common::{CachedName, GroupwareResources, auth::AccessToken};
+use common::{CachedName, GroupwareResources, Server, auth::AccessToken};
 use store::{ahash::AHashMap, roaring::RoaringBitmap};
+#[cfg(feature = "enterprise")]
+use trc::AddContext;
 use types::acl::Acl;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -90,6 +92,48 @@ impl RelevantCalendar {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DefaultFreeBusy {
+    Granted,
+    Denied,
+}
+
+impl DefaultFreeBusy {
+    pub fn of(granted: bool) -> Self {
+        if granted {
+            DefaultFreeBusy::Granted
+        } else {
+            DefaultFreeBusy::Denied
+        }
+    }
+
+    pub async fn resolve(
+        server: &Server,
+        access_token: &AccessToken,
+        account_id: u32,
+    ) -> trc::Result<Self> {
+        if !server.core.groupware.share_free_busy || access_token.is_member(account_id) {
+            return Ok(DefaultFreeBusy::Denied);
+        }
+
+        // SPDX-SnippetBegin
+        // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+        // SPDX-License-Identifier: LicenseRef-SEL
+        #[cfg(feature = "enterprise")]
+        let granted = server
+            .try_account(account_id)
+            .await
+            .caused_by(trc::location!())?
+            .is_some_and(|account| account.is_same_tenant(access_token));
+        // SPDX-SnippetEnd
+
+        #[cfg(not(feature = "enterprise"))]
+        let granted = true;
+
+        Ok(Self::of(granted))
+    }
+}
+
 enum CalendarAccess {
     All,
     Shared(RoaringBitmap),
@@ -122,9 +166,14 @@ impl<'x> AvailabilityCalendars<'x> {
         account_id: u32,
         access_token: &'x AccessToken,
         principal: &AccessToken,
+        default: DefaultFreeBusy,
     ) -> Option<Self> {
-        let free_busy = Self::free_busy_access(resources, account_id, access_token)?;
         let role = PrincipalRole::of(principal, account_id);
+        let default = match role {
+            PrincipalRole::Owner => default,
+            PrincipalRole::Sharee => DefaultFreeBusy::Denied,
+        };
+        let free_busy = Self::free_busy_access(resources, account_id, access_token, default)?;
         let subscribable = match role {
             PrincipalRole::Owner => CalendarAccess::All,
             PrincipalRole::Sharee => CalendarAccess::Shared(resources.shared_containers(
@@ -148,8 +197,9 @@ impl<'x> AvailabilityCalendars<'x> {
         resources: &'x GroupwareResources,
         account_id: u32,
         access_token: &'x AccessToken,
+        default: DefaultFreeBusy,
     ) -> Option<Self> {
-        let free_busy = Self::free_busy_access(resources, account_id, access_token)?;
+        let free_busy = Self::free_busy_access(resources, account_id, access_token, default)?;
         Some(Self::build(
             resources,
             account_id,
@@ -161,12 +211,29 @@ impl<'x> AvailabilityCalendars<'x> {
         ))
     }
 
+    pub fn published(
+        resources: &'x GroupwareResources,
+        account_id: u32,
+        access_token: &'x AccessToken,
+    ) -> Self {
+        Self::build(
+            resources,
+            account_id,
+            access_token,
+            account_id,
+            PrincipalRole::Owner,
+            CalendarAccess::All,
+            CalendarAccess::All,
+        )
+    }
+
     fn free_busy_access(
         resources: &GroupwareResources,
         account_id: u32,
         access_token: &AccessToken,
+        default: DefaultFreeBusy,
     ) -> Option<CalendarAccess> {
-        if access_token.is_member(account_id) {
+        if default == DefaultFreeBusy::Granted || access_token.is_member(account_id) {
             Some(CalendarAccess::All)
         } else {
             let calendar_ids = resources.shared_containers(

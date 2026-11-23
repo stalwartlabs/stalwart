@@ -1,13 +1,12 @@
 [package]
 name = "pop3"
-version = "1.1.1"
+version = "1.2.0"
 edition = "2024"
 
 [dependencies]
 store = { path = "../store" }
 common = { path = "../common" }
 directory = { path = "../directory" }
-imap = { path = "../imap" }
 utils = { path = "../utils" }
 trc = { path = "../trc" }
 types = { path = "../types" }
@@ -21,7 +20,7 @@ memchr = "2.8"
 itoa = "1"
 
 [features]
-enterprise = ["store/enterprise", "common/enterprise", "directory/enterprise", "imap/enterprise", "utils/enterprise", "trc/enterprise", "email/enterprise", "registry/enterprise"]
+enterprise = ["store/enterprise", "common/enterprise", "directory/enterprise", "utils/enterprise", "trc/enterprise", "email/enterprise", "registry/enterprise"]
 
 [lints]
 workspace = true

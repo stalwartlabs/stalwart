@@ -13,13 +13,29 @@ use std::{
     borrow::Cow,
     time::{Duration, Instant, SystemTime},
 };
-use trc::SmtpEvent;
+use trc::{LimitEvent, SmtpEvent};
+
+const MAX_HELO_DOMAINS: usize = 5;
 
 impl<T: SessionStream> Session<T> {
     pub async fn handle_ehlo(&mut self, domain: Cow<'_, str>, is_extended: bool) -> Result<(), ()> {
         // Set EHLO domain
 
         if domain != self.data.helo_domain {
+            self.data.helo_domains += 1;
+            if self.data.helo_domains > MAX_HELO_DOMAINS {
+                trc::event!(
+                    Limit(LimitEvent::TooManyRequests),
+                    SpanId = self.data.session_id,
+                    Domain = CompactString::from(domain.as_ref()),
+                    Limit = MAX_HELO_DOMAINS,
+                );
+
+                self.write(b"421 4.7.0 Too many EHLO commands, disconnecting.\r\n")
+                    .await?;
+                return Err(());
+            }
+
             // Reject non-FQDN EHLO domains - simply checks that the hostname has at least one dot
             if self.params.ehlo_reject_non_fqdn && !has_valid_labels(domain.as_ref()) {
                 trc::event!(

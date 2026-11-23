@@ -27,6 +27,7 @@ use crate::{
         ops::{self, Field, Match},
         rec::{Range, Rec, Str, tag},
     },
+    runtime::tests::test_date::{ZONE_LOCAL, ZONE_NAMED, ZONE_OFFSET, ZONE_ORIGINAL},
     sieve::LoadError,
 };
 
@@ -822,21 +823,13 @@ impl Codegen<'_> {
                 self.emit_op(&op);
             }
             Test::Date(t) => {
-                let zone = match &t.zone {
-                    Zone::Time(time) => ops::Zone {
-                        kind: 0,
-                        time: *time,
-                    },
-                    Zone::Original => ops::Zone { kind: 1, time: 0 },
-                    Zone::Local => ops::Zone { kind: 2, time: 0 },
-                };
                 let op = ops::TestDate {
                     header_name: self.inline(&t.header_name),
                     key_list: self.list(&t.key_list),
                     match_type: Match::from_match_type(&t.match_type),
                     comparator: t.comparator.code(),
                     index: t.index,
-                    zone,
+                    zone: t.zone.to_op(),
                     date_part: t.date_part as u8,
                     mime_anychild: t.mime_anychild,
                     is_not: t.is_not,
@@ -845,7 +838,7 @@ impl Codegen<'_> {
             }
             Test::CurrentDate(t) => {
                 let op = ops::TestCurrentDate {
-                    zone: t.zone,
+                    zone: t.zone.to_op(),
                     match_type: Match::from_match_type(&t.match_type),
                     comparator: t.comparator.code(),
                     date_part: t.date_part as u8,
@@ -1122,6 +1115,29 @@ op_emit!(
     TestCmd,
     TestCmdTest,
 );
+
+impl Zone {
+    fn to_op(self) -> ops::Zone {
+        match self {
+            Zone::Time(time) => ops::Zone {
+                kind: ZONE_OFFSET,
+                time,
+            },
+            Zone::Original => ops::Zone {
+                kind: ZONE_ORIGINAL,
+                time: 0,
+            },
+            Zone::Local => ops::Zone {
+                kind: ZONE_LOCAL,
+                time: 0,
+            },
+            Zone::Named(id) => ops::Zone {
+                kind: ZONE_NAMED,
+                time: i64::from(id),
+            },
+        }
+    }
+}
 
 impl Field for () {
     fn read(_: &mut crate::bytecode::cursor::Cursor<'_>) -> crate::bytecode::Decoded<Self> {

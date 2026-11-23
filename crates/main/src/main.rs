@@ -76,6 +76,7 @@ async fn async_main() -> ExitCode {
     init.start_queue_manager();
 
     // Log configuration errors
+    init.bootstrap.log_notices();
     init.bootstrap.log_errors();
     init.bootstrap.log_warnings();
 

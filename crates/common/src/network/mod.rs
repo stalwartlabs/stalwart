@@ -7,13 +7,16 @@
 use self::limiter::{ConcurrencyLimiter, InFlight};
 use crate::{Server, config::server::ServerProtocol};
 use compact_str::{CompactString, ToCompactString};
+use futures::FutureExt;
 use registry::types::ipmask::IpAddrOrMask;
 use rustls::ServerConfig;
 use std::fmt::Debug;
 use std::{
     borrow::Cow,
+    future::Future,
     io,
-    net::IpAddr,
+    net::{IpAddr, Ipv6Addr},
+    pin::pin,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -100,6 +103,14 @@ pub struct SessionData<T: SessionStream> {
 pub trait SessionStream: AsyncRead + AsyncWrite + Unpin + 'static + Sync + Send {
     fn is_tls(&self) -> bool;
     fn tls_version_and_cipher(&self) -> (Cow<'static, str>, Cow<'static, str>);
+}
+
+pub async fn ready_or_timeout<F: Future>(duration: Duration, future: F) -> Option<F::Output> {
+    let mut future = pin!(future);
+    match future.as_mut().now_or_never() {
+        Some(output) => Some(output),
+        None => timeout(duration, future).await.ok(),
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -288,11 +299,17 @@ impl Debug for TcpAcceptor {
     }
 }
 
-pub fn ip_to_bytes(ip: &IpAddr) -> ArrayVec<[u8; 16]> {
+pub const IPV6_PREFIX_MASK: u128 = u128::MAX << 64;
+
+pub fn ipv6_prefix(addr: Ipv6Addr) -> Ipv6Addr {
+    Ipv6Addr::from_bits(addr.to_bits() & IPV6_PREFIX_MASK)
+}
+
+pub fn ip_rate_key(ip: &IpAddr) -> ArrayVec<[u8; 16]> {
     let mut bytes = ArrayVec::new();
-    match ip {
+    match ip.to_canonical() {
         IpAddr::V4(ip) => bytes.extend_from_slice(&ip.octets()),
-        IpAddr::V6(ip) => bytes.extend_from_slice(&ip.octets()),
+        IpAddr::V6(ip) => bytes.extend_from_slice(&((ip.to_bits() >> 64) as u64).to_be_bytes()),
     }
     bytes
 }
@@ -313,3 +330,8 @@ pub fn ip_to_bytes_prefix(prefix: u8, ip: &IpAddr) -> Vec<u8> {
         }
     }
 }
+
+#[cfg(all(test, stalwart_tests))]
+#[rustfmt::skip]
+#[path = "../../../../../stalwart-tests/unit/common/src/network/tests.rs"]
+mod tests;

@@ -15,7 +15,7 @@ use crate::{
     receiver::{Request, Token, bad},
 };
 
-use super::{parse_number, parse_sequence_set};
+use super::{MAX_FLAGS, parse_number, parse_sequence_set};
 
 impl Request<Command> {
     pub fn parse_store(self) -> trc::Result<store::Arguments> {
@@ -98,6 +98,9 @@ impl Request<Command> {
                             let flag =
                                 Flag::parse_imap(flag).map_err(|v| bad(self.tag.clone(), v))?;
                             if !keywords.contains(&flag) {
+                                if keywords.len() == MAX_FLAGS {
+                                    return Err(bad(self.tag.clone(), "Too many flags."));
+                                }
                                 keywords.push(flag);
                             }
                         }

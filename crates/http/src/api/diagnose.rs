@@ -353,6 +353,11 @@ async fn delivery_diagnose(
         }
     };
 
+    let allow_invalid_certs = server.get_tls_or_default("default", 0).allow_invalid_certs
+        && !mta_sts_policy
+            .as_ref()
+            .is_some_and(|policy| policy.enforce());
+
     // Fetch TLS-RPT settings
     let now = Instant::now();
     tx.send(DeliveryStage::TlsRptLookupStart).await?;
@@ -647,7 +652,11 @@ async fn delivery_diagnose(
                     let now = Instant::now();
                     let mut client = match client
                         .try_start_tls(
-                            &server.inner.data.smtp_connectors.pki_verify,
+                            if dane_policy.is_some() || allow_invalid_certs {
+                                &server.inner.data.smtp_connectors.dummy_verify
+                            } else {
+                                &server.inner.data.smtp_connectors.pki_verify
+                            },
                             hostname,
                             &capabilities,
                         )

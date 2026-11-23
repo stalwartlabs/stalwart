@@ -18,6 +18,12 @@ use registry::{
 };
 use std::sync::Arc;
 use store::registry::write::{RegistryWrite, RegistryWriteResult};
+// SPDX-SnippetBegin
+// SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+// SPDX-License-Identifier: LicenseRef-SEL
+#[cfg(feature = "enterprise")]
+use registry::schema::enums::TenantStorageQuota;
+// SPDX-SnippetEnd
 use trc::AddContext;
 use types::id::Id;
 
@@ -213,6 +219,9 @@ impl Server {
                         ))
                         .ctx(trc::Key::Domain, CompactString::from(domain.name())));
                 }
+                #[cfg(feature = "enterprise")]
+                self.assert_can_provision(&domain, TenantStorageQuota::MaxAccounts)
+                    .await?;
                 // SPDX-SnippetEnd
 
                 let mut aliases = Vec::with_capacity(account.email_aliases.len());
@@ -268,17 +277,6 @@ impl Server {
                     ..Default::default()
                 }));
 
-                // SPDX-SnippetBegin
-                // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-                // SPDX-License-Identifier: LicenseRef-SEL
-                #[cfg(feature = "enterprise")]
-                if self.core.is_enterprise_edition() && !self.can_create_account().await? {
-                    return Err(trc::AuthEvent::Error.into_err().details(
-                        "Account creation not possible: license key account limit reached",
-                    ));
-                }
-                // SPDX-SnippetEnd
-
                 match self
                     .registry()
                     .write(RegistryWrite::insert(&account))
@@ -321,7 +319,7 @@ impl Server {
                     .await
                     .caused_by(trc::location!())?
                 {
-                    Some(account) if !account.is_user_account() => Ok(account_id),
+                    Some(account) if account.is_group_account() => Ok(account_id),
                     Some(_) => Err(trc::AuthEvent::Error
                         .into_err()
                         .details("Account ID from directory does not correspond to a group account")
@@ -450,6 +448,9 @@ impl Server {
                         ))
                         .ctx(trc::Key::Domain, CompactString::from(domain.name())));
                 }
+                #[cfg(feature = "enterprise")]
+                self.assert_can_provision(&domain, TenantStorageQuota::MaxGroups)
+                    .await?;
                 // SPDX-SnippetEnd
 
                 let mut aliases = Vec::with_capacity(group.email_aliases.len());
@@ -486,17 +487,6 @@ impl Server {
                     ..Default::default()
                 }));
 
-                // SPDX-SnippetBegin
-                // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
-                // SPDX-License-Identifier: LicenseRef-SEL
-                #[cfg(feature = "enterprise")]
-                if self.core.is_enterprise_edition() && !self.can_create_account().await? {
-                    return Err(trc::AuthEvent::Error.into_err().details(
-                        "Account creation not possible: license key account limit reached",
-                    ));
-                }
-                // SPDX-SnippetEnd
-
                 match self
                     .registry()
                     .write(RegistryWrite::insert(&account))
@@ -521,6 +511,42 @@ impl Server {
             }
         }
     }
+
+    // SPDX-SnippetBegin
+    // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+    // SPDX-License-Identifier: LicenseRef-SEL
+    #[cfg(feature = "enterprise")]
+    async fn assert_can_provision(
+        &self,
+        domain: &DomainCache,
+        quota: TenantStorageQuota,
+    ) -> trc::Result<()> {
+        if !self.core.is_enterprise_edition() {
+            return Ok(());
+        }
+        if !self.can_create_account().await? {
+            return Err(trc::AuthEvent::Error
+                .into_err()
+                .details("Account creation not possible: license key account limit reached"));
+        }
+        if let Some(tenant_id) = domain.id_tenant
+            && let Some(reached) = self
+                .tenant_quota_reached(tenant_id, quota)
+                .await
+                .caused_by(trc::location!())?
+        {
+            return Err(trc::AuthEvent::Error
+                .into_err()
+                .details(format!(
+                    "Account creation not possible: tenant quota of {} {} reached",
+                    reached.limit, reached.objects
+                ))
+                .ctx(trc::Key::Domain, CompactString::from(domain.name()))
+                .ctx(trc::Key::Limit, reached.limit));
+        }
+        Ok(())
+    }
+    // SPDX-SnippetEnd
 
     async fn validate_address<'x>(
         &self,

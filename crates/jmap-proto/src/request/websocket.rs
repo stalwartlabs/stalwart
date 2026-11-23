@@ -10,7 +10,7 @@ use crate::{
     object::AnyId,
     request::{
         Call, RequestMethod,
-        parser::{CallList, LenientCall},
+        parser::{CallList, LenientCall, json_error_event},
     },
     response::{Response, ResponseMethod, serialize::serialize_hex, status::PushObject},
 };
@@ -42,13 +42,13 @@ pub struct WebSocketResponse<'x> {
     #[serde(serialize_with = "serialize_hex")]
     session_state: u32,
 
-    #[serde(rename(deserialize = "createdIds"))]
-    #[serde(skip_serializing_if = "crate::method::ahash_is_empty")]
-    created_ids: AHashMap<String, AnyId>,
+    #[serde(rename = "createdIds")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    created_ids: Option<AHashMap<String, AnyId>>,
 
     #[serde(rename = "requestId")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    request_id: Option<String>,
+    pub request_id: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Eq, serde::Serialize)]
@@ -102,6 +102,17 @@ pub enum WebSocketRequestErrorType {
     RequestError,
 }
 
+#[derive(Debug)]
+pub struct WebSocketParseError {
+    pub error: trc::Error,
+    pub request_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct WebSocketMessageId {
+    id: Option<String>,
+}
+
 enum MessageType {
     Request,
     PushEnable,
@@ -112,34 +123,75 @@ enum MessageType {
 impl<'x> WebSocketMessage<'x> {
     #[cold]
     #[inline(never)]
-    fn parse_lenient(text: &'x str, err: serde_json::Error) -> Result<Self, CompactString> {
+    fn parse_lenient(
+        text: &'x str,
+        err: serde_json::Error,
+    ) -> Result<Self, (trc::JmapEvent, CompactString)> {
         serde_json::from_str::<LenientWebSocketMessage>(text)
             .map(|message| message.0)
-            .map_err(|_| err.to_compact_string())
+            .map_err(|_| (json_error_event(text), err.to_compact_string()))
     }
 
-    pub fn parse(json: &'x [u8], max_calls: usize, max_size: usize) -> trc::Result<Self> {
-        if json.len() <= max_size {
-            let message = match from_utf8(json) {
-                Ok(text) => {
-                    serde_json::from_str::<Self>(text).or_else(|err| Self::parse_lenient(text, err))
-                }
-                Err(err) => Err(err.to_compact_string()),
-            };
-            match message {
-                Ok(WebSocketMessage::Request(req))
-                    if req.request.method_calls.len() > max_calls =>
-                {
-                    Err(trc::LimitEvent::CallsIn.into_err())
-                }
-                Ok(msg) => Ok(msg),
-                Err(err) => Err(trc::JmapEvent::NotRequest
-                    .into_err()
-                    .details(format_compact!("Invalid WebSocket JMAP request {err}"))),
-            }
-        } else {
-            Err(trc::LimitEvent::SizeRequest.into_err())
+    pub fn parse(
+        json: &'x [u8],
+        max_calls: usize,
+        max_size: usize,
+    ) -> Result<Self, WebSocketParseError> {
+        if json.len() > max_size {
+            return Err(WebSocketParseError {
+                error: trc::LimitEvent::SizeRequest.into_err(),
+                request_id: None,
+            });
         }
+        let text = from_utf8(json).map_err(|err| {
+            WebSocketParseError::invalid(trc::JmapEvent::NotJson, err.to_compact_string(), None)
+        })?;
+        match serde_json::from_str::<Self>(text).or_else(|err| Self::parse_lenient(text, err)) {
+            Ok(WebSocketMessage::Request(mut req)) => {
+                let error = if let Some(capability) = req.request.unknown_capability.take() {
+                    trc::JmapEvent::UnknownCapability
+                        .into_err()
+                        .details(capability)
+                } else if req.request.method_calls.len() > max_calls {
+                    trc::LimitEvent::CallsIn.into_err()
+                } else {
+                    return Ok(WebSocketMessage::Request(req));
+                };
+                Err(WebSocketParseError {
+                    error,
+                    request_id: req.id,
+                })
+            }
+            Ok(msg) => Ok(msg),
+            Err((event, err)) => Err(WebSocketParseError::invalid(
+                event,
+                err,
+                WebSocketMessageId::parse(text),
+            )),
+        }
+    }
+}
+
+impl WebSocketParseError {
+    #[cold]
+    #[inline(never)]
+    fn invalid(event: trc::JmapEvent, err: CompactString, request_id: Option<String>) -> Self {
+        WebSocketParseError {
+            error: event
+                .into_err()
+                .details(format_compact!("Invalid WebSocket JMAP request {err}")),
+            request_id,
+        }
+    }
+}
+
+impl WebSocketMessageId {
+    #[cold]
+    #[inline(never)]
+    fn parse(text: &str) -> Option<String> {
+        serde_json::from_str::<WebSocketMessageId>(text)
+            .ok()
+            .and_then(|message| message.id)
     }
 }
 
@@ -271,7 +323,7 @@ impl<'x> WebSocketResponse<'x> {
             _type: WebSocketResponseType::Response,
             method_responses: response.method_responses,
             session_state: response.session_state,
-            created_ids: response.created_ids,
+            created_ids: response.echo_created_ids.then_some(response.created_ids),
             request_id,
         }
     }

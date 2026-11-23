@@ -1,6 +1,6 @@
 [package]
 name = "http"
-version = "1.1.1"
+version = "1.2.0"
 edition = "2024"
 
 [dependencies]
@@ -13,6 +13,7 @@ email = { path = "../email" }
 smtp = { path = "../smtp" }
 jmap = { path = "../jmap" }
 dav = { path = "../dav" }
+exchange = { path = "../exchange", optional = true }
 scim = { path = "../scim" }
 groupware = { path = "../groupware" }
 http_proto = { path = "../http-proto" }
@@ -23,8 +24,8 @@ services = { path =  "../services" }
 registry = { path =  "../registry" }
 mail-parser = { version = "1.0", features = ["full_encoding"] } 
 mail-builder = { version = "2.0" }
-mail-auth = { version = "0.15.1", features = ["generate", "arc"] }
-tokio = { version = "1.54", features = ["rt"] }
+mail-auth = { version = "0.16.0", features = ["generate", "arc"] }
+tokio = { version = "1.54", features = ["rt", "time"] }
 hyper = { version = "1.12.0", features = ["server", "http1", "http2"] }
 hyper-util = { version = "0.1.21", features = ["tokio"] }
 http-body-util = "0.1.5"
@@ -45,8 +46,9 @@ flate2 = "1.1"
 jmap-tools = { path = "../jmap-tools" }
 
 [features]
+exchange = ["dep:exchange", "common/exchange"]
 dev_mode = []
-enterprise = ["scim/enterprise", "store/enterprise", "common/enterprise", "utils/enterprise", "trc/enterprise", "email/enterprise", "smtp/enterprise", "jmap/enterprise", "dav/enterprise", "groupware/enterprise", "http_proto/enterprise", "jmap_proto/enterprise", "directory/enterprise", "services/enterprise", "registry/enterprise"]
+enterprise = ["scim/enterprise", "store/enterprise", "common/enterprise", "utils/enterprise", "trc/enterprise", "email/enterprise", "smtp/enterprise", "jmap/enterprise", "dav/enterprise", "exchange?/enterprise", "groupware/enterprise", "http_proto/enterprise", "jmap_proto/enterprise", "directory/enterprise", "services/enterprise", "registry/enterprise"]
 
 [lints]
 workspace = true

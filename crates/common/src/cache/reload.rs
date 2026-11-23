@@ -5,14 +5,14 @@
  */
 
 use crate::{
-    Core, Server,
+    BuildServer, Core, Server,
     config::{
         server::{Listeners, tls::parse_certificates},
         storage::Storage,
         telemetry::Telemetry,
     },
     ipc::{QueueEvent, RegistryChange},
-    network::security::{BlockedIps, IpWithTtl},
+    network::security::BlockedIps,
 };
 use ahash::AHashMap;
 use directory::Directories;
@@ -34,7 +34,13 @@ pub struct ReloadResult {
 
 impl Server {
     pub async fn reload_registry(&self, change: RegistryChange) -> trc::Result<ReloadResult> {
-        Box::pin(self.reload(change)).await
+        let result = Box::pin(self.reload(change)).await;
+        if change.object() == ObjectType::SpamClassifier
+            && let Err(err) = self.inner.build_server().spam_model_reload().await
+        {
+            trc::error!(err.details("Failed to reload spam classifier model"));
+        }
+        result
     }
 
     async fn reload(&self, change: RegistryChange) -> trc::Result<ReloadResult> {
@@ -50,13 +56,11 @@ impl Server {
                             .unwrap_or(u64::MAX);
 
                         if expires_at > now() {
-                            let mut ips = self.inner.data.blocked_ips.write();
-                            if let Some(ip) = ip.address.try_to_ip() {
-                                ips.block(ip, expires_at);
-                            } else {
-                                ips.blocked_ip_networks
-                                    .push(IpWithTtl::new(ip.address, expires_at));
-                            }
+                            self.inner
+                                .data
+                                .blocked_ips
+                                .write()
+                                .block(ip.address, expires_at);
                         }
                     }
                     return Ok(bootstrap.into());
@@ -184,6 +188,7 @@ impl Server {
                                 .await
                                 .ok();
 
+                            bootstrap.log_notices();
                             return Ok(ReloadResult {
                                 errors: bootstrap.errors,
                                 warnings: bootstrap.warnings,
@@ -195,6 +200,7 @@ impl Server {
             }
         }
 
+        bootstrap.log_notices();
         Ok(bootstrap.into())
     }
 }

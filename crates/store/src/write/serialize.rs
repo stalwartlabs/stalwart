@@ -446,6 +446,24 @@ impl Archive<ArchiveBytes> {
         }
     }
 
+    #[cfg(feature = "exchange")]
+    pub fn restamp_change_id(bytes: &mut [u8], change_id: u64) -> bool {
+        match bytes.split_last_mut() {
+            Some((marker, contents))
+                if *marker & (MAGIC_MARKER | VERSIONED) == MAGIC_MARKER | VERSIONED =>
+            {
+                match contents.last_chunk_mut::<U64_LEN>() {
+                    Some(stamp) => {
+                        *stamp = change_id.to_be_bytes();
+                        true
+                    }
+                    None => false,
+                }
+            }
+            _ => false,
+        }
+    }
+
     pub fn restamp_hash(bytes: &mut [u8]) {
         debug_assert!(
             bytes

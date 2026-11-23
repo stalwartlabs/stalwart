@@ -48,7 +48,7 @@ pub(crate) struct TestVacation {
     derive(serde::Serialize, serde::Deserialize)
 )]
 #[repr(u8)]
-pub(crate) enum Period {
+pub enum Period {
     Days(u64) = 0,
     Seconds(u64) = 1,
     Default = 2,

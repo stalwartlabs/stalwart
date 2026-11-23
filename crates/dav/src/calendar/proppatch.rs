@@ -494,7 +494,8 @@ impl CalendarPropPatchRequestHandler for Server {
                             components
                                 .0
                                 .into_iter()
-                                .map(|v| SupportedComponent::from(v.0)),
+                                .map(|v| SupportedComponent::from(v.0))
+                                .filter(SupportedComponent::is_storable),
                         )
                         .into_inner();
                         if calendar.supported_components != 0 {

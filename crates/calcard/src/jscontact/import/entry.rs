@@ -16,6 +16,7 @@ use crate::{
     },
 };
 use jmap_tools::{Key, Map, Value};
+use smallvec::smallvec;
 use std::borrow::Cow;
 
 #[allow(clippy::wrong_self_convention)]
@@ -101,6 +102,39 @@ impl EntryState {
                 String::new()
             },
         );
+    }
+
+    pub(super) fn take_text_value_type(&mut self) -> bool {
+        let len = self.entry.params.len();
+        self.entry.params.retain(|param| {
+            param.name != VCardParameterName::Value
+                || !param.value.as_value_type().is_some_and(|value_type| {
+                    value_type.is_iana_and(|v| *v == &VCardValueType::Text)
+                })
+        });
+        self.entry.params.len() != len
+    }
+
+    pub(super) fn move_username_to_value(&mut self) -> bool {
+        if !self
+            .entry
+            .values
+            .iter()
+            .all(|value| matches!(value, VCardValue::Text(text) if text.is_empty()))
+        {
+            return false;
+        }
+        let Some(position) = self
+            .entry
+            .params
+            .iter()
+            .position(|param| param.name == VCardParameterName::Username)
+        else {
+            return false;
+        };
+        let param = self.entry.params.remove(position);
+        self.entry.values = smallvec![VCardValue::Text(param.value.into_text().into_owned())];
+        true
     }
 
     pub(super) fn set_map_name(&mut self) {

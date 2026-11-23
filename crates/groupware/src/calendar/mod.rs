@@ -7,6 +7,7 @@
 pub mod alarm;
 pub mod alerts;
 pub mod availability;
+pub mod booking;
 pub mod color;
 pub mod compare;
 pub mod dates;
@@ -25,6 +26,8 @@ pub mod schedule;
 pub mod sequence;
 pub mod storage;
 pub mod user;
+pub mod working_hours;
+pub mod write;
 
 use crate::metadata::tracked_kinds;
 use calcard::icalendar::{
@@ -617,6 +620,15 @@ impl ArchivedCalendarEvent {
 impl Default for ChangedBy {
     fn default() -> Self {
         ChangedBy::CalendarAddress("".into())
+    }
+}
+
+impl SupportedComponent {
+    pub fn is_storable(&self) -> bool {
+        !matches!(
+            self,
+            SupportedComponent::VAvailability | SupportedComponent::Available
+        )
     }
 }
 

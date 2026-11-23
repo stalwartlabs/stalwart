@@ -143,6 +143,18 @@ where
 }
 
 impl ResponseDeadline {
+    fn arm_deadline(&mut self, cx: &mut Context<'_>) {
+        let Some(timeout) = self.timeout else {
+            return;
+        };
+        let sent_at = Instant::now();
+        self.sent_at = Some(sent_at);
+        self.timer.as_mut().reset(sent_at + timeout);
+        if self.timer.as_mut().poll(cx).is_ready() {
+            cx.waker().wake_by_ref();
+        }
+    }
+
     fn poll_deadline(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         let (Some(sent_at), Some(timeout)) = (self.sent_at, self.timeout) else {
             return Poll::Pending;
@@ -202,7 +214,7 @@ impl AsyncWrite for ResponseDeadline {
             PgSocket::Unix(stream) => Pin::new(stream).poll_write(cx, buf),
         };
         if this.sent_at.is_none() && matches!(result, Poll::Ready(Ok(written)) if written > 0) {
-            this.sent_at = Some(Instant::now());
+            this.arm_deadline(cx);
         }
         result
     }

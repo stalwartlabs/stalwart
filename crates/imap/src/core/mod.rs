@@ -49,6 +49,7 @@ impl ImapSessionManager {
 }
 
 pub const MAX_CONCURRENT_OPS: u32 = 5;
+const SESSION_REVOKED_BYE: &[u8] = b"* BYE Account access changed, please log in again.\r\n";
 
 pub struct Session<T: SessionStream> {
     pub server: Server,
@@ -281,6 +282,24 @@ impl<T: SessionStream> SessionData<T> {
             .renew_access_token(&self.access_token, self.remote_addr)
             .await
             .caused_by(trc::location!())
+    }
+
+    pub async fn assert_session_access(&self) -> trc::Result<()> {
+        if self.server.is_access_token_current(&self.access_token) {
+            return Ok(());
+        }
+        let result = Box::pin(
+            self.server
+                .assert_session_access(&self.access_token, self.remote_addr),
+        )
+        .await;
+        if result
+            .as_ref()
+            .is_err_and(|err| matches!(err.as_ref(), trc::EventType::Security(_)))
+        {
+            self.write_bytes(SESSION_REVOKED_BYE).await.ok();
+        }
+        result
     }
 
     pub fn replace_stream_tx<U: SessionStream>(

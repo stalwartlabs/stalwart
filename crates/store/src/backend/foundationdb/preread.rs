@@ -6,14 +6,14 @@
 
 use super::{
     MAX_VALUE_SIZE,
-    window::{Isolation, WindowError, WindowLoad, WindowRead, WindowRows, read_window},
+    window::{WindowLoad, read_keys},
 };
 use crate::{
     WITH_SUBSPACE,
     write::{Advance, AssignedIds, Batch, BatchCursor, Operation, ValueOp},
 };
 use ahash::AHashSet;
-use foundationdb::{FdbError, Transaction};
+use fdb::Transaction;
 use std::ops::Range;
 use xxhash_rust::xxh3::xxh3_64;
 
@@ -39,20 +39,16 @@ pub(super) struct MergePreRead {
     values: Vec<u8>,
     slots: Vec<Slot>,
     next: usize,
-    reads_own_writes: bool,
 }
 
 fn window_reads<'k>(
     keys: &'k [u8],
     reads: &'k [(Range<usize>, usize)],
-) -> impl Iterator<Item = (usize, WindowRead<'k>)> + Send + use<'k> {
+) -> impl Iterator<Item = (usize, &'k [u8])> + use<'k> {
     reads
         .iter()
         .enumerate()
-        .filter_map(move |(index, (range, _))| {
-            keys.get(range.clone())
-                .map(|key| (index, WindowRead::Key(key)))
-        })
+        .filter_map(move |(index, (range, _))| keys.get(range.clone()).map(|key| (index, key)))
 }
 
 impl MergePreRead {
@@ -93,19 +89,11 @@ impl MergePreRead {
                             plan.reads.push((start..plan.keys.len(), plan.slots.len()));
                             plan.slots.push(Slot::Missing);
                         }
-                        ValueOp::MergeFnc(_) => {
-                            plan.slots.push(Slot::Sequential);
-                            plan.reads_own_writes = true;
-                        }
-                        ValueOp::AddAndGet(_) => plan.reads_own_writes = true,
+                        ValueOp::MergeFnc(_) => plan.slots.push(Slot::Sequential),
                         _ => {}
                     }
                 }
-                Advance::Assert { .. } => plan.reads_own_writes = true,
-                Advance::ClearRange { .. } => {
-                    range_cleared = true;
-                    plan.reads_own_writes = true;
-                }
+                Advance::ClearRange { .. } => range_cleared = true,
                 _ => {}
             }
         }
@@ -115,9 +103,9 @@ impl MergePreRead {
 
     pub(super) async fn read(
         &mut self,
-        trx: &Transaction,
+        trx: &mut Transaction<'_>,
         load: &WindowLoad,
-    ) -> Result<(), FdbError> {
+    ) -> fdb::Result<()> {
         let MergePreRead {
             keys,
             reads,
@@ -133,38 +121,29 @@ impl MergePreRead {
                 *slot = Slot::Missing;
             }
         }
-        let result = read_window(
-            trx,
-            load,
-            WindowRows::Raw,
-            Isolation::Serializable,
-            window_reads(keys, reads),
-            |index, _, value| {
-                if let Some(slot) = reads.get(index).and_then(|(_, slot)| slots.get_mut(*slot)) {
-                    let start = values.len();
-                    values.extend_from_slice(value);
-                    *slot = if value.len() < MAX_VALUE_SIZE {
-                        Slot::Value(start..values.len())
-                    } else {
-                        Slot::Head(start..values.len())
-                    };
-                }
-                Ok(true)
-            },
-        )
-        .await;
-        match result {
-            Ok(()) => Ok(()),
-            Err(WindowError::Store(_)) => {
-                slots.fill_with(|| Slot::Sequential);
-                Ok(())
+        read_keys(trx, load, window_reads(keys, reads), |index, value| {
+            if let Some(slot) = reads.get(index).and_then(|(_, slot)| slots.get_mut(*slot)) {
+                let start = values.len();
+                values.extend_from_slice(value);
+                *slot = if value.len() < MAX_VALUE_SIZE {
+                    Slot::Value(start..values.len())
+                } else {
+                    Slot::Head(start..values.len())
+                };
             }
-            Err(WindowError::Fdb { error, .. }) => Err(error),
-        }
+        })
+        .await
     }
 
-    pub(super) fn reads_own_writes(&self) -> bool {
-        self.reads_own_writes
+    pub(super) fn prefetched(&self) -> impl Iterator<Item = (&[u8], Option<&[u8]>)> {
+        self.reads.iter().filter_map(|(key, slot)| {
+            let key = self.keys.get(key.clone())?;
+            match self.slots.get(*slot)? {
+                Slot::Value(value) => Some((key, Some(self.values.get(value.clone())?))),
+                Slot::Missing => Some((key, None)),
+                Slot::Head(_) | Slot::Sequential => None,
+            }
+        })
     }
 
     pub(super) fn next_merge(&mut self) -> Prefetched<'_> {

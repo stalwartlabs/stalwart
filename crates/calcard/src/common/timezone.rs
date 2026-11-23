@@ -53,6 +53,21 @@ impl Tz {
         tz.time_zone().is_some().then_some(tz)
     }
 
+    pub fn from_iana_id(id: u16) -> Option<Self> {
+        tzdb::id_to_name(id).map(|_| Self::Iana(id))
+    }
+
+    pub fn iana_name(&self) -> Option<&'static str> {
+        match self {
+            Self::Iana(id) => tzdb::id_to_name(*id),
+            Self::Fixed(_) | Self::Floating => None,
+        }
+    }
+
+    pub fn offset_at_unix(&self, seconds: i64) -> i32 {
+        Timestamp::from_second(seconds).map_or(0, |timestamp| self.offset_at(timestamp).seconds())
+    }
+
     /// Resolves a named zone, caching it for the lifetime of the process.
     ///
     /// Returns `None` for floating and fixed zones, and for a name the time

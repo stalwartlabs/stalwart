@@ -99,7 +99,7 @@ pub enum AddressPart {
     derive(serde::Serialize, serde::Deserialize)
 )]
 #[repr(u8)]
-pub(crate) enum MatchType {
+pub enum MatchType {
     Is = 0,
     Contains = 1,
     Matches(u64) = 2,
@@ -115,7 +115,7 @@ pub(crate) enum MatchType {
     derive(serde::Serialize, serde::Deserialize)
 )]
 #[repr(u8)]
-pub(crate) enum RelationalMatch {
+pub enum RelationalMatch {
     Gt = 0,
     Ge = 1,
     Lt = 2,

@@ -18,7 +18,7 @@ impl RegistryStore {
 
         // Build store
         inner.store = match inner.read_data_store().await {
-            RegistryInit::Ok(data_store) => Store::build(data_store).await?,
+            RegistryInit::Ok(data_store) => Store::build(*data_store).await?,
             RegistryInit::Err(err) => return Err(err),
             RegistryInit::Bootstrap => {
                 inner.env_recovery_mode = true;

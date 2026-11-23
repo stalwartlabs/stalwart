@@ -29,9 +29,9 @@ use jmap_proto::{
 use std::future::Future;
 use std::time::Instant;
 use tokio_tungstenite::WebSocketStream;
-use trc::JmapEvent;
+use trc::{JmapEvent, LimitEvent};
 use tungstenite::{
-    Message,
+    Error as WsError, Message,
     protocol::{CloseFrame, frame::coding::CloseCode},
 };
 use types::type_state::{DataType, StateChange};
@@ -144,7 +144,8 @@ impl WebSocketHandler for Server {
                                                                 &mut reservation,
                                                             )
                                                             .await;
-                                                        match WebSocketResponse::from_response(response, request.id).to_json() {
+                                                        let response = WebSocketResponse::from_response(response, request.id);
+                                                        match response.to_json() {
                                                             Ok(response) => response,
                                                             Err(err) => {
                                                                 trc::event!(
@@ -153,7 +154,7 @@ impl WebSocketHandler for Server {
                                                                     SpanId = session.session_id,
                                                                     Reason = err.to_compact_string()
                                                                 );
-                                                                WebSocketRequestError::from(RequestError::internal_server_error()).to_json()
+                                                                WebSocketRequestError::from_error(RequestError::internal_server_error(), response.request_id).to_json()
                                                             }
                                                         }
                                                     }
@@ -183,8 +184,8 @@ impl WebSocketHandler for Server {
                                             continue;
                                         }
                                         Err(err) => {
-                                            let response = WebSocketRequestError::from(err.to_request_error()).to_json();
-                                            trc::error!(err.details("Failed to parse WebSocket message").span_id(session.session_id));
+                                            let response = WebSocketRequestError::from_error(err.error.to_request_error(), err.request_id).to_json();
+                                            trc::error!(err.error.details("Rejected WebSocket message").span_id(session.session_id));
                                             response
                                         },
                                     };
@@ -214,6 +215,18 @@ impl WebSocketHandler for Server {
 
                             last_request = Instant::now();
                             last_heartbeat = Instant::now();
+                        }
+                        Ok(Some(Err(WsError::Capacity(err)))) => {
+                            trc::event!(
+                                Limit(LimitEvent::SizeRequest),
+                                SpanId = session.session_id,
+                                Reason = err.to_compact_string()
+                            );
+                            let _ = stream.close(Some(CloseFrame {
+                                code: CloseCode::Size,
+                                reason: "Message too big".into(),
+                            })).await;
+                            break;
                         }
                         Ok(Some(Err(err))) => {
                             trc::event!(Jmap(JmapEvent::WebsocketError),

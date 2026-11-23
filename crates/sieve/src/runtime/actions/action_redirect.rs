@@ -35,16 +35,18 @@ impl<'x> Context<'x> {
         };
         if self.num_redirects >= self.runtime.max_redirects
             || self.num_out_messages >= self.runtime.max_out_messages
-            || self
-                .root_headers()
-                .filter(|h| h.is_named(&HeaderName::Received))
-                .count()
-                >= self.runtime.max_received_headers
+            || (!redirect.list && address.eq_ignore_ascii_case(self.user_address.as_ref()))
         {
             return Ok(());
         }
 
-        if !redirect.list && address.eq_ignore_ascii_case(self.user_address.as_ref()) {
+        if self
+            .root_headers()
+            .filter(|h| h.is_named(&HeaderName::Received))
+            .count()
+            >= self.runtime.max_received_headers
+        {
+            self.hop_limited = true;
             return Ok(());
         }
 

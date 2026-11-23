@@ -5,14 +5,14 @@
  */
 
 use std::{
-    fs::{File, OpenOptions},
-    io::{ErrorKind, Write},
+    fs::{self, File, OpenOptions},
+    io::{self, ErrorKind, Write},
     path::PathBuf,
     thread::Builder,
     time::SystemTime,
 };
 
-use crate::config::telemetry::{LogTracer, RotationStrategy};
+use crate::config::telemetry::{LogFiles, LogTracer, RotationStrategy};
 
 use compact_str::{CompactString, ToCompactString};
 use mail_parser::DateTime;
@@ -217,5 +217,23 @@ impl LogTracer {
             RotationStrategy::Minutely => now.to_timestamp() as u64 + 60,
             RotationStrategy::Never => 0,
         }
+    }
+}
+
+impl LogFiles {
+    pub fn newest_first(&self) -> io::Result<Vec<PathBuf>> {
+        let mut files = Vec::new();
+        for entry in fs::read_dir(&self.path)? {
+            let entry = entry?;
+            let is_log = entry.file_name().to_str().is_some_and(|name| {
+                name.strip_prefix(self.prefix.as_str())
+                    .is_some_and(|suffix| suffix.is_empty() || suffix.starts_with('.'))
+            });
+            if is_log && entry.file_type()?.is_file() {
+                files.push(entry.path());
+            }
+        }
+        files.sort_unstable_by(|a, b| b.file_name().cmp(&a.file_name()));
+        Ok(files)
     }
 }

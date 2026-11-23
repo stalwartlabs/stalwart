@@ -1,6 +1,6 @@
 [package]
 name = "common"
-version = "1.1.1"
+version = "1.2.0"
 edition = "2024"
 build = "build.rs"
 
@@ -19,10 +19,10 @@ jmap_proto = { path = "../jmap-proto" }
 sieve-rs = { path = "../sieve", features = ["serde"] }
 mail-parser = { version = "1.0", features = ["full_encoding"] } 
 mail-builder = { version = "2.0" }
-mail-auth = { version = "0.15.1", features = ["generate", "arc"] }
+mail-auth = { version = "0.16.0", features = ["generate", "arc"] }
 smtp-report = { path = "../smtp-report" }
 smtp-proto = { path = "../smtp-proto", features = ["rkyv"] }
-dns-update = { version = "0.6.2" }
+dns-update = { version = "0.6.3" }
 calcard = { path = "../calcard", features = ["rkyv"] }
 ahash = { version = "0.8.12", features = ["serde"] }
 parking_lot = "0.13.0"
@@ -56,7 +56,6 @@ decancer = "4.0.0"
 unicode-security = "0.1.2"
 infer = "0.22"
 bincode = { version = "2.0.1", features = ["serde"] }
-hostname = "0.4.2"
 zip = "9.1"
 xxhash-rust = { version = "0.8.19", features = ["xxh3"] }
 psl = "2"
@@ -93,10 +92,11 @@ libc = "0.2.191"
 sd-notify = "0.5"
 
 [target.'cfg(stalwart_tests)'.dependencies]
-dns-update = { version = "0.6.2", features = ["test_provider"] }
+dns-update = { version = "0.6.3", features = ["test_provider"] }
 
 [features]
 dev_mode = []
+exchange = ["store/exchange"]
 enterprise = ["store/enterprise", "utils/enterprise", "trc/enterprise", "telemetry/enterprise", "directory/enterprise", "coordinator/enterprise", "registry/enterprise", "jmap_proto/enterprise"]
 foundation = []
 redis = ["store/redis"]

@@ -86,6 +86,8 @@ pub struct DomainCache {
 
 pub const DOMAIN_FLAG_RELAY: u8 = 1;
 pub const DOMAIN_FLAG_SUB_ADDRESSING: u8 = 1 << 1;
+pub const DOMAIN_FLAG_DKIM2_STRICT: u8 = 1 << 3;
+pub const DOMAIN_FLAG_DNS_MANAGED: u8 = 1 << 4;
 
 // SPDX-SnippetBegin
 // SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
@@ -136,6 +138,9 @@ impl AccountStorage {
 }
 
 pub const ACCOUNT_IS_USER: u64 = 1;
+pub const ACCOUNT_IS_ROOM: u64 = 1 << 1;
+pub const ACCOUNT_IS_EQUIPMENT: u64 = 1 << 2;
+pub(crate) const ACCOUNT_TYPE_MASK: u64 = ACCOUNT_IS_USER | ACCOUNT_IS_ROOM | ACCOUNT_IS_EQUIPMENT;
 
 #[derive(Debug, Clone)]
 pub struct RoleCache {

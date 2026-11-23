@@ -17,6 +17,7 @@ pub mod dkim;
 pub mod dmarc;
 pub mod inbound;
 pub mod index;
+pub mod mdn;
 pub mod scheduler;
 pub mod send;
 pub mod spf;

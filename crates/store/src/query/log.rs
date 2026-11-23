@@ -33,7 +33,7 @@ pub enum Change {
     DeleteItem(u64),
 }
 
-const _: () = assert!(size_of::<Change>() == 16);
+const _: () = assert!(size_of::<Change>() <= 16);
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Hash, Default)]
 #[repr(transparent)]

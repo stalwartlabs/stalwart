@@ -28,7 +28,7 @@ use dav_proto::schema::{
 use groupware::RFC_3986;
 use groupware::cache::GroupwareCache;
 use hyper::StatusCode;
-use registry::schema::enums::Permission;
+use registry::schema::enums::{Permission, ResourceKind};
 use std::borrow::Cow;
 use trc::AddContext;
 use types::collection::Collection;
@@ -315,11 +315,15 @@ impl PrincipalPropFind for Server {
                         PrincipalProperty::CalendarUserType => {
                             fields.push(DavPropertyValue::new(
                                 property.clone(),
-                                if account.is_user_account() {
-                                    DavValue::String("INDIVIDUAL".to_string())
-                                } else {
-                                    DavValue::String("GROUP".to_string())
-                                },
+                                DavValue::String(
+                                    match account.resource_kind() {
+                                        Some(ResourceKind::Room) => "ROOM",
+                                        Some(ResourceKind::Equipment) => "RESOURCE",
+                                        None if account.is_user_account() => "INDIVIDUAL",
+                                        None => "GROUP",
+                                    }
+                                    .to_string(),
+                                ),
                             ));
                         }
                         PrincipalProperty::ScheduleInboxURL => {

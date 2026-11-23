@@ -143,7 +143,13 @@ pub struct Tracers {
 pub struct Metrics {
     pub prometheus: Option<PrometheusMetrics>,
     pub otel: Option<Arc<OtelMetrics>>,
-    pub log_path: Option<String>,
+    pub log_files: Option<Arc<LogFiles>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct LogFiles {
+    pub path: String,
+    pub prefix: String,
 }
 
 #[derive(Debug, Clone)]
@@ -803,7 +809,7 @@ impl Metrics {
                     None => None,
                 }
             },
-            log_path: bp
+            log_files: bp
                 .list_infallible::<Tracer>()
                 .await
                 .into_iter()
@@ -811,7 +817,10 @@ impl Metrics {
                     if let Tracer::Log(log_tracer) = tracer.object
                         && log_tracer.enable
                     {
-                        Some(log_tracer.path)
+                        Some(Arc::new(LogFiles {
+                            path: log_tracer.path,
+                            prefix: log_tracer.prefix,
+                        }))
                     } else {
                         None
                     }

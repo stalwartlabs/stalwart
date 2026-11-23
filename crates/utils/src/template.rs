@@ -204,6 +204,8 @@ fn html_escape(result: &mut String, input: &str) {
             '>' => result.push_str("&gt;"),
             '"' => result.push_str("&quot;"),
             '\'' => result.push_str("&#39;"),
+            '\n' => result.push_str("<br>"),
+            '\r' => {}
             _ => result.push(c),
         }
     }

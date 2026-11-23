@@ -5,10 +5,10 @@
  */
 
 use super::{
-    FDB_BATCH_THROTTLED, FDB_VALUE_TOO_LARGE, FdbStore, MAX_THROTTLED_TIME, MAX_VALUE_SIZE,
-    into_error,
+    FDB_VALUE_TOO_LARGE, FdbStore, MAX_THROTTLED_TIME, MAX_VALUE_SIZE, into_error,
+    known::KnownValues,
     preread::{MergePreRead, Prefetched},
-    read::{ChunkedValue, read_chunk_tail, read_chunked_value},
+    read::{ChunkedValue, Source, read_chunk_tail, read_chunked_value},
 };
 use crate::{
     backend::deserialize_i64_le,
@@ -19,18 +19,25 @@ use crate::{
     },
     *,
 };
-use foundationdb::{
-    FdbError, KeySelector, RangeOption, Transaction,
-    options::{self, MutationType},
+use fdb::{
+    AtomicOp, Bytes, CommitError, ErrorCode, KeyValue, Priority, RangeCursor, RangeOptions,
+    ReadOptions, Transaction, TransactionOptions,
 };
-use futures::TryStreamExt;
-use std::{borrow::Cow, cmp::Ordering, ops::Range, time::Instant};
+use futures::future::{Either, ready, try_join_all};
+use std::{
+    borrow::Cow,
+    cmp::Ordering,
+    mem::swap,
+    ops::{Bound, Range},
+    time::Instant,
+};
 
 const PURGE_BATCH_SIZE: usize = 1024;
 
 enum Previous<'x> {
     Prefetched(Option<&'x [u8]>),
     Read(ChunkedValue),
+    Known(&'x ChunkedValue),
 }
 
 struct Throttle {
@@ -43,6 +50,18 @@ struct CounterKeys {
     ranges: Vec<Range<usize>>,
     reservation_key: Vec<usize>,
     reservation_total: Vec<i64>,
+}
+
+#[derive(Clone, Copy)]
+enum Written {
+    Set(i64),
+    Add(i64),
+}
+
+#[derive(Clone, Copy, Default)]
+struct OwnWrites {
+    set: Option<i64>,
+    add: i64,
 }
 
 impl FdbStore {
@@ -59,65 +78,48 @@ impl FdbStore {
         let mut log_buf = Vec::new();
         let mut log_scratch = Vec::new();
 
-        let mut next_trx: Option<Transaction> = None;
+        let mut next_trx: Option<Transaction<'_>> = None;
 
         'retry: loop {
             let mut cursor = BatchCursor::new(&batch);
             result.rollback(mark);
 
-            let trx = match next_trx.take() {
+            let mut trx = match next_trx.take() {
                 Some(trx) => trx,
-                None => self.db.create_trx().map_err(into_error)?,
+                None => self.transaction(batch.priority),
             };
-            if batch.priority == CommitPriority::Background {
-                trx.set_option(options::TransactionOption::PriorityBatch)
-                    .map_err(into_error)?;
-            }
-            #[cfg(stalwart_tests)]
-            super::probe::report_conflicts(&trx);
 
             let mut preread = if counter_keys.is_empty() {
-                let preread = MergePreRead::plan(&mut batch, result);
-                if preread
-                    .as_ref()
-                    .is_some_and(|preread| !preread.reads_own_writes())
-                {
-                    trx.set_option(options::TransactionOption::ReadYourWritesDisable)
-                        .map_err(into_error)?;
-                }
-                preread
+                MergePreRead::plan(&mut batch, result)
             } else {
-                if let Err(err) = allocate_counters(&trx, &batch, &counter_keys, result).await {
+                if let Err(err) = allocate_counters(&mut trx, &batch, &counter_keys, result).await {
                     match err {
                         ApplyError::Retryable(err) => {
-                            next_trx = Some(
-                                self.on_write_error(
-                                    trx,
-                                    err,
-                                    &mut retry_count,
-                                    &mut start,
-                                    &mut throttle,
-                                )
-                                .await?,
-                            );
+                            self.on_write_error(
+                                &mut trx,
+                                err,
+                                &mut retry_count,
+                                &mut start,
+                                &mut throttle,
+                            )
+                            .await?;
+                            next_trx = Some(trx);
                             continue 'retry;
                         }
-                        ApplyError::Fatal(err) => {
-                            trx.cancel();
-                            return Err(err);
-                        }
+                        ApplyError::Fatal(err) => return Err(err),
                     }
                 }
                 MergePreRead::plan(&mut batch, result)
             };
-            if let Some(preread) = &mut preread
-                && let Err(err) = preread.read(&trx, &self.windows).await
-            {
-                next_trx = Some(
-                    self.on_write_error(trx, err, &mut retry_count, &mut start, &mut throttle)
-                        .await?,
-                );
-                continue 'retry;
+            let mut known = KnownValues::plan(&mut batch, result);
+            if let Some(preread) = &mut preread {
+                if let Err(err) = preread.read(&mut trx, &self.windows).await {
+                    self.on_write_error(&mut trx, err, &mut retry_count, &mut start, &mut throttle)
+                        .await?;
+                    next_trx = Some(trx);
+                    continue 'retry;
+                }
+                known.seed(preread.prefetched());
             }
 
             let mut key_buf = Vec::with_capacity(64);
@@ -126,50 +128,55 @@ impl FdbStore {
                     Advance::Cursor => {}
                     Advance::Value { class, op } => {
                         cursor.value_key(class, &mut key_buf, WITH_SUBSPACE);
+                        let slot = known.slot(&key_buf);
 
                         match op {
                             ValueOp::Set(set_value) => {
                                 let value = set_value.resolve(result)?;
-                                if !chunk_value(&trx, &mut key_buf, &value, class, None).await {
-                                    trx.cancel();
-                                    return Err(trc::StoreEvent::FoundationdbError
-                                        .ctx(trc::Key::Reason, "Value is too large")
-                                        .ctx(trc::Key::Code, FDB_VALUE_TOO_LARGE));
+                                if !chunk_value(&mut trx, &mut key_buf, &value, class, None).await?
+                                {
+                                    return Err(value_too_large());
                                 }
+                                known.forget(slot);
                             }
                             ValueOp::MergeFnc(merge_op) => {
-                                let previous = match preread.as_mut().map(MergePreRead::next_merge)
-                                {
-                                    Some(Prefetched::Value(value)) => {
+                                let prefetched = preread.as_mut().map(MergePreRead::next_merge);
+                                let previous = match (known.get(slot), prefetched) {
+                                    (Some(value), _) => Ok(Previous::Known(value)),
+                                    (None, Some(Prefetched::Value(value))) => {
                                         Ok(Previous::Prefetched(value))
                                     }
-                                    Some(Prefetched::Head(head)) => {
-                                        read_chunk_tail(&key_buf, &trx, false, head).await.map(
-                                            |tail| match tail {
-                                                Some(chunked) => Previous::Read(chunked),
-                                                None => Previous::Prefetched(Some(head)),
-                                            },
+                                    (None, Some(Prefetched::Head(head))) => read_chunk_tail(
+                                        &key_buf,
+                                        &mut Source::Transaction(&mut trx),
+                                        head,
+                                    )
+                                    .await
+                                    .map(|tail| match tail {
+                                        Some(chunked) => Previous::Read(chunked),
+                                        None => Previous::Prefetched(Some(head)),
+                                    }),
+                                    (None, Some(Prefetched::Sequential) | None) => {
+                                        read_chunked_value(
+                                            &key_buf,
+                                            &mut Source::Transaction(&mut trx),
                                         )
-                                    }
-                                    Some(Prefetched::Sequential) | None => {
-                                        read_chunked_value(&key_buf, &trx, false)
-                                            .await
-                                            .map(Previous::Read)
+                                        .await
+                                        .map(Previous::Read)
                                     }
                                 };
                                 let previous = match previous {
                                     Ok(previous) => previous,
                                     Err(err) => {
-                                        next_trx = Some(
-                                            self.on_write_error(
-                                                trx,
-                                                err,
-                                                &mut retry_count,
-                                                &mut start,
-                                                &mut throttle,
-                                            )
-                                            .await?,
-                                        );
+                                        self.on_write_error(
+                                            &mut trx,
+                                            err,
+                                            &mut retry_count,
+                                            &mut start,
+                                            &mut throttle,
+                                        )
+                                        .await?;
+                                        next_trx = Some(trx);
                                         continue 'retry;
                                     }
                                 };
@@ -179,11 +186,14 @@ impl FdbStore {
                                         (Some(*bytes), Some(*bytes), 1)
                                     }
                                     Previous::Prefetched(None)
-                                    | Previous::Read(ChunkedValue::None) => (None, None, 0),
-                                    Previous::Read(ChunkedValue::Single(slice)) => {
-                                        (Some(slice.as_ref()), Some(slice.as_ref()), 1)
+                                    | Previous::Read(ChunkedValue::None)
+                                    | Previous::Known(ChunkedValue::None) => (None, None, 0),
+                                    Previous::Read(ChunkedValue::Single(bytes))
+                                    | Previous::Known(ChunkedValue::Single(bytes)) => {
+                                        (Some(bytes.as_ref()), Some(bytes.as_ref()), 1)
                                     }
-                                    Previous::Read(ChunkedValue::Chunked { bytes, n_chunks }) => {
+                                    Previous::Read(ChunkedValue::Chunked { bytes, n_chunks })
+                                    | Previous::Known(ChunkedValue::Chunked { bytes, n_chunks }) => {
                                         (None, Some(bytes.as_slice()), *n_chunks as usize + 1)
                                     }
                                 };
@@ -201,86 +211,118 @@ impl FdbStore {
                                             trx.atomic_op(
                                                 &key_buf,
                                                 append_bytes,
-                                                MutationType::AppendIfFits,
-                                            );
-                                        } else if !chunk_value(
-                                            &trx,
+                                                AtomicOp::AppendIfFits,
+                                            )
+                                            .map_err(into_error)?;
+                                            known.update(slot, move || {
+                                                Some(ChunkedValue::Single(Bytes::from(value)))
+                                            });
+                                        } else if chunk_value(
+                                            &mut trx,
                                             &mut key_buf,
                                             &value,
                                             class,
                                             Some(prev_num_chunks),
                                         )
-                                        .await
+                                        .await?
                                         {
-                                            trx.cancel();
-                                            return Err(trc::StoreEvent::FoundationdbError
-                                                .ctx(trc::Key::Reason, "Value is too large")
-                                                .ctx(trc::Key::Code, FDB_VALUE_TOO_LARGE));
+                                            known
+                                                .update(slot, move || ChunkedValue::written(value));
+                                        } else {
+                                            return Err(value_too_large());
                                         }
                                     }
                                     MergeResult::Delete => {
-                                        if prev_num_chunks > 1 {
-                                            clear_chunks(&trx, &key_buf, None).await;
+                                        let cleared = if prev_num_chunks > 1 {
+                                            clear_chunks(&mut trx, &key_buf, None).await
                                         } else {
-                                            trx.clear(&key_buf);
-                                        }
+                                            trx.clear(&key_buf)
+                                        };
+                                        cleared.map_err(into_error)?;
+                                        known.update(slot, || Some(ChunkedValue::None));
                                     }
-                                    MergeResult::Skip => (),
+                                    MergeResult::Skip => match previous {
+                                        Previous::Read(value) => {
+                                            known.update(slot, move || Some(value))
+                                        }
+                                        Previous::Prefetched(value) if slot.is_some() => {
+                                            let value = value.map_or(ChunkedValue::None, |value| {
+                                                ChunkedValue::Single(Bytes::copy_from_slice(value))
+                                            });
+                                            known.update(slot, move || Some(value));
+                                        }
+                                        Previous::Prefetched(_) | Previous::Known(_) => (),
+                                    },
                                 }
                             }
                             ValueOp::AtomicAdd(by) => {
-                                trx.atomic_op(&key_buf, &by.to_le_bytes()[..], MutationType::Add);
+                                trx.atomic_op(&key_buf, &by.to_le_bytes()[..], AtomicOp::Add)
+                                    .map_err(into_error)?;
+                                known.forget(slot);
                             }
                             ValueOp::AddAndGet(by) => {
-                                let current = match trx.get(&key_buf, false).await {
-                                    Ok(current) => current,
-                                    Err(err) => {
-                                        next_trx = Some(
-                                            self.on_write_error(
-                                                trx,
-                                                err,
-                                                &mut retry_count,
-                                                &mut start,
-                                                &mut throttle,
-                                            )
-                                            .await?,
-                                        );
-                                        continue 'retry;
+                                let read;
+                                let current = match known.get(slot) {
+                                    Some(value) => value.bytes(),
+                                    None => {
+                                        #[cfg(stalwart_tests)]
+                                        super::probe::point_read(&key_buf);
+                                        match trx.get(&key_buf).await {
+                                            Ok(current) => {
+                                                read = current;
+                                                read.as_deref()
+                                            }
+                                            Err(err) => {
+                                                self.on_write_error(
+                                                    &mut trx,
+                                                    err,
+                                                    &mut retry_count,
+                                                    &mut start,
+                                                    &mut throttle,
+                                                )
+                                                .await?;
+                                                next_trx = Some(trx);
+                                                continue 'retry;
+                                            }
+                                        }
                                     }
                                 };
                                 let num = if let Some(bytes) = current {
-                                    deserialize_i64_le(&key_buf, &bytes)? + *by
+                                    deserialize_i64_le(&key_buf, bytes)? + *by
                                 } else {
                                     *by
                                 };
-                                trx.set(&key_buf, &num.to_le_bytes()[..]);
+                                trx.set(&key_buf, &num.to_le_bytes()[..])
+                                    .map_err(into_error)?;
+                                known.forget(slot);
                                 result.push_counter_id(num);
                             }
                             ValueOp::Clear => {
-                                if class.may_be_chunked() {
-                                    clear_chunks(&trx, &key_buf, None).await;
+                                let cleared = if class.may_be_chunked() {
+                                    clear_chunks(&mut trx, &key_buf, None).await
                                 } else {
-                                    trx.clear(&key_buf);
-                                }
+                                    trx.clear(&key_buf)
+                                };
+                                cleared.map_err(into_error)?;
+                                known.forget(slot);
                             }
                         }
                     }
                     Advance::Index { field, key, set } => {
                         cursor.index_key(field, key, &mut key_buf, WITH_SUBSPACE);
 
-                        if set {
-                            trx.set(&key_buf, &[]);
+                        let written = if set {
+                            trx.set(&key_buf, &[])
                         } else {
-                            trx.clear(&key_buf);
-                        }
+                            trx.clear(&key_buf)
+                        };
+                        written.map_err(into_error)?;
                     }
                     Advance::Log { collection, set } => {
                         cursor.log_key(collection, result, &mut key_buf, WITH_SUBSPACE);
 
-                        match set {
-                            LogSet::Bytes(bytes) => {
-                                trx.set(&key_buf, bytes);
-                            }
+                        let written = match set {
+                            LogSet::Bytes(bytes) => trx.set(&key_buf, bytes),
                             LogSet::Pending(changes) => {
                                 changes.serialize_into(
                                     collection.is_prefixed(),
@@ -288,9 +330,10 @@ impl FdbStore {
                                     &mut log_scratch,
                                     &mut log_buf,
                                 );
-                                trx.set(&key_buf, &log_buf);
+                                trx.set(&key_buf, &log_buf)
                             }
-                        }
+                        };
+                        written.map_err(into_error)?;
                     }
                     Advance::ClearRange { subspace, from, to } => {
                         key_buf.clear();
@@ -301,41 +344,53 @@ impl FdbStore {
                         .serialize_into(&mut key_buf, WITH_SUBSPACE);
                         let mut end = Vec::with_capacity(to.len() + 1);
                         AnyKey { subspace, key: to }.serialize_into(&mut end, WITH_SUBSPACE);
-                        trx.clear_range(&key_buf, &end);
+                        trx.clear_range(&key_buf, &end).map_err(into_error)?;
+                        known.forget_all();
                     }
                     Advance::Assert {
                         class,
                         assert_value,
                     } => {
                         cursor.value_key(class, &mut key_buf, WITH_SUBSPACE);
+                        let slot = known.slot(&key_buf);
 
-                        let matches = match read_chunked_value(&key_buf, &trx, false).await {
-                            Ok(ChunkedValue::Single(bytes)) => assert_value.matches(bytes.as_ref()),
-                            Ok(ChunkedValue::Chunked { bytes, .. }) => {
-                                assert_value.matches(bytes.as_ref())
-                            }
-                            Ok(ChunkedValue::None) => assert_value.is_none(),
-                            Err(err) => {
-                                next_trx = Some(
+                        let mut read = None;
+                        let value = match known.get(slot) {
+                            Some(value) => value,
+                            None => match read_chunked_value(
+                                &key_buf,
+                                &mut Source::Transaction(&mut trx),
+                            )
+                            .await
+                            {
+                                Ok(value) => read.insert(value),
+                                Err(err) => {
                                     self.on_write_error(
-                                        trx,
+                                        &mut trx,
                                         err,
                                         &mut retry_count,
                                         &mut start,
                                         &mut throttle,
                                     )
-                                    .await?,
-                                );
-                                continue 'retry;
-                            }
+                                    .await?;
+                                    next_trx = Some(trx);
+                                    continue 'retry;
+                                }
+                            },
+                        };
+                        let matches = match value.bytes() {
+                            Some(bytes) => assert_value.matches(bytes),
+                            None => assert_value.is_none(),
                         };
 
                         if !matches {
-                            if let Ok(read_version) = trx.get_read_version().await {
-                                self.version.advance(read_version);
+                            if let Ok(read_version) = trx.read_version().await {
+                                self.db.advance_read_version(read_version);
                             }
-                            trx.cancel();
                             return Err(trc::StoreEvent::AssertValueFailed.into());
+                        }
+                        if let Some(value) = read {
+                            known.update(slot, move || Some(value));
                         }
                     }
                 }
@@ -343,53 +398,63 @@ impl FdbStore {
 
             let will_retry = retry_count < MAX_COMMIT_ATTEMPTS && start.elapsed() < MAX_COMMIT_TIME;
             #[cfg(stalwart_tests)]
-            let commit = match super::probe::injected_throttle(batch.priority) {
-                Some(err) => {
-                    trx.cancel();
-                    Ok(Err(err))
-                }
-                None => self.try_commit(trx).await,
-            };
+            let injected = super::probe::injected_throttle(batch.priority);
             #[cfg(not(stalwart_tests))]
-            let commit = self.try_commit(trx).await;
-            match commit? {
-                Ok(()) => return Ok(()),
-                Err(err) if throttle.waits(err) => {
-                    start = Instant::now();
-                    tokio::time::sleep(commit_backoff(MAX_COMMIT_ATTEMPTS)).await;
-                }
-                Err(err) => {
-                    retry_not_committed(err, will_retry, retry_count)?;
-                    #[cfg(stalwart_tests)]
-                    crate::write::record_retry(retry_count);
-                    tokio::time::sleep(commit_backoff(retry_count)).await;
-                    retry_count += 1;
-                }
+            let injected = None;
+            let (err, failed) = match injected {
+                Some(err) => (err, None),
+                None => match self.try_commit(trx).await {
+                    Ok(()) => return Ok(()),
+                    Err(failed) => (failed.error(), Some(failed)),
+                },
+            };
+            if throttle.waits(err) {
+                start = Instant::now();
+                tokio::time::sleep(commit_backoff(MAX_COMMIT_ATTEMPTS)).await;
+            } else {
+                retry_not_committed(err, will_retry, retry_count)?;
+                #[cfg(stalwart_tests)]
+                crate::write::record_retry(retry_count);
+                tokio::time::sleep(commit_backoff(retry_count)).await;
+                retry_count += 1;
             }
+            next_trx = failed.map(CommitError::into_transaction);
         }
     }
 
-    async fn on_write_error(
-        &self,
-        trx: Transaction,
-        err: FdbError,
+    fn transaction(&self, priority: CommitPriority) -> Transaction<'_> {
+        self.db.transaction(TransactionOptions {
+            priority: match priority {
+                CommitPriority::Default => Priority::Default,
+                CommitPriority::Background => Priority::Batch,
+            },
+            #[cfg(stalwart_tests)]
+            conflict_report: super::probe::conflict_report(),
+            ..Default::default()
+        })
+    }
+
+    async fn on_write_error<'db>(
+        &'db self,
+        trx: &mut Transaction<'db>,
+        err: fdb::Error,
         retry_count: &mut u32,
         start: &mut Instant,
         throttle: &mut Throttle,
-    ) -> trc::Result<Transaction> {
+    ) -> trc::Result<()> {
         if throttle.waits(err) {
-            trx.cancel();
             *start = Instant::now();
             tokio::time::sleep(commit_backoff(MAX_COMMIT_ATTEMPTS)).await;
-            self.db.create_trx().map_err(into_error)
+            *trx = self.transaction(throttle.priority);
+            Ok(())
         } else if !err.is_retryable() {
             Err(into_error(err))
         } else if *retry_count < MAX_COMMIT_ATTEMPTS && start.elapsed() < MAX_COMMIT_TIME {
             #[cfg(stalwart_tests)]
             crate::write::record_retry(*retry_count);
-            let trx = trx.on_error(err).await.map_err(into_error)?;
+            trx.on_error(err).await.map_err(into_error)?;
             *retry_count += 1;
-            Ok(trx)
+            Ok(())
         } else {
             Err(exhausted(into_error(err), *retry_count))
         }
@@ -397,31 +462,29 @@ impl FdbStore {
 
     pub(super) async fn commit_attempt(
         &self,
-        trx: Transaction,
+        trx: Transaction<'_>,
         retry_count: u32,
         start: Instant,
     ) -> trc::Result<bool> {
         let will_retry = retry_count < MAX_COMMIT_ATTEMPTS && start.elapsed() < MAX_COMMIT_TIME;
 
-        match self.try_commit(trx).await? {
+        match self.try_commit(trx).await {
             Ok(()) => Ok(true),
-            Err(err) => retry_not_committed(err, will_retry, retry_count).map(|()| false),
+            Err(err) => retry_not_committed(err.error(), will_retry, retry_count).map(|()| false),
         }
     }
 
-    async fn try_commit(&self, trx: Transaction) -> trc::Result<Result<(), FdbError>> {
+    async fn try_commit<'db>(&self, trx: Transaction<'db>) -> Result<(), CommitError<'db>> {
         match trx.commit().await {
-            Ok(result) => {
+            Ok(_) => {
                 #[cfg(stalwart_tests)]
                 super::probe::commit_ok();
-                let commit_version = result.committed_version().map_err(into_error)?;
-                self.version.raise_floor(commit_version);
-                Ok(Ok(()))
+                Ok(())
             }
             Err(err) => {
                 #[cfg(stalwart_tests)]
-                super::probe::commit_failed(&err).await;
-                Ok(Err(FdbError::from(err)))
+                super::probe::commit_failed(&err);
+                Err(err)
             }
         }
     }
@@ -436,51 +499,52 @@ impl FdbStore {
             let to_key = [subspace.byte() + 1];
             let mut delete_keys: Vec<Vec<u8>> = Vec::new();
             let mut last_key: Vec<u8> = Vec::new();
+            let mut read_key: Vec<u8> = Vec::new();
             let mut retry_count = 0;
             let mut start = Instant::now();
-            let mut next_trx: Option<Transaction> = None;
+            let mut next_trx = None;
 
             'scan: loop {
-                let trx = match next_trx.take() {
+                let mut trx = match next_trx.take() {
                     Some(trx) => trx,
-                    None => self.read_trx().await?,
+                    None => {
+                        self.read(ReadOptions {
+                            priority: Priority::Batch,
+                            ..Default::default()
+                        })
+                        .await?
+                    }
                 };
-                trx.set_option(options::TransactionOption::PriorityBatch)
-                    .map_err(into_error)?;
                 let mut made_progress = false;
-
                 let begin = if last_key.is_empty() {
-                    KeySelector::first_greater_or_equal(&from_key[..])
+                    Bound::Included(&from_key[..])
                 } else {
-                    KeySelector::first_greater_than(last_key.clone())
+                    Bound::Excluded(last_key.as_slice())
                 };
-                let mut values = trx.get_ranges_keyvalues(
-                    RangeOption {
-                        begin,
-                        end: KeySelector::first_greater_or_equal(&to_key[..]),
-                        mode: options::StreamingMode::WantAll,
-                        reverse: false,
-                        ..Default::default()
-                    },
-                    true,
-                );
+                let mut values =
+                    RangeCursor::new(begin, Bound::Excluded(&to_key[..]), RangeOptions::default())
+                        .map_err(into_error)?;
+                read_key.clear();
 
                 loop {
-                    match values.try_next().await {
-                        Ok(Some(value)) => {
-                            made_progress = true;
-                            last_key.clear();
-                            last_key.extend_from_slice(value.key());
+                    match values.next(trx.snapshot()).await {
+                        Ok(Some(page)) => {
+                            for KeyValue { key, value } in &page {
+                                made_progress = true;
+                                read_key.clear();
+                                read_key.extend_from_slice(key);
 
-                            if value.value().iter().all(|byte| *byte == 0) {
-                                delete_keys.push(value.key().to_vec());
+                                if value.iter().all(|byte| *byte == 0) {
+                                    delete_keys.push(key.to_vec());
 
-                                if delete_keys.len() >= PURGE_BATCH_SIZE {
-                                    drop(values);
-                                    self.purge_counters(&mut delete_keys).await?;
-                                    retry_count = 0;
-                                    start = Instant::now();
-                                    continue 'scan;
+                                    if delete_keys.len() >= PURGE_BATCH_SIZE {
+                                        drop(values);
+                                        swap(&mut last_key, &mut read_key);
+                                        self.purge_counters(&mut delete_keys).await?;
+                                        retry_count = 0;
+                                        start = Instant::now();
+                                        continue 'scan;
+                                    }
                                 }
                             }
                         }
@@ -488,6 +552,7 @@ impl FdbStore {
                         Err(err) => {
                             drop(values);
                             if made_progress {
+                                swap(&mut last_key, &mut read_key);
                                 retry_count = 0;
                                 start = Instant::now();
                             }
@@ -495,9 +560,8 @@ impl FdbStore {
                                 && retry_count < MAX_COMMIT_ATTEMPTS
                                 && start.elapsed() < MAX_COMMIT_TIME
                             {
-                                self.version.expire();
-                                let trx = trx.on_error(err).await.map_err(into_error)?;
-                                next_trx = Some(self.apply_read_version(trx).await?);
+                                trx.on_error(err).await.map_err(into_error)?;
+                                next_trx = Some(trx);
                                 retry_count += 1;
                                 continue 'scan;
                             }
@@ -523,11 +587,13 @@ impl FdbStore {
         let mut retry_count = 0;
 
         loop {
-            let trx = self.db.create_trx().map_err(into_error)?;
-            trx.set_option(options::TransactionOption::PriorityBatch)
-                .map_err(into_error)?;
+            let mut trx = self.db.transaction(TransactionOptions {
+                priority: Priority::Batch,
+                ..Default::default()
+            });
             for key in delete_keys.iter() {
-                trx.atomic_op(key, &integer, MutationType::CompareAndClear);
+                trx.atomic_op(key, &integer, AtomicOp::CompareAndClear)
+                    .map_err(into_error)?;
             }
 
             if self.commit_attempt(trx, retry_count, start).await? {
@@ -549,8 +615,8 @@ impl FdbStore {
         let mut retry_count = 0;
 
         loop {
-            let trx = self.db.create_trx().map_err(into_error)?;
-            trx.clear_range(&from, &to);
+            let mut trx = self.db.transaction(TransactionOptions::default());
+            trx.clear_range(&from, &to).map_err(into_error)?;
 
             if self.commit_attempt(trx, retry_count, start).await? {
                 return Ok(());
@@ -572,14 +638,14 @@ impl Throttle {
         }
     }
 
-    fn waits(&mut self, err: FdbError) -> bool {
+    fn waits(&mut self, err: fdb::Error) -> bool {
         self.priority == CommitPriority::Background
-            && err.code() == FDB_BATCH_THROTTLED
+            && err.error_code() == ErrorCode::BATCH_TRANSACTION_THROTTLED
             && self.since.get_or_insert_with(Instant::now).elapsed() < MAX_THROTTLED_TIME
     }
 }
 
-fn retry_not_committed(err: FdbError, will_retry: bool, retry_count: u32) -> trc::Result<()> {
+fn retry_not_committed(err: fdb::Error, will_retry: bool, retry_count: u32) -> trc::Result<()> {
     if !err.is_retryable_not_committed() {
         Err(into_error(err))
     } else if will_retry {
@@ -589,7 +655,18 @@ fn retry_not_committed(err: FdbError, will_retry: bool, retry_count: u32) -> trc
     }
 }
 
-async fn clear_chunks(trx: &Transaction, key: &[u8], from_chunk: Option<u8>) {
+#[cold]
+fn value_too_large() -> trc::Error {
+    trc::StoreEvent::FoundationdbError
+        .ctx(trc::Key::Reason, "Value is too large")
+        .ctx(trc::Key::Code, FDB_VALUE_TOO_LARGE)
+}
+
+async fn clear_chunks(
+    trx: &mut Transaction<'_>,
+    key: &[u8],
+    from_chunk: Option<u8>,
+) -> fdb::Result<()> {
     let to = KeySerializer::new(key.len() + 1)
         .write(key)
         .write(u8::MAX)
@@ -605,36 +682,33 @@ async fn clear_chunks(trx: &Transaction, key: &[u8], from_chunk: Option<u8>) {
     };
 
     #[cfg(debug_assertions)]
+    if let Ok(snapshot) = trx.snapshot().await
+        && let Ok(mut chunks) = RangeCursor::new(
+            Bound::Included(from.as_ref()),
+            Bound::Excluded(to.as_slice()),
+            RangeOptions::default(),
+        )
     {
-        let mut chunks = trx.get_ranges_keyvalues(
-            RangeOption {
-                begin: KeySelector::first_greater_or_equal(from.as_ref()),
-                end: KeySelector::first_greater_or_equal(to.as_slice()),
-                mode: options::StreamingMode::WantAll,
-                ..Default::default()
-            },
-            true,
-        );
-
-        while let Ok(Some(chunk)) = chunks.try_next().await {
-            let found = chunk.key();
-            debug_assert!(
-                found.len() == key.len() + 1 || found == key,
-                "chunk range of {key:?} holds foreign key {found:?}, clearing it would destroy data"
-            );
+        while let Ok(Some(page)) = chunks.next(snapshot).await {
+            for found in page.iter().map(|row| row.key) {
+                debug_assert!(
+                    found.len() == key.len() + 1 || found == key,
+                    "chunk range of {key:?} holds foreign key {found:?}, clearing it would destroy data"
+                );
+            }
         }
     }
 
-    trx.clear_range(from.as_ref(), &to);
+    trx.clear_range(from.as_ref(), &to)
 }
 
 async fn chunk_value(
-    trx: &Transaction,
+    trx: &mut Transaction<'_>,
     key: &mut Vec<u8>,
     value: &[u8],
     class: &ValueClass,
     prev_num_chunks: Option<usize>,
-) -> bool {
+) -> trc::Result<bool> {
     let num_chunks = if value.len() >= MAX_VALUE_SIZE {
         value.len().div_ceil(MAX_VALUE_SIZE)
     } else {
@@ -642,7 +716,7 @@ async fn chunk_value(
     };
 
     if num_chunks > u8::MAX as usize {
-        return false;
+        return Ok(false);
     }
 
     debug_assert!(
@@ -654,31 +728,33 @@ async fn chunk_value(
     if class.may_be_chunked()
         && prev_num_chunks.is_none_or(|prev_num_chunks| prev_num_chunks > num_chunks)
     {
-        clear_chunks(trx, key, Some((num_chunks - 1) as u8)).await;
+        clear_chunks(trx, key, Some((num_chunks - 1) as u8))
+            .await
+            .map_err(into_error)?;
     }
 
     if value.len() >= MAX_VALUE_SIZE {
         for (pos, chunk) in value.chunks(MAX_VALUE_SIZE).enumerate() {
             match pos.cmp(&1) {
                 Ordering::Less => {}
-                Ordering::Equal => {
-                    key.push(0);
-                }
+                Ordering::Equal => key.push(0),
                 Ordering::Greater => {
-                    *key.last_mut().unwrap() += 1;
+                    if let Some(last) = key.last_mut() {
+                        *last += 1;
+                    }
                 }
             }
-            trx.set(key, chunk);
+            trx.set(key, chunk).map_err(into_error)?;
         }
     } else {
-        trx.set(key, value);
+        trx.set(key, value).map_err(into_error)?;
     }
 
-    true
+    Ok(true)
 }
 
 enum ApplyError {
-    Retryable(FdbError),
+    Retryable(fdb::Error),
     Fatal(trc::Error),
 }
 
@@ -751,7 +827,7 @@ fn counter_keys(batch: &Batch<'_>) -> CounterKeys {
 }
 
 async fn allocate_counters(
-    trx: &Transaction,
+    trx: &mut Transaction<'_>,
     batch: &Batch<'_>,
     keys: &CounterKeys,
     result: &mut AssignedIds,
@@ -759,47 +835,86 @@ async fn allocate_counters(
     let num_accounts = batch.change_accounts.len();
     let num_reserved = num_accounts + keys.reservation_total.len();
     let mut cursors = vec![0i64; keys.reservation_total.len()];
+    let tracks_writes = keys.ranges.len() > MAX_CONCURRENT_ALLOCATIONS;
+    let mut written = Vec::new();
+    let mut snapshot = None;
+    let overshoots = |index: usize| {
+        index >= num_reserved
+            && batch
+                .bounds
+                .get(index - num_reserved)
+                .is_some_and(CounterBound::allows_overshoot)
+    };
 
     for chunk_start in (0..keys.ranges.len()).step_by(MAX_CONCURRENT_ALLOCATIONS) {
         let chunk_end = (chunk_start + MAX_CONCURRENT_ALLOCATIONS).min(keys.ranges.len());
-        let values = futures::future::try_join_all((chunk_start..chunk_end).map(|index| {
-            let snapshot = index >= num_reserved
-                && batch
-                    .bounds
-                    .get(index - num_reserved)
-                    .is_some_and(CounterBound::allows_overshoot);
-            trx.get(keys.key(index), snapshot)
+        if snapshot.is_none() && (chunk_start..chunk_end).any(overshoots) {
+            snapshot = Some(trx.snapshot().await.map_err(ApplyError::Retryable)?);
+        }
+        let mut own = [None; MAX_CONCURRENT_ALLOCATIONS];
+        if chunk_start > 0 {
+            let earlier = written.get(..chunk_start).unwrap_or_default();
+            for (slot, index) in own.iter_mut().zip(chunk_start..chunk_end) {
+                if overshoots(index) {
+                    *slot = Some(OwnWrites::fold(keys, earlier, keys.key(index)));
+                }
+            }
+        }
+        let values = try_join_all((chunk_start..chunk_end).zip(own).map(|(index, own)| {
+            let key = keys.key(index);
+            match (own, snapshot.filter(|_| overshoots(index))) {
+                (Some(OwnWrites { set: Some(_), .. }), _) => {
+                    Either::Left(Either::Left(ready(Ok(None))))
+                }
+                (_, Some(snapshot)) => {
+                    Either::Left(Either::Right(async move { snapshot.get(key).await }))
+                }
+                (_, None) => Either::Right(trx.get(key)),
+            }
         }))
         .await
         .map_err(ApplyError::Retryable)?;
 
-        for (offset, value) in values.into_iter().enumerate() {
+        for ((offset, value), own) in values.into_iter().enumerate().zip(own) {
             let index = chunk_start + offset;
             let key = keys.key(index);
-            let current = match value {
+            let mut current = match value {
                 Some(bytes) => deserialize_i64_le(key, &bytes)?,
                 None => 0,
             };
+            if let Some(own) = own {
+                current = own.apply(current);
+            }
 
-            if index < num_accounts {
+            let write = if index < num_accounts {
                 let account = &batch.change_accounts[index];
                 let change_id = current + 1;
-                trx.set(key, &change_id.to_le_bytes()[..]);
+                trx.set(key, &change_id.to_le_bytes()[..])
+                    .map_err(into_error)?;
                 result.push_change_id(*account, change_id as u64);
+                Written::Set(change_id)
             } else if index < num_reserved {
                 let key_offset = index - num_accounts;
                 let last_id = current + keys.reservation_total[key_offset];
-                trx.set(key, &last_id.to_le_bytes()[..]);
+                trx.set(key, &last_id.to_le_bytes()[..])
+                    .map_err(into_error)?;
                 cursors[key_offset] = current;
+                Written::Set(last_id)
             } else {
                 let bound = &batch.bounds[index - num_reserved];
                 let value = current.saturating_add(bound.by);
                 bound.verify(value)?;
                 if bound.allows_overshoot() {
-                    trx.atomic_op(key, &bound.by.to_le_bytes()[..], MutationType::Add);
+                    trx.atomic_op(key, &bound.by.to_le_bytes()[..], AtomicOp::Add)
+                        .map_err(into_error)?;
+                    Written::Add(bound.by)
                 } else {
-                    trx.set(key, &value.to_le_bytes()[..]);
+                    trx.set(key, &value.to_le_bytes()[..]).map_err(into_error)?;
+                    Written::Set(value)
                 }
+            };
+            if tracks_writes {
+                written.push(write);
             }
         }
     }
@@ -812,3 +927,31 @@ async fn allocate_counters(
 
     Ok(())
 }
+
+impl OwnWrites {
+    fn fold(keys: &CounterKeys, written: &[Written], key: &[u8]) -> Self {
+        written
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| keys.key(*index) == key)
+            .fold(OwnWrites::default(), |own, (_, write)| match write {
+                Written::Set(set) => OwnWrites {
+                    set: Some(*set),
+                    add: 0,
+                },
+                Written::Add(by) => OwnWrites {
+                    add: own.add.wrapping_add(*by),
+                    ..own
+                },
+            })
+    }
+
+    fn apply(self, snapshot_value: i64) -> i64 {
+        self.set.unwrap_or(snapshot_value).wrapping_add(self.add)
+    }
+}
+
+#[cfg(all(test, stalwart_tests))]
+#[rustfmt::skip]
+#[path = "../../../../../../stalwart-tests/unit/store/src/backend/foundationdb/write/tests.rs"]
+mod tests;

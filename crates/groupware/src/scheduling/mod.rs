@@ -21,6 +21,7 @@ use std::{cmp::Ordering, fmt::Display, hash::Hash};
 use utils::sanitize_email;
 
 pub mod attendee;
+pub mod busy_status;
 pub mod event_cancel;
 pub mod event_create;
 pub mod event_update;
@@ -236,7 +237,6 @@ impl Attendee<'_> {
     pub fn send_invite_messages(&self) -> bool {
         !self.email.is_local
             && self.is_server_scheduling
-            && self.rsvp.is_none_or(|rsvp| rsvp)
             && (self.force_send.is_some()
                 || self.part_stat.is_none_or(|part_stat| {
                     part_stat == &ICalendarParticipationStatus::NeedsAction
@@ -246,7 +246,6 @@ impl Attendee<'_> {
     pub fn send_update_messages(&self) -> bool {
         !self.email.is_local
             && self.is_server_scheduling
-            && self.rsvp.is_none_or(|rsvp| rsvp)
             && (self.force_send.is_some()
                 || self
                     .part_stat

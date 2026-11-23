@@ -26,9 +26,11 @@ use crate::calendar_event::{
     user::user_data_error,
     validate::{
         BooleanValue, InstanceMetadata, InstanceView, OverridePatch, OverridePointer, PropertyName,
+        validate_time_zones,
     },
 };
 use crate::changes::state::JmapCacheState;
+use crate::generate_uid;
 use calcard::{
     common::{
         PartialDateTime,
@@ -1054,7 +1056,10 @@ impl CalendarEventSet for Server {
                     self,
                     access_token,
                     &account_info,
-                    new_content.data.event_range_end(),
+                    new_content
+                        .data
+                        .event_range_end()
+                        .max(calendar_event.inner.event_range_end()),
                 )
             } else {
                 ItipSendStatus::NotRequested
@@ -2395,6 +2400,7 @@ fn update_calendar_event<'x>(
         return Err(SetError::invalid_properties()
             .with_description("Failed to convert calendar event to JSCalendar."));
     };
+    validate_time_zones(entries)?;
 
     if has_recurrence_changes
         && entries
@@ -3362,29 +3368,4 @@ fn patch_parent_ids(
             .with_property(JSCalendarProperty::CalendarIds)
             .with_description("Invalid patch operation for calendarIds.")),
     }
-}
-
-fn generate_uid() -> String {
-    let mut bytes = rand::random::<[u8; 16]>();
-    bytes[6] = (bytes[6] & 0x0f) | 0x40;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    format!(
-        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-        bytes[0],
-        bytes[1],
-        bytes[2],
-        bytes[3],
-        bytes[4],
-        bytes[5],
-        bytes[6],
-        bytes[7],
-        bytes[8],
-        bytes[9],
-        bytes[10],
-        bytes[11],
-        bytes[12],
-        bytes[13],
-        bytes[14],
-        bytes[15],
-    )
 }

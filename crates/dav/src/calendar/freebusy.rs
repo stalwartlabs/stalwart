@@ -27,6 +27,7 @@ use groupware::{
         availability::{AvailabilityCalendars, ComponentBusy, Inclusion, PrincipalRole},
         identity::ParticipantIdentityAddresses,
         privacy::EventPrivacy,
+        working_hours::WorkingHoursHandler,
     },
 };
 use http_proto::HttpResponse;
@@ -184,6 +185,7 @@ impl CalendarFreebusyRequestHandler for Server {
             let mut document_ids = RoaringBitmap::new();
             let mut selected = AHashMap::new();
             let mut role = PrincipalRole::Owner;
+            let is_itip = matches!(scope, FreeBusyScope::Account(_));
             match scope {
                 FreeBusyScope::Collection(collection) => {
                     let shared_acls =
@@ -403,6 +405,32 @@ impl CalendarFreebusyRequestHandler for Server {
                 )
                 .await
                 .caused_by(trc::location!())?;
+            }
+
+            if is_itip
+                && total_instances <= max_instances
+                && let Some(account) = self
+                    .try_account(account_id)
+                    .await
+                    .caused_by(trc::location!())?
+                && let Some(schedule) = self
+                    .working_schedule(&account)
+                    .await
+                    .caused_by(trc::location!())?
+            {
+                let unavailable = fb_entries
+                    .entry(ICalendarFreeBusyType::BusyUnavailable)
+                    .or_default();
+                for interval in schedule.unavailable(range.start, range.end) {
+                    total_instances = total_instances.saturating_add(1);
+                    if total_instances > max_instances {
+                        break;
+                    }
+                    unavailable.push(interval);
+                }
+                if unavailable.is_empty() {
+                    fb_entries.remove(&ICalendarFreeBusyType::BusyUnavailable);
+                }
             }
 
             if total_instances > max_instances {

@@ -88,6 +88,7 @@ impl<'x> Context<'x> {
             pending: Pending::Idle,
             error: None,
             rejected: false,
+            hop_limited: false,
             included: Vec::new(),
             vars_global: AHashMap::new(),
             vars_env: AHashMap::new(),
@@ -116,6 +117,7 @@ impl<'x> Context<'x> {
             num_instructions: 0,
             num_scanned_bytes: 0,
             num_out_messages: 0,
+            has_replied: false,
             last_message_id: 0,
             main_message_id: 0,
             virus_status: VirusStatus::Unknown,
@@ -443,7 +445,7 @@ impl<'x> Context<'x> {
                 let test = ops::TestValidExtList::decode(cur)?;
                 self.pos = cur.pos;
                 {
-                    let result = self.test_valid_ext_list(script, &test)?;
+                    let result = self.test_valid_ext_list(script, &test, handler)?;
                     self.test_outcome(result)
                 }
             }
@@ -1187,6 +1189,10 @@ impl<'x> Context<'x> {
 
     pub fn has_message_changed(&self) -> bool {
         self.main_message_id > 0
+    }
+
+    pub fn is_hop_limited(&self) -> bool {
+        self.hop_limited
     }
 
     pub(crate) fn user_from_field(&self) -> String {
