@@ -709,8 +709,7 @@ impl MailboxView {
                                 uid,
                                 id: document_id,
                             });
-                        }
-                        if let Some(changed) = changed.as_deref_mut() {
+                        } else if let Some(changed) = changed.as_deref_mut() {
                             changed.push(uid);
                         }
                     }

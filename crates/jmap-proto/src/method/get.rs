@@ -13,8 +13,10 @@ use crate::{
     },
     types::state::State,
 };
+use ahash::AHashSet;
 use jmap_tools::Value;
 use serde::{Deserialize, Deserializer};
+use std::hash::Hash;
 use types::id::Id;
 
 const LINEAR_DEDUP_LIMIT: usize = 16;
@@ -148,17 +150,33 @@ impl<T: JmapObject> GetRequest<T> {
     pub fn unwrap_ids(
         &mut self,
         max_objects_in_get: usize,
-    ) -> trc::Result<(Option<Vec<T::Id>>, Vec<MaybeInvalid<T::Id>>)> {
+    ) -> trc::Result<(Option<Vec<T::Id>>, Vec<MaybeInvalid<T::Id>>)>
+    where
+        T::Id: Clone + Eq + Hash,
+    {
         if let Some(ids) = self.ids.take() {
             let ids = ids.unwrap();
             if ids.len() <= max_objects_in_get {
                 let mut valid = Vec::with_capacity(ids.len());
                 let mut invalid = Vec::new();
+                let mut seen =
+                    (ids.len() > LINEAR_DEDUP_LIMIT).then(|| AHashSet::with_capacity(ids.len()));
                 for id in ids {
                     match id {
-                        MaybeIdReference::Id(id) => valid.push(id),
+                        MaybeIdReference::Id(id) => {
+                            let is_new = match &mut seen {
+                                Some(seen) => seen.insert(id.clone()),
+                                None => !valid.contains(&id),
+                            };
+                            if is_new {
+                                valid.push(id);
+                            }
+                        }
                         MaybeIdReference::Invalid(s) | MaybeIdReference::Reference(s) => {
-                            invalid.push(MaybeInvalid::Invalid(s))
+                            let id = MaybeInvalid::Invalid(s);
+                            if !invalid.contains(&id) {
+                                invalid.push(id);
+                            }
                         }
                     }
                 }

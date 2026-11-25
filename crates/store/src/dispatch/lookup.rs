@@ -61,7 +61,7 @@ impl InMemoryStore {
             InMemoryStore::Sharded(store) => store.key_set(kv).await,
             // SPDX-SnippetEnd
             InMemoryStore::Sql(_) | InMemoryStore::Static(_) | InMemoryStore::Http(_) => {
-                Err(trc::StoreEvent::NotSupported.into_err())
+                Err(self.unsupported())
             }
         }
         .caused_by(trc::location!())
@@ -88,7 +88,7 @@ impl InMemoryStore {
             InMemoryStore::Sharded(store) => store.key_incr(kv).await,
             // SPDX-SnippetEnd
             InMemoryStore::Sql(_) | InMemoryStore::Static(_) | InMemoryStore::Http(_) => {
-                Err(trc::StoreEvent::NotSupported.into_err())
+                Err(self.unsupported())
             }
         }
         .caused_by(trc::location!())
@@ -111,7 +111,7 @@ impl InMemoryStore {
             InMemoryStore::Sharded(store) => store.key_delete(key).await,
             // SPDX-SnippetEnd
             InMemoryStore::Sql(_) | InMemoryStore::Static(_) | InMemoryStore::Http(_) => {
-                Err(trc::StoreEvent::NotSupported.into_err())
+                Err(self.unsupported())
             }
         }
         .caused_by(trc::location!())
@@ -139,7 +139,7 @@ impl InMemoryStore {
             InMemoryStore::Sharded(store) => store.counter_delete(key).await,
             // SPDX-SnippetEnd
             InMemoryStore::Sql(_) | InMemoryStore::Static(_) | InMemoryStore::Http(_) => {
-                Err(trc::StoreEvent::NotSupported.into_err())
+                Err(self.unsupported())
             }
         }
         .caused_by(trc::location!())
@@ -165,7 +165,7 @@ impl InMemoryStore {
             InMemoryStore::Sharded(store) => store.key_delete_prefix(prefix).await,
             // SPDX-SnippetEnd
             InMemoryStore::Sql(_) | InMemoryStore::Static(_) | InMemoryStore::Http(_) => {
-                Err(trc::StoreEvent::NotSupported.into_err())
+                Err(self.unsupported())
             }
         }
         .caused_by(trc::location!())
@@ -205,7 +205,7 @@ impl InMemoryStore {
             InMemoryStore::Http(store) => {
                 Ok(store.get(key.into().as_str()).map(|value| T::from(value)))
             }
-            InMemoryStore::Sql(_) => Err(trc::StoreEvent::NotSupported.into_err()),
+            InMemoryStore::Sql(_) => Err(self.unsupported()),
         }
         .caused_by(trc::location!())
     }
@@ -231,7 +231,7 @@ impl InMemoryStore {
                 StaticMemoryStore::Set(set) => set.contains(key.into().as_str()),
             }),
             InMemoryStore::Http(store) => Ok(store.contains(key.into().as_str())),
-            InMemoryStore::Sql(_) => Err(trc::StoreEvent::NotSupported.into_err()),
+            InMemoryStore::Sql(_) => Err(self.unsupported()),
         }
         .caused_by(trc::location!())
     }
@@ -265,6 +265,16 @@ impl InMemoryStore {
             .await
     }
 
+    #[cold]
+    fn unsupported(&self) -> trc::Error {
+        match self {
+            InMemoryStore::Sql(Store::None) => trc::StoreEvent::NotConfigured
+                .into_err()
+                .details("The in-memory store is not available, check the startup log for errors."),
+            _ => trc::StoreEvent::NotSupported.into_err(),
+        }
+    }
+
     pub async fn try_lock(&self, prefix: u8, key: &[u8], duration: u64) -> trc::Result<bool> {
         #[cfg(stalwart_tests)]
         crate::dispatch::StoreOps::count_in_memory(self).await;
@@ -296,7 +306,7 @@ impl InMemoryStore {
             }
             // SPDX-SnippetEnd
             InMemoryStore::Sql(_) | InMemoryStore::Static(_) | InMemoryStore::Http(_) => {
-                Err(trc::StoreEvent::NotSupported.into_err())
+                Err(self.unsupported())
             }
         }
     }
@@ -332,7 +342,7 @@ impl InMemoryStore {
             }
             // SPDX-SnippetEnd
             InMemoryStore::Sql(_) | InMemoryStore::Static(_) | InMemoryStore::Http(_) => {
-                Err(trc::StoreEvent::NotSupported.into_err())
+                Err(self.unsupported())
             }
         }
     }
@@ -361,7 +371,7 @@ impl InMemoryStore {
             InMemoryStore::Sharded(store) => store.try_lease(&key, token, duration).await,
             // SPDX-SnippetEnd
             InMemoryStore::Sql(_) | InMemoryStore::Static(_) | InMemoryStore::Http(_) => {
-                Err(trc::StoreEvent::NotSupported.into_err())
+                Err(self.unsupported())
             }
         }
     }
@@ -390,7 +400,7 @@ impl InMemoryStore {
             InMemoryStore::Sharded(store) => store.renew_lease(&key, token, duration).await,
             // SPDX-SnippetEnd
             InMemoryStore::Sql(_) | InMemoryStore::Static(_) | InMemoryStore::Http(_) => {
-                Err(trc::StoreEvent::NotSupported.into_err())
+                Err(self.unsupported())
             }
         }
     }
@@ -413,7 +423,7 @@ impl InMemoryStore {
             InMemoryStore::Sharded(store) => store.release_lease(&key, token).await,
             // SPDX-SnippetEnd
             InMemoryStore::Sql(_) | InMemoryStore::Static(_) | InMemoryStore::Http(_) => {
-                Err(trc::StoreEvent::NotSupported.into_err())
+                Err(self.unsupported())
             }
         }
     }
@@ -585,3 +595,8 @@ impl From<Value<'static>> for String {
         }
     }
 }
+
+#[cfg(all(test, stalwart_tests))]
+#[rustfmt::skip]
+#[path = "../../../../../stalwart-tests/unit/store/src/dispatch/lookup/tests.rs"]
+mod tests;

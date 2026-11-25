@@ -10,7 +10,9 @@ use crate::{
         NewMetadata, ObjectMetadata,
     },
     changes::state::JmapCacheState,
-    email::{PatchResult, handle_email_patch, ingested_into_object, parse_keywords},
+    email::{
+        PatchResult, handle_email_patch, ingested_into_object, invalid_pointer, parse_keywords,
+    },
 };
 use common::{
     MAX_RECEIVED_AT, Server, auth::AccessToken, ipc::PushNotification, sharing::EffectiveAcl,
@@ -210,8 +212,11 @@ impl JmapEmailCopy for Server {
                             PatchResult::RemoveMailbox(id) => {
                                 mailboxes.retain(|mid| mid != &id);
                             }
-                            PatchResult::Invalid(set_error) => {
-                                response.not_created.append(id.clone(), set_error);
+                            PatchResult::Invalid | PatchResult::InvalidValue => {
+                                response.not_created.append(
+                                    id.clone(),
+                                    invalid_pointer(SetError::invalid_properties(), pointer),
+                                );
                                 continue 'create;
                             }
                         }

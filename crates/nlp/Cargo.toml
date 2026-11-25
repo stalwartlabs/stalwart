@@ -1,19 +1,19 @@
 [package]
 name = "nlp"
-version = "1.2.0"
+version = "1.2.1"
 edition = "2024"
 
 [dependencies]
-xxhash-rust = { version = "0.8.19", features = ["xxh3"] }
+xxhash-rust = { version = "0.8.21", features = ["xxh3"] }
 serde = { version = "1.0", features = ["derive"]}
-ahash = { version = "0.8.12", features = ["serde"] }
+ahash = { version = "0.8.14", features = ["serde"] }
 whatlang = "0.18" # Language detection
 rust-stemmers = "1.2" # Stemmers
 jieba-rs = "0.11" # Chinese stemmer
 psl = "2"
 memchr = "2.8"
 hashify = "0.3"
-rand = "0.10.3"
+rand = "0.10.4"
 rkyv.workspace = true
 
 [features]

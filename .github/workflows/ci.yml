@@ -41,7 +41,7 @@ jobs:
       contents: read
       attestations: write
       packages: write
-    needs: [linux, windows, macos, freebsd]
+    needs: [linux, windows, freebsd]
     if: github.event_name == 'push' || inputs.Docker
     steps:
       - name: Install Cosign
@@ -375,7 +375,7 @@ jobs:
       matrix:
         include:
           - target: aarch64-apple-darwin
-          - target: x86_64-apple-darwin
+          # - target: x86_64-apple-darwin
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -395,7 +395,7 @@ jobs:
       - name: Upload Artifacts
         uses: actions/upload-artifact@v7.0.1
         with:
-          name: artifact-${{matrix.target}}
+          name: macos-artifact-${{matrix.target}}
           path: artifacts
 
   freebsd:
@@ -461,7 +461,7 @@ jobs:
       contents: write
       attestations: write
     if: github.event_name == 'push' || inputs.Release
-    needs: [linux, windows, macos, freebsd]
+    needs: [linux, windows, freebsd]
     runs-on: ubuntu-latest
     steps:
       # Must run before artifacts are downloaded — checkout cleans the workspace.
@@ -545,9 +545,50 @@ jobs:
           draft: ${{ startsWith(github.ref, 'refs/tags/') || null }}
           body_path: release_body.md
 
+  release-macos:
+    name: Release / macOS
+    permissions:
+      id-token: write
+      contents: write
+      attestations: write
+    if: github.event_name == 'push' || inputs.Release
+    needs: [macos, release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: archive
+          pattern: macos-artifact-*
+
+      - name: Compress
+        run: |
+          set -eux
+          cd archive
+          for dir in macos-artifact-*; do
+              target="${dir#macos-artifact-}"
+              tar -C "$dir" -czf "stalwart-${target}.tar.gz" stalwart
+          done
+
+      - name: Attest binary
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: archive/*.tar.gz
+
+      - name: Use cosign to sign existing artifacts
+        uses: sigstore/gh-action-sigstore-python@v3.5.0
+        with:
+          inputs: archive/*.tar.gz
+
+      - name: Upload to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'nightly' }}
+        run: gh release upload "$TAG" archive/*.tar.gz archive/*.sigstore.json --clobber --repo "${{ github.repository }}"
+
   publish:
     name: Publish release
-    needs: [linux, windows, macos, freebsd, multiarch, release]
+    needs: [linux, windows, freebsd, multiarch, release]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     permissions:
@@ -560,7 +601,7 @@ jobs:
 
   cleanup:
     name: Cleanup failed release
-    needs: [linux, windows, macos, freebsd, multiarch, release]
+    needs: [linux, windows, freebsd, multiarch, release]
     if: failure() && startsWith(github.ref, 'refs/tags/') && github.run_attempt >= 3
     runs-on: ubuntu-latest
     permissions:

@@ -597,7 +597,7 @@ fn set_date(
             }
             if let Some(midnight) = partner_date
                 .filter(|_| has_time(component, &partner))
-                .and_then(|date| date.to_zoned(TimeZone::UTC).ok())
+                .and_then(|date| date.to_zoned_datetime(TimeZone::UTC).ok())
             {
                 remove_all(component, &partner);
                 component
@@ -713,7 +713,7 @@ fn materialize_due(component: &mut ICalendarComponent, pending: ImpliedDue) {
             entry
         }
         _ => {
-            let Ok(midnight) = due.to_zoned(TimeZone::UTC) else {
+            let Ok(midnight) = due.to_zoned_datetime(TimeZone::UTC) else {
                 return;
             };
             utc_target().entry(ICalendarProperty::Due, midnight.timestamp(), true)

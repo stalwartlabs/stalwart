@@ -1,6 +1,6 @@
 [package]
 name = "trc"
-version = "1.2.0"
+version = "1.2.1"
 edition = "2024"
 
 [dependencies]
@@ -14,7 +14,7 @@ reqwest = { version = "0.13", default-features = false, features = ["rustls", "h
 rtrb = "0.4.1"
 parking_lot = "0.13.0"
 tokio = { version = "1.54", features = ["net", "macros"] }
-ahash = "0.8.12"
+ahash = "0.8.14"
 rkyv.workspace = true
 compact_str = "0.10.0"
 hashify = "0.3"

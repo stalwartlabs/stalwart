@@ -12,7 +12,7 @@ use mail_auth::crypto::{Ed25519Key, MlDsa44Key};
 use mail_auth::dkim::generate::DkimKeyPair;
 use registry::schema::enums::DkimSignatureType;
 use registry::schema::structs::DkimSignature;
-use rsa::pkcs1::{DecodeRsaPublicKey, der::Document};
+use rsa::{PublicKey as RsaPublicKey, pkcs1::DecodeRsaPublicKey, pkcs8::EncodePublicKey};
 use store::rand::distr::Alphanumeric;
 use store::rand::{self, RngExt};
 
@@ -53,11 +53,14 @@ pub async fn generate_dkim_public_key(key: &DkimSignature) -> trc::Result<String
         DkimSignature::Dkim1RsaSha256(_) | DkimSignature::Dkim2RsaSha256(_) => {
             rsa_key_parse(pem.as_bytes())
                 .and_then(|pk| {
-                    Document::from_pkcs1_der(&pk.public_key()).map_err(|err| {
-                        trc::EventType::Dkim(trc::DkimEvent::BuildError)
-                            .into_err()
-                            .reason(err)
-                    })
+                    RsaPublicKey::from_pkcs1_der(&pk.public_key())
+                        .map_err(|err| err.to_string())
+                        .and_then(|key| key.to_public_key_der().map_err(|err| err.to_string()))
+                        .map_err(|err| {
+                            trc::EventType::Dkim(trc::DkimEvent::BuildError)
+                                .into_err()
+                                .reason(err)
+                        })
                 })
                 .map(|pk| STANDARD.encode(pk.as_bytes()))
         }
@@ -142,7 +145,7 @@ pub fn generate_dkim_selector(
     template: &str,
     sig_type: DkimSignatureType,
 ) -> Result<String, String> {
-    let now = Timestamp::now().to_zoned(TimeZone::UTC);
+    let now = Timestamp::now().to_zoned_datetime(TimeZone::UTC);
     let mut result = Vec::with_capacity(template.len());
     let mut chars = template.as_bytes();
 

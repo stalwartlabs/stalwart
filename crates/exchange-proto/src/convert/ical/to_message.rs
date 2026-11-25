@@ -412,7 +412,7 @@ impl<'c> Writer<'_, 'c> {
         if let Some(time) = other_text(main, SEQUENCE_TIME_NAME).and_then(|value| {
             DateTime::strptime(SEQUENCE_TIME_FORMAT, value.trim())
                 .ok()?
-                .to_zoned(TimeZone::UTC)
+                .to_zoned_datetime(TimeZone::UTC)
                 .ok()
         }) {
             set_time(bag, SEQUENCE_TIME.key(), time.timestamp());

@@ -110,13 +110,13 @@ pub(super) fn instance_start(props: &PropBag) -> Result<Option<Timestamp>, Conve
     let Some(OwnedPropValue::Time(start)) = props.get_any(START_WHOLE.prop()) else {
         return Err(ConvertError::Unsupported);
     };
-    let time = timestamp(*start).to_zoned(TimeZone::UTC).time();
+    let time = timestamp(*start).to_zoned_datetime(TimeZone::UTC).time();
     i16::try_from(year)
         .ok()
         .zip(i8::try_from(month).ok())
         .zip(i8::try_from(day).ok())
         .and_then(|((year, month), day)| Date::new(year, month, day).ok())
-        .and_then(|date| date.to_datetime(time).to_zoned(TimeZone::UTC).ok())
+        .and_then(|date| date.to_datetime(time).to_zoned_datetime(TimeZone::UTC).ok())
         .map(|zoned| Some(zoned.timestamp()))
         .ok_or(ConvertError::Unsupported)
 }

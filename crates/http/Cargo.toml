@@ -1,6 +1,6 @@
 [package]
 name = "http"
-version = "1.2.0"
+version = "1.2.1"
 edition = "2024"
 
 [dependencies]
@@ -26,7 +26,7 @@ mail-parser = { version = "1.0", features = ["full_encoding"] }
 mail-builder = { version = "2.0" }
 mail-auth = { version = "0.16.0", features = ["generate", "arc"] }
 tokio = { version = "1.54", features = ["rt", "time"] }
-hyper = { version = "1.12.0", features = ["server", "http1", "http2"] }
+hyper = { version = "1.13.0", features = ["server", "http1", "http2"] }
 hyper-util = { version = "0.1.21", features = ["tokio"] }
 http-body-util = "0.1.5"
 async-stream = "0.3.6"
@@ -36,7 +36,7 @@ encodify = "1.0"
 sha2 = "0.11"
 rkyv.workspace = true
 form-data = { version = "0.6.0", features = ["sync"], default-features = false }
-mime = "0.3.17"
+mime = "0.3.18"
 percent-encoding = "2.3.2"
 hashify = { version = "0.3" }
 compact_str = "0.10.0"

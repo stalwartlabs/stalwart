@@ -2,6 +2,36 @@
 
 All notable changes to this project will be documented in this file. This project adheres to [Semantic Versioning](http://semver.org/).
 
+## [1.2.1] - 2026-11-25
+
+## Fixed
+- MTA: in a cluster, an in-memory store error while locking a queued message now retries within seconds instead of parking the message for ten minutes.
+- IMAP:
+  - IDLE no longer sends unsolicited `FETCH` responses for newly arrived messages, which made Thunderbird and Evolution skip messages announced by `EXISTS` while another command was running.
+  - Mailbox names and other strings containing CR or LF are sent as literals, so a shared mailbox name can no longer inject response lines into another user's session.
+- JMAP:
+  - `/get` methods list an id requested more than once only once in `list` or `notFound`.
+  - `Mailbox/set` refuses two sibling mailboxes with the same name created or renamed in the same request.
+  - `Email/set` rejects with `invalidPatch` a keyword or mailbox pointer deeper than one level, and an update that both replaces and patches `keywords` or `mailboxIds`.
+- Sieve:
+  - JMAP reports invalid scripts as `invalidSieve`, a `require` of an unsupported extension is refused, invalid header names in tests no longer fail compilation, and imap4flags variable names require `variables`.
+  - `redirect` keeps an empty envelope sender (`MAIL FROM:<>`), and `reject` sends a failure MDN instead of a DSN; `ereject` still produces a DSN. Mail rules now reject with `ereject` (protocol-level refusal) instead of `reject`.
+- Calendar: iMIP invitation and update emails now label UTC and fixed-offset times that have no `TZID` with their time zone.
+- Exchange:
+  - MAPI: Outlook in cached mode no longer shows an empty body for messages whose HTML part is larger than 32 KiB; properties over 32 KiB are now included in cached-mode downloads and FastTransfer copies.
+  - EWS: folders now return the `PR_ENTRYID` and `PR_ATTR_HIDDEN` extended properties when requested, which Apple Mail needs to sync the folder list without crashing.
+  - ActiveSync: Find reads its search text as KQL, so iOS Mail server searches such as `from:"name" OR subject:"name"` find messages again.
+  - ActiveSync: SendMail, SmartReply and SmartForward accept a raw `message/rfc822` body at every protocol version, so Outlook for iOS and Android can send mail.
+  - ActiveSync: refused SendMail, SmartReply and SmartForward requests, and requests refused for their body type or invalid WBXML, are logged as `http.error` (debug) with the command, the ActiveSync status and the reason.
+  - ActiveSync: a calendar Add with an empty `Recurrence` element is stored as a single event instead of failing with status 6, so iOS Calendar can create events again.
+- Auth: password logins on a domain served by an OpenID Connect directory now fail as invalid credentials (`535 5.7.8` over SMTP) and count toward the authentication auto-ban.
+- Security:
+  - `x:AppPassword/set` and `x:ApiKey/set` only update or delete credentials of their own type, so an app password or API key can no longer change the account password or remove its TOTP.
+  - S/MIME key harvesting limits the nesting of the signed content, so a crafted signed message can no longer crash the server with a stack overflow.
+  - `Mailbox/set` requires the share right for pointer patches into `shareWith`, so a sharee without `mayShare` can no longer change a mailbox's permissions.
+- Store maintenance: a trace retention longer than the time since 2021-09-22 no longer fails the task with "Invalid id cutoff for global unindex".
+- In-memory store: when the configured store is not available (for example Stalwart Keep was unreachable at startup), operations now fail with "not configured" and point to the startup log instead of "Operation not supported by store".
+
 ## [1.2.0] - 2026-11-23
 
 Upgrade instructions:

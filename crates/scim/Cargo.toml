@@ -1,6 +1,6 @@
 [package]
 name = "scim"
-version = "1.2.0"
+version = "1.2.1"
 edition = "2024"
 
 [dependencies]
@@ -17,10 +17,10 @@ types = { path = "../types" }
 utils = { path = "../utils" }
 trc = { path = "../trc" }
 compact_str = "0.10.0"
-hyper = { version = "1.12.0", features = ["server", "http1", "http2"] }
+hyper = { version = "1.13.0", features = ["server", "http1", "http2"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-xxhash-rust = { version = "0.8.19", features = ["xxh3"] }
+xxhash-rust = { version = "0.8.21", features = ["xxh3"] }
 icu_locale = "2.4.0"
 
 [dev-dependencies]

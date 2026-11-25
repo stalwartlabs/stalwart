@@ -28,6 +28,7 @@ use hyper::{
     header::{CONTENT_ENCODING, HeaderValue as HttpHeaderValue, VARY},
 };
 use std::{
+    fmt::Debug,
     io::Write,
     pin::Pin,
     task::{Context, Poll},
@@ -67,6 +68,26 @@ pub enum EasResponse {
 
 impl EasResponse {
     pub fn status(command: Command, status: Status) -> Self {
+        EasResponse::Status { command, status }
+    }
+
+    #[cold]
+    #[inline(never)]
+    pub fn refused(
+        session_id: u64,
+        account_id: u32,
+        command: Command,
+        status: Status,
+        reason: &dyn Debug,
+    ) -> Self {
+        trc::event!(
+            Http(trc::HttpEvent::Error),
+            SpanId = session_id,
+            AccountId = account_id,
+            Details = command.name(),
+            Code = status.0,
+            Reason = format!("{reason:?}"),
+        );
         EasResponse::Status { command, status }
     }
 

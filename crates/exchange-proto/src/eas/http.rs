@@ -181,6 +181,7 @@ impl From<Truncated> for HttpError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BodyKind {
     Wbxml,
+    Mime,
     Empty,
     Other,
 }
@@ -197,15 +198,15 @@ pub fn classify_body(content_type: Option<&[u8]>, len: usize) -> BodyKind {
         .next()
         .unwrap_or_default()
         .trim_ascii();
-    if hashify::set_ignore_case!(
+    hashify::map_ignore_case!(
         media,
-        "application/vnd.ms-sync.wbxml",
-        "application/vnd.ms-sync"
-    ) {
-        BodyKind::Wbxml
-    } else {
-        BodyKind::Other
-    }
+        BodyKind,
+        "application/vnd.ms-sync.wbxml" => BodyKind::Wbxml,
+        "application/vnd.ms-sync" => BodyKind::Wbxml,
+        "message/rfc822" => BodyKind::Mime,
+    )
+    .copied()
+    .unwrap_or(BodyKind::Other)
 }
 
 pub fn parse_request_line<'a>(

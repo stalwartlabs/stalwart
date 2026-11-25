@@ -757,7 +757,7 @@ fn compact(instant: Timestamp) -> Compact {
 fn local_as_utc(zoned: ZonedDateTime) -> EasDateTime {
     let local = zoned.naive_local();
     let seconds = local
-        .to_zoned(TimeZone::UTC)
+        .to_zoned_datetime(TimeZone::UTC)
         .map_or(0, |zoned| zoned.timestamp().as_second());
     EasDateTime(UtcSeconds(seconds), 0)
 }

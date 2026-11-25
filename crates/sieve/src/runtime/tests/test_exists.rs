@@ -11,7 +11,7 @@ use crate::{
     runtime::{
         RuntimeError,
         message::parts::{PartCursor, Scope},
-        tests::test_header::HeaderKeys,
+        tests::test_header::{HeaderKeys, InvalidHeaderNames},
     },
 };
 use mail_parser::HeaderName;
@@ -23,7 +23,11 @@ impl<'x> Context<'x> {
         script: &'x Sieve<'x>,
         test: &ops::TestExists,
     ) -> Result<TestResult, RuntimeError> {
-        let header_names = self.parse_header_names(script, test.header_names)?;
+        let Some(header_names) =
+            self.parse_header_names(script, test.header_names, InvalidHeaderNames::Fail)?
+        else {
+            return Ok(TestResult::Bool(test.is_not));
+        };
         let Some(part) = self.current_part() else {
             return Ok(TestResult::Bool(test.is_not));
         };

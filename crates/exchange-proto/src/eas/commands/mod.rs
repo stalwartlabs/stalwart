@@ -219,8 +219,11 @@ pub(crate) fn read_id<'a>(
     tag: Tag,
     max: usize,
 ) -> Result<Cow<'a, str>, CommandError> {
-    let value = read_str(dec, tag)?;
-    if value.len() <= max {
+    read_str(dec, tag).and_then(|value| bounded(value, tag, max))
+}
+
+pub(crate) fn bounded<T: AsRef<str>>(value: T, tag: Tag, max: usize) -> Result<T, CommandError> {
+    if value.as_ref().len() <= max {
         Ok(value)
     } else {
         Err(CommandError::InvalidValue { tag })

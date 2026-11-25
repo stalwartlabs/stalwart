@@ -39,11 +39,11 @@ const CAPABILITY_NAMES: [&str; 20] = [
     "editheader",
     "envelope",
     "environment",
+    "ereject",
     "fileinto",
     "imap4flags",
     "mailboxid",
     "mime",
-    "reject",
     "relational",
     "spamtest",
     "spamtestplus",
@@ -130,11 +130,11 @@ impl Capabilities {
     const EDITHEADER: u32 = 1 << 4;
     const ENVELOPE: u32 = 1 << 5;
     const ENVIRONMENT: u32 = 1 << 6;
-    const FILEINTO: u32 = 1 << 7;
-    const IMAP4FLAGS: u32 = 1 << 8;
-    const MAILBOXID: u32 = 1 << 9;
-    const MIME: u32 = 1 << 10;
-    const REJECT: u32 = 1 << 11;
+    const EREJECT: u32 = 1 << 7;
+    const FILEINTO: u32 = 1 << 8;
+    const IMAP4FLAGS: u32 = 1 << 9;
+    const MAILBOXID: u32 = 1 << 10;
+    const MIME: u32 = 1 << 11;
     const RELATIONAL: u32 = 1 << 12;
     const SPAMTEST: u32 = 1 << 13;
     const SPAMTESTPLUS: u32 = 1 << 14;
@@ -251,7 +251,7 @@ impl Capabilities {
             };
         }
         if actions.reject.is_some() {
-            caps |= Self::REJECT;
+            caps |= Self::EREJECT;
         }
         caps
     }
@@ -860,7 +860,7 @@ fn write_actions(
         out.push_str("discard;\r\n");
     }
     if let Some(reject) = &actions.reject {
-        out.push_str("reject ");
+        out.push_str("ereject ");
         write_quoted(out, &reject.reason);
         out.push_str(";\r\n");
     }

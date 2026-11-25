@@ -32,6 +32,12 @@ use smallvec::SmallVec;
 pub(crate) type HeaderNames<'x> = SmallVec<[HeaderName<'x>; 4]>;
 pub(crate) type HeaderKeys<'x> = SmallVec<[HeaderKey<'x>; 4]>;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum InvalidHeaderNames {
+    Skip,
+    Fail,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum MimeOptsRef<'x> {
     None,
@@ -49,7 +55,9 @@ impl<'x> Context<'x> {
         handler: &mut H,
     ) -> Result<TestResult, RuntimeError> {
         let key_list = self.eval_keys(script, test.key_list)?;
-        let header_list = self.parse_header_names(script, test.header_list)?;
+        let header_list = self
+            .parse_header_names(script, test.header_list, InvalidHeaderNames::Skip)?
+            .unwrap_or_default();
         let mime_opts = self.mime_opts(script, &test.mime_opts)?;
         let comparator = Comparator::from_code(test.comparator);
         let match_type = test.match_type.match_type();
@@ -235,7 +243,8 @@ impl<'x> Context<'x> {
         &self,
         script: &'x Sieve<'x>,
         header_names: Range,
-    ) -> Result<HeaderNames<'x>, RuntimeError> {
+        invalid: InvalidHeaderNames,
+    ) -> Result<Option<HeaderNames<'x>>, RuntimeError> {
         let mut result = HeaderNames::with_capacity(header_names.len as usize);
         let mut iter = script.recs(header_names)?;
         while let Some(rec) = iter.next() {
@@ -248,10 +257,12 @@ impl<'x> Context<'x> {
                     self.parse_header_name_str(self.intern_cow(value.into_string()))
                 {
                     result.push(header_name);
+                } else if invalid == InvalidHeaderNames::Fail {
+                    return Ok(None);
                 }
             }
         }
-        Ok(result)
+        Ok(Some(result))
     }
 
     #[inline(always)]

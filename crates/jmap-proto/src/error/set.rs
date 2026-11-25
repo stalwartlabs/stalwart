@@ -106,8 +106,8 @@ pub enum SetErrorType {
     CannotUnsend,
     #[serde(rename = "alreadyExists")]
     AlreadyExists,
-    #[serde(rename = "invalidScript")]
-    InvalidScript,
+    #[serde(rename = "invalidSieve")]
+    InvalidSieve,
     #[serde(rename = "sieveIsActive")]
     SieveIsActive,
     #[serde(rename = "addressBookHasContents")]
@@ -157,7 +157,7 @@ impl SetErrorType {
             SetErrorType::ForbiddenToSend => "forbiddenToSend",
             SetErrorType::CannotUnsend => "cannotUnsend",
             SetErrorType::AlreadyExists => "alreadyExists",
-            SetErrorType::InvalidScript => "invalidScript",
+            SetErrorType::InvalidSieve => "invalidSieve",
             SetErrorType::SieveIsActive => "sieveIsActive",
             SetErrorType::AddressBookHasContents => "addressBookHasContents",
             SetErrorType::NodeHasChildren => "nodeHasChildren",

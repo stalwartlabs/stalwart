@@ -277,8 +277,7 @@ impl ExchangeSubmit for Server {
 }
 
 impl SubmitOnce {
-    pub fn eas(device_slot: u16, client_id: &str) -> Option<Self> {
-        let bytes = client_id.as_bytes();
+    pub fn eas(device_slot: u16, bytes: &[u8]) -> Option<Self> {
         let len = u8::try_from(bytes.len()).ok().filter(|len| *len > 0)?;
         let mut once = SubmitOnce {
             device_slot,

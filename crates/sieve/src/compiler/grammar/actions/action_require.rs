@@ -20,7 +20,9 @@ impl CompilerState<'_> {
         capability: Capability,
         token_info: &TokenInfo,
     ) -> Result<(), CompileError> {
-        if self.compiler.disabled_capabilities.contains(&capability) {
+        if self.compiler.disabled_capabilities.contains(&capability)
+            || (self.compiler.unknown_capabilities_disabled && capability.is_unknown())
+        {
             return Err(CompileError {
                 line_num: token_info.line_num,
                 line_pos: token_info.line_pos,

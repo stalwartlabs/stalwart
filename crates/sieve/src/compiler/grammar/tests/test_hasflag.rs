@@ -38,6 +38,8 @@ impl CompilerState<'_> {
         let mut is_local = false;
 
         let maybe_variables;
+        let variables_line_num;
+        let variables_line_pos;
 
         loop {
             let token_info = self.tokens.unwrap_next()?;
@@ -72,6 +74,8 @@ impl CompilerState<'_> {
                     is_local = true;
                 }
                 _ => {
+                    variables_line_num = token_info.line_num;
+                    variables_line_pos = token_info.line_pos;
                     maybe_variables = self.parse_raw_strings_token(token_info)?;
                     break;
                 }
@@ -87,6 +91,7 @@ impl CompilerState<'_> {
                 if !maybe_variables.is_empty() {
                     let line_num = *line_num;
                     let line_pos = *line_pos;
+                    self.validate_flag_variable_name(variables_line_num, variables_line_pos)?;
 
                     let mut variable_list = Vec::with_capacity(maybe_variables.len());
                     for variable in maybe_variables {

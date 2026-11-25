@@ -5,7 +5,7 @@
  */
 
 use crate::compiler::{
-    CompileError, ErrorType, Value,
+    CompileError, Value,
     grammar::{
         Capability, Comparator,
         actions::action_mime::MimeOpts,
@@ -129,14 +129,7 @@ impl CompilerState<'_> {
                 _ => {
                     if header_list.is_none() {
                         let headers = self.parse_raw_strings_token(token_info)?;
-                        let (headers, all_valid) = self.resolve_header_names(headers);
-                        if !all_valid {
-                            return Err(self
-                                .tokens
-                                .unwrap_next()?
-                                .custom(ErrorType::InvalidHeaderName));
-                        }
-                        header_list = headers.into();
+                        header_list = self.resolve_header_names(headers).into();
                     } else {
                         key_list = self.parse_raw_strings_token(token_info)?;
                         break;

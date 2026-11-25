@@ -86,13 +86,17 @@ pub fn event_from_eas(ical: &mut ICalendar, update: &EventUpdate<'_>) -> Result<
         .position(|component| component.component_type == ICalendarComponentType::VEvent)
         .ok_or(ConvertError::Unsupported)?;
     let all_day = calendar.all_day_event == Some(ALL_DAY);
+    let recurrence = calendar
+        .recurrence
+        .as_ref()
+        .filter(|recurrence| recurrence.recurrence_type.is_some());
     let (start, end) = event_times(calendar, all_day, update.now)?;
     let zone = if all_day && update.version >= ProtocolVersion::V160 {
         Zone::Named(TimeTarget {
             tz: Tz::UTC,
             tzid: None,
         })
-    } else if calendar.recurrence.is_some() {
+    } else if recurrence.is_some() {
         Zone::decode(calendar.timezone.as_ref()).resolved(start)
     } else {
         Zone::decode(calendar.timezone.as_ref())
@@ -116,7 +120,7 @@ pub fn event_from_eas(ical: &mut ICalendar, update: &EventUpdate<'_>) -> Result<
     };
     let mut dtstart = zone.time_entry(ICalendarProperty::Dtstart, start, all_day)?;
     let form = time_form(&dtstart);
-    let (start, end, rule) = match &calendar.recurrence {
+    let (start, end, rule) = match recurrence {
         Some(recurrence) => {
             check_occurrences(recurrence)?;
             let rule = recurrence_rule(recurrence, utc(start), &zone, form)?;
@@ -185,7 +189,7 @@ pub fn event_from_eas(ical: &mut ICalendar, update: &EventUpdate<'_>) -> Result<
     if let Some(OrEmpty(Some(minutes))) = calendar.reminder {
         add_alarm(ical, main, minutes)?;
     }
-    if calendar.recurrence.is_some() {
+    if recurrence.is_some() {
         let exceptions = calendar
             .exceptions
             .as_ref()

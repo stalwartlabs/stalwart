@@ -72,6 +72,7 @@ impl Scripting {
                     .map(|cap| cap.as_str()),
             )
             .without_capability(Capability::ImapSieve)
+            .without_unknown_capabilities()
             .register_functions(&mut fnc_map_untrusted);
 
         // Parse untrusted runtime

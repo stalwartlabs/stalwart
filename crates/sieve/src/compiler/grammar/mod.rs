@@ -436,6 +436,14 @@ impl CompilerState<'_> {
             || (capability != &Capability::Ihave && self.compiler.no_capability_check)
     }
 
+    pub(crate) fn validate_flag_variable_name(
+        &mut self,
+        line_num: usize,
+        line_pos: usize,
+    ) -> Result<(), CompileError> {
+        self.validate_argument(0, Capability::Variables.into(), line_num, line_pos)
+    }
+
     #[inline(always)]
     pub(crate) fn reset_param_check(&mut self) {
         self.param_check.fill(false);
@@ -500,21 +508,17 @@ impl CompilerState<'_> {
         self.header_name(header).ok()
     }
 
-    pub(crate) fn resolve_header_names(&mut self, headers: Vec<RawValue>) -> (Vec<Value>, bool) {
-        let mut all_valid = true;
-        let mut values = Vec::with_capacity(headers.len());
-
-        for header in headers {
-            match self.header_name(header) {
-                Ok(value) => values.push(value),
-                Err(value) => {
-                    all_valid = false;
-                    values.push(value);
-                }
-            }
+    pub(crate) fn resolve_test_header_name(&mut self, header: RawValue) -> Value {
+        match self.header_name(header) {
+            Ok(value) | Err(value) => value,
         }
+    }
 
-        (values, all_valid)
+    pub(crate) fn resolve_header_names(&mut self, headers: Vec<RawValue>) -> Vec<Value> {
+        headers
+            .into_iter()
+            .map(|header| self.resolve_test_header_name(header))
+            .collect()
     }
 
     pub(crate) fn validate_match(
@@ -585,6 +589,13 @@ impl AddressPart {
 }
 
 impl Capability {
+    pub(crate) fn is_unknown(&self) -> bool {
+        matches!(
+            self,
+            Capability::Other(_) | Capability::Comparator(Comparator::Other(_))
+        )
+    }
+
     pub(crate) fn id(&self) -> u8 {
         match self {
             Capability::Envelope => 0,

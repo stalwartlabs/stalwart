@@ -5,7 +5,7 @@
  */
 
 use crate::compiler::{
-    CompileError, ErrorType, Value,
+    CompileError, Value,
     grammar::instruction::{CompilerState, MapLocalVars},
     lexer::{Token, word::Word},
 };
@@ -59,15 +59,7 @@ impl CompilerState<'_> {
                     self.validate_argument(2, None, line_num, line_pos)?;
                     self.tokens.next();
                     let header = self.parse_raw_string()?;
-                    dup_match = match self.resolve_header_name(header) {
-                        Some(header) => DupMatch::Header(header),
-                        None => {
-                            return Err(self
-                                .tokens
-                                .unwrap_next()?
-                                .custom(ErrorType::InvalidHeaderName));
-                        }
-                    };
+                    dup_match = DupMatch::Header(self.resolve_test_header_name(header));
                 }
                 Token::Tag(Word::UniqueId) => {
                     self.validate_argument(2, None, line_num, line_pos)?;

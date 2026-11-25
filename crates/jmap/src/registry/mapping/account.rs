@@ -530,11 +530,10 @@ pub(crate) async fn account_set(
 
             // Process updates
             'outer: for (id, value) in set.update.drain(..) {
-                if let Some(mut old_credential) =
-                    account.credentials.values_mut().find(|credential| {
-                        credential.credential_id() == id
-                            && !matches!(credential, Credential::Passkey(_))
-                    })
+                if let Some(mut old_credential) = account
+                    .credentials
+                    .values_mut()
+                    .find(|credential| is_secondary_credential(credential, set.object_type, id))
                 {
                     let mut credential = old_credential.clone();
                     let mut unpatched_properties = VecMap::new();
@@ -619,24 +618,11 @@ pub(crate) async fn account_set(
                     .credentials
                     .0
                     .inner
-                    .iter_mut()
-                    .position(|c| c.value.credential_id() == id)
+                    .iter()
+                    .position(|c| is_secondary_credential(&c.value, set.object_type, id))
                 {
-                    let credentials = &mut account.credentials.inner_mut().inner;
-                    if !matches!(
-                        credentials[idx].value,
-                        Credential::Password(_) | Credential::Passkey(_)
-                    ) {
-                        credentials.remove(idx);
-                        set.response.destroyed.push(id);
-                    } else {
-                        set.response.not_destroyed.append(
-                            id,
-                            SetError::forbidden().with_description(
-                                "Users are not allowed to destroy their own credentials.",
-                            ),
-                        );
-                    }
+                    account.credentials.inner_mut().inner.remove(idx);
+                    set.response.destroyed.push(id);
                 } else {
                     set.response.not_destroyed.append(id, SetError::not_found());
                 }
@@ -943,6 +929,14 @@ pub(crate) async fn credential_query(
     }
 
     Ok(response)
+}
+
+fn is_secondary_credential(credential: &Credential, object_type: ObjectType, id: Id) -> bool {
+    match (credential, object_type) {
+        (Credential::AppPassword(credential), ObjectType::AppPassword)
+        | (Credential::ApiKey(credential), ObjectType::ApiKey) => credential.credential_id == id,
+        _ => false,
+    }
 }
 
 pub(crate) fn validate_credential_permissions(

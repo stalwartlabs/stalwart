@@ -1,6 +1,6 @@
 [package]
 name = "imap_proto"
-version = "1.2.0"
+version = "1.2.1"
 edition = "2024"
 
 [dependencies]
@@ -9,7 +9,7 @@ utils = { path = "../utils" }
 mail-parser = { version = "1.0", features = ["full_encoding"] } 
 ahash = { version = "0.8" }
 encodify = "1.0"
-jiff = "0.2.38"
+jiff = "1.0.3"
 trc = { path = "../trc" }
 hashify = { version = "0.3" }
 compact_str = "0.10.0"

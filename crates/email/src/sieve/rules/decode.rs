@@ -472,10 +472,7 @@ impl<'s> Decoder<'s> {
                     actions.discard = true;
                     ActionSlot::Discard
                 }
-                Op::Reject {
-                    ereject: false,
-                    reason,
-                } => {
+                Op::Reject { reason, .. } => {
                     actions.reject = Some(MailRuleReject {
                         reason: self.string(reason)?,
                     });

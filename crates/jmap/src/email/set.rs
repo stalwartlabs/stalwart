@@ -12,9 +12,9 @@ use crate::{
     blob::download::{BlobAccess, BlobDownload},
     changes::state::JmapCacheState,
     email::{
-        PatchResult,
+        PatchResult, conflicting_patch,
         grouped::{GroupedIngest, QueuedEmail},
-        handle_email_patch, ingested_into_object, parse_keywords,
+        handle_email_patch, ingested_into_object, invalid_pointer, parse_keywords,
     },
 };
 use common::{
@@ -299,8 +299,11 @@ impl EmailSet for Server {
                             PatchResult::RemoveMailbox(id) => {
                                 mailboxes.retain(|mid| mid != &id);
                             }
-                            PatchResult::Invalid(set_error) => {
-                                response.not_created.append(id, set_error);
+                            PatchResult::Invalid | PatchResult::InvalidValue => {
+                                response.not_created.append(
+                                    id,
+                                    invalid_pointer(SetError::invalid_properties(), pointer),
+                                );
                                 continue 'create;
                             }
                         }
@@ -1219,6 +1222,9 @@ impl EmailSet for Server {
                 };
                 let mut new_data = data.clone();
                 let mut has_keyword_replace = false;
+                let mut has_keyword_patch = false;
+                let mut has_mailbox_replace = false;
+                let mut has_mailbox_patch = false;
 
                 for (property, mut value) in object.into_expanded_object() {
                     if let Err(err) = response.resolve_self_references(&mut value, 0, false) {
@@ -1228,6 +1234,13 @@ impl EmailSet for Server {
 
                     match (property, value) {
                         (Key::Property(EmailProperty::MailboxIds), Value::Object(ids)) => {
+                            if has_mailbox_patch {
+                                response
+                                    .not_updated
+                                    .append(id, conflicting_patch(EmailProperty::MailboxIds));
+                                continue 'update;
+                            }
+                            has_mailbox_replace = true;
                             new_data.set_mailboxes(
                                 ids.into_expanded_boolean_set()
                                     .filter_map(|id| {
@@ -1243,6 +1256,12 @@ impl EmailSet for Server {
                             );
                         }
                         (Key::Property(EmailProperty::Keywords), keywords @ Value::Object(_)) => {
+                            if has_keyword_patch {
+                                response
+                                    .not_updated
+                                    .append(id, conflicting_patch(EmailProperty::Keywords));
+                                continue 'update;
+                            }
                             has_keyword_replace = true;
                             match parse_keywords(keywords) {
                                 Ok(keywords) => new_data.set_keywords(keywords),
@@ -1254,20 +1273,50 @@ impl EmailSet for Server {
                         }
                         (Key::Property(EmailProperty::Pointer(pointer)), value) => {
                             match handle_email_patch(&pointer, value) {
+                                PatchResult::SetKeyword(_) | PatchResult::RemoveKeyword(_)
+                                    if has_keyword_replace =>
+                                {
+                                    response
+                                        .not_updated
+                                        .append(id, conflicting_patch(EmailProperty::Keywords));
+                                    continue 'update;
+                                }
+                                PatchResult::AddMailbox(_) | PatchResult::RemoveMailbox(_)
+                                    if has_mailbox_replace =>
+                                {
+                                    response
+                                        .not_updated
+                                        .append(id, conflicting_patch(EmailProperty::MailboxIds));
+                                    continue 'update;
+                                }
                                 PatchResult::SetKeyword(keyword) => {
+                                    has_keyword_patch = true;
                                     new_data.add_keyword(keyword.clone());
                                 }
                                 PatchResult::RemoveKeyword(keyword) => {
+                                    has_keyword_patch = true;
                                     new_data.remove_keyword(keyword);
                                 }
                                 PatchResult::AddMailbox(id) => {
+                                    has_mailbox_patch = true;
                                     new_data.add_mailbox(MessageUid::new_unassigned(id));
                                 }
                                 PatchResult::RemoveMailbox(id) => {
+                                    has_mailbox_patch = true;
                                     new_data.remove_mailbox(id);
                                 }
-                                PatchResult::Invalid(set_error) => {
-                                    response.not_updated.append(id, set_error);
+                                PatchResult::Invalid => {
+                                    response.not_updated.append(
+                                        id,
+                                        invalid_pointer(SetError::invalid_patch(), pointer),
+                                    );
+                                    continue 'update;
+                                }
+                                PatchResult::InvalidValue => {
+                                    response.not_updated.append(
+                                        id,
+                                        invalid_pointer(SetError::invalid_properties(), pointer),
+                                    );
                                     continue 'update;
                                 }
                             }

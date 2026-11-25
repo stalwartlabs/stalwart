@@ -37,7 +37,7 @@ impl SieveScriptValidate for Server {
                         .map(|bytes| self.core.sieve.untrusted_compiler.compile(&bytes))
                     {
                         Some(Ok(_)) => None,
-                        Some(Err(err)) => SetError::new(SetErrorType::InvalidScript)
+                        Some(Err(err)) => SetError::new(SetErrorType::InvalidSieve)
                             .with_description(err.to_string())
                             .into(),
                         None => SetError::new(SetErrorType::BlobNotFound).into(),

@@ -9,9 +9,10 @@ use std::borrow::Cow;
 use super::appdata::email::{Forwardee, Forwardees};
 use super::appdata::{Body, Value};
 use super::{
-    Children, CommandError, MAX_ID_LEN, MAX_LONG_ID_LEN, read_bytes, read_date, read_id, read_str,
-    required,
+    Children, CommandError, MAX_ID_LEN, MAX_LONG_ID_LEN, bounded, read_bytes, read_date, read_id,
+    read_str, required,
 };
+use crate::eas::http::RequestParams;
 use crate::eas::status::Status;
 use crate::eas::tokens::tag::{airsyncbase as asb, compose_mail as cm, rights_management as rm};
 use crate::eas::tokens::{ProtocolVersion, Tag};
@@ -116,9 +117,57 @@ impl<'a> ComposeRequest<'a> {
         }
         Ok(request)
     }
+
+    pub fn from_mime(
+        params: &'a RequestParams<'_>,
+        mime: &'a [u8],
+        command: ComposeCommand,
+    ) -> Result<Self, CommandError> {
+        let source = match command {
+            ComposeCommand::SendMail => None,
+            ComposeCommand::SmartReply | ComposeCommand::SmartForward => {
+                Some(Source::from_params(params)?)
+            }
+        };
+        Ok(ComposeRequest {
+            command,
+            client_id: Cow::Borrowed(""),
+            source,
+            account_id: None,
+            save_in_sent: params.save_in_sent,
+            replace_mime: false,
+            mime: Cow::Borrowed(mime),
+            template_id: None,
+            body: None,
+            forwardees: Vec::new(),
+        })
+    }
 }
 
 impl<'a> Source<'a> {
+    fn from_params(params: &'a RequestParams<'_>) -> Result<Self, CommandError> {
+        let id = |value: &'a Option<Cow<'_, str>>, tag: Tag, max: usize| {
+            value
+                .as_deref()
+                .map(|value| bounded(value, tag, max).map(Cow::Borrowed))
+                .transpose()
+        };
+        Ok(Source {
+            folder_id: id(&params.collection_id, cm::FOLDER_ID, MAX_ID_LEN)?,
+            item_id: id(&params.item_id, cm::ITEM_ID, MAX_ID_LEN)?,
+            long_id: id(&params.long_id, cm::LONG_ID, MAX_LONG_ID_LEN)?,
+            instance_id: params
+                .occurrence
+                .as_deref()
+                .map(|occurrence| {
+                    EasDateTime::parse(occurrence.as_bytes()).ok_or(CommandError::InvalidDate {
+                        tag: cm::INSTANCE_ID,
+                    })
+                })
+                .transpose()?,
+        })
+    }
+
     fn parse(dec: &mut Decoder<'a>) -> Result<Self, CommandError> {
         let mut source = Source::default();
         let mut children = Children::of(dec);

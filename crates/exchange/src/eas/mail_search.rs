@@ -8,6 +8,7 @@ use super::{context::EasContext, sync::estimate::mail_folder};
 use crate::folders::FolderNode;
 use ::email::cache::{email::MessageCacheAccess, mailbox::MailboxCacheAccess};
 use common::{MessageStoreCache, Server, cache::email::MessageRef};
+use exchange_proto::eas::kql::{FreeText, KqlNode, KqlProperty};
 use nlp::language::Language;
 use smallvec::SmallVec;
 use std::mem;
@@ -43,6 +44,12 @@ pub enum TextFields {
     Email,
     Calendar,
     Contacts,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum TextTarget {
+    Fields,
+    Email(&'static [EmailSearchField]),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -173,26 +180,86 @@ impl MailSearch {
         }
     }
 
+    pub fn push_free_text(&mut self, text: &str, language: Language) {
+        let nodes = match FreeText::parse(text, |value| {
+            TextToken::parse(value).is_some_and(|token| token.term(TokenPosition::Inner).is_some())
+        }) {
+            FreeText::Keywords(text) => {
+                self.push_text(text, language);
+                return;
+            }
+            FreeText::Query(nodes) => nodes,
+        };
+        let last = nodes
+            .iter()
+            .rposition(|node| matches!(node, KqlNode::Term { .. }));
+        for (index, node) in nodes.iter().enumerate() {
+            match *node {
+                KqlNode::And => self.text.push(SearchFilter::And),
+                KqlNode::Or => self.text.push(SearchFilter::Or),
+                KqlNode::Not => self.text.push(SearchFilter::Not),
+                KqlNode::End => self.text.push(SearchFilter::End),
+                KqlNode::Term { property, value } => {
+                    let position = if last == Some(index) {
+                        TokenPosition::Last
+                    } else {
+                        TokenPosition::Inner
+                    };
+                    let target = property.map_or(TextTarget::Fields, |property| {
+                        TextTarget::Email(property_fields(property))
+                    });
+                    if let Some(term) =
+                        TextToken::parse(value).and_then(|token| token.term(position))
+                    {
+                        self.push_term_in(term, target, language);
+                    }
+                }
+            }
+        }
+    }
+
     fn push_term(&mut self, term: TextTerm<'_>, language: Language) {
+        self.push_term_in(term, TextTarget::Fields, language);
+    }
+
+    fn push_term_in(&mut self, term: TextTerm<'_>, target: TextTarget, language: Language) {
         match term {
             TextTerm::Prefix { word, prefix } => {
                 self.text.push(SearchFilter::Or);
-                self.fields.push(&mut self.text, word, language);
-                self.fields
-                    .push(&mut self.text, &format!("{prefix}*"), language);
+                self.push_target(target, word, language);
+                self.push_target(target, &format!("{prefix}*"), language);
                 self.text.push(SearchFilter::End);
             }
             TextTerm::Split { word, head, tail } => {
                 self.text.push(SearchFilter::Or);
-                self.fields.push(&mut self.text, word, language);
+                self.push_target(target, word, language);
                 self.text.push(SearchFilter::And);
-                self.fields.push(&mut self.text, head, language);
-                self.fields
-                    .push(&mut self.text, &format!("{tail}*"), language);
+                self.push_target(target, head, language);
+                self.push_target(target, &format!("{tail}*"), language);
                 self.text.push(SearchFilter::End);
                 self.text.push(SearchFilter::End);
             }
-            TextTerm::Word(word) => self.fields.push(&mut self.text, word, language),
+            TextTerm::Word(word) => self.push_target(target, word, language),
+        }
+    }
+
+    fn push_target(&mut self, target: TextTarget, text: &str, language: Language) {
+        match target {
+            TextTarget::Fields => self.fields.push(&mut self.text, text, language),
+            TextTarget::Email(fields) => {
+                self.text.push(SearchFilter::Or);
+                self.text.extend(fields.iter().map(|field| {
+                    let language = match field {
+                        EmailSearchField::From
+                        | EmailSearchField::To
+                        | EmailSearchField::Cc
+                        | EmailSearchField::Bcc => Language::None,
+                        _ => language,
+                    };
+                    SearchFilter::has_text(field.clone(), text, language)
+                }));
+                self.text.push(SearchFilter::End);
+            }
         }
     }
 
@@ -283,6 +350,29 @@ impl MailSearch {
                 .thread_id
                 .is_none_or(|thread_id| message.thread_id() == thread_id)
             && self.mailbox_of(message).is_some()
+    }
+}
+
+fn property_fields(property: KqlProperty) -> &'static [EmailSearchField] {
+    match property {
+        KqlProperty::From => &[EmailSearchField::From],
+        KqlProperty::To => &[EmailSearchField::To],
+        KqlProperty::Cc => &[EmailSearchField::Cc],
+        KqlProperty::Bcc => &[EmailSearchField::Bcc],
+        KqlProperty::Participants => &[
+            EmailSearchField::From,
+            EmailSearchField::To,
+            EmailSearchField::Cc,
+            EmailSearchField::Bcc,
+        ],
+        KqlProperty::Recipients => &[
+            EmailSearchField::To,
+            EmailSearchField::Cc,
+            EmailSearchField::Bcc,
+        ],
+        KqlProperty::Subject => &[EmailSearchField::Subject],
+        KqlProperty::Body => &[EmailSearchField::Body],
+        KqlProperty::Attachment => &[EmailSearchField::Attachment],
     }
 }
 

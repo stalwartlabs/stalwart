@@ -1,15 +1,15 @@
 [package]
 name = "telemetry"
-version = "1.2.0"
+version = "1.2.1"
 edition = "2024"
 
 [dependencies]
 trc = { path = "../trc" }
-ahash = "0.8.12"
+ahash = "0.8.14"
 bytes = "1"
-http = "1.1"
+http = "1.5"
 http-body-util = "0.1.5"
-hyper = { version = "1.12.0", features = ["client", "http1", "http2"] }
+hyper = { version = "1.13.0", features = ["client", "http1", "http2"] }
 hyper-util = { version = "0.1.21", features = ["tokio"] }
 tokio = { version = "1.54", features = ["net", "time", "rt", "sync", "macros"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["aws_lc_rs", "tls12"] }
@@ -18,7 +18,7 @@ rustls-pki-types = "1"
 encodify = "1.0"
 httpdate = "1.0.3"
 memchr = "2.8"
-itoa = "1.0.18"
+itoa = "1.0.19"
 zmij = "1.0.23"
 hashify = "0.3"
 

@@ -383,6 +383,7 @@ impl Compiler {
             functions: AHashMap::new(),
             no_capability_check: false,
             disabled_capabilities: AHashSet::new(),
+            unknown_capabilities_disabled: false,
         }
     }
 
@@ -506,6 +507,11 @@ impl Compiler {
         for capability in capabilities {
             self.unset_capability(capability);
         }
+        self
+    }
+
+    pub fn without_unknown_capabilities(mut self) -> Self {
+        self.unknown_capabilities_disabled = true;
         self
     }
 }

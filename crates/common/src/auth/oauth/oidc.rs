@@ -141,6 +141,16 @@ impl Server {
         audience: impl Into<String>,
         claims: StandardClaims,
     ) -> trc::Result<String> {
+        let signing_key = self
+            .core
+            .oauth
+            .oidc_signing_secret
+            .as_ref()
+            .ok_or_else(|| {
+                trc::AuthEvent::Error
+                    .into_err()
+                    .details("No OIDC signing key available")
+            })?;
         let now = now() as i64;
 
         jsonwebtoken::encode(
@@ -157,7 +167,7 @@ impl Server {
                 exp: now + self.core.oauth.oidc_expiry_id_token as i64,
                 private: claims,
             },
-            &self.core.oauth.oidc_signing_secret,
+            signing_key,
         )
         .map_err(|err| {
             trc::AuthEvent::Error

@@ -10,7 +10,7 @@ use crate::{
     backend::{hash::HashAlgorithm, verify::SignatureScheme},
     der::{
         DerError, oid,
-        reader::{Encoding, Reader, Tlv},
+        reader::{Encoding, MAX_DEPTH, Reader, Tlv},
         tag,
     },
     error::VerifyError,
@@ -95,18 +95,19 @@ struct SignerInfo<'x> {
     signature: &'x [u8],
 }
 
-fn hash_econtent(econtent: Tlv<'_>, hasher: &mut impl Sink) -> Result<(), DerError> {
+fn hash_econtent(econtent: Tlv<'_>, hasher: &mut impl Sink, depth: usize) -> Result<(), DerError> {
     match econtent.tag {
         tag::OCTET_STRING => {
             hasher.put(econtent.content);
             Ok(())
         }
-        CONSTRUCTED_OCTET_STRING => {
+        CONSTRUCTED_OCTET_STRING if depth < MAX_DEPTH => {
             for chunk in econtent.reader() {
-                hash_econtent(chunk?, hasher)?;
+                hash_econtent(chunk?, hasher, depth + 1)?;
             }
             Ok(())
         }
+        CONSTRUCTED_OCTET_STRING => Err(DerError::TooDeep),
         _ => Err(DerError::UnexpectedTag),
     }
 }
@@ -287,7 +288,7 @@ pub(crate) fn verify<'x>(
         let mut hasher = hash.hasher();
         match (&content, econtent) {
             (Content::Detached(data), None) => Canonical::new(&mut hasher).put(data),
-            (Content::Encapsulated, Some(econtent)) => hash_econtent(econtent, &mut hasher)?,
+            (Content::Encapsulated, Some(econtent)) => hash_econtent(econtent, &mut hasher, 0)?,
             _ => return Err(DerError::UnexpectedTag),
         }
         Ok(hasher.finish())

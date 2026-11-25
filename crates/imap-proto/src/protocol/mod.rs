@@ -205,8 +205,7 @@ const fn byte_class_table(needles: &[u8]) -> [bool; 256] {
     table
 }
 
-static NEEDS_ESCAPE: [bool; 256] = byte_class_table(b"\\\"\0");
-static NEEDS_LITERAL: [bool; 256] = byte_class_table(b"\\\"\r\n\0");
+static NEEDS_ESCAPE: [bool; 256] = byte_class_table(b"\\\"\r\n\0");
 
 #[inline(always)]
 fn find_escape(text: &[u8]) -> Option<usize> {
@@ -220,15 +219,24 @@ fn without_nul(text: &str) -> String {
 }
 
 pub fn quoted_string(buf: &mut Vec<u8>, text: &str) {
+    let start = buf.len();
     let mut rest = text.as_bytes();
     buf.push(b'"');
     while let Some(pos) = find_escape(rest) {
         let (head, tail) = rest.split_at(pos);
         buf.extend_from_slice(head);
         let mut tail = tail.iter();
-        if let Some(&ch) = tail.next().filter(|&&ch| ch != 0) {
-            buf.push(b'\\');
-            buf.push(ch);
+        match tail.next() {
+            Some(b'\r' | b'\n') => {
+                buf.truncate(start);
+                quoted_or_literal_string(buf, text);
+                return;
+            }
+            Some(&ch) if ch != 0 => {
+                buf.push(b'\\');
+                buf.push(ch);
+            }
+            _ => {}
         }
         rest = tail.as_slice();
     }
@@ -250,7 +258,7 @@ pub(crate) fn quoted_mailbox_name(buf: &mut Vec<u8>, name: &str, is_utf8: bool) 
 
 pub fn quoted_or_literal_string(buf: &mut Vec<u8>, text: &str) {
     let bytes = text.as_bytes();
-    if !bytes.iter().any(|&ch| NEEDS_LITERAL[ch as usize]) {
+    if find_escape(bytes).is_none() {
         buf.push(b'"');
         buf.extend_from_slice(bytes);
         buf.push(b'"');

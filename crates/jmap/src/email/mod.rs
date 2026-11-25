@@ -16,6 +16,10 @@ use types::{id::Id, keyword::Keyword};
 #[rustfmt::skip]
 #[path = "../../../../../stalwart-tests/unit/jmap/src/email/contention.rs"]
 mod contention;
+#[cfg(all(test, stalwart_tests))]
+#[rustfmt::skip]
+#[path = "../../../../../stalwart-tests/unit/jmap/src/email/patch.rs"]
+mod patch;
 pub mod copy;
 pub mod get;
 mod grouped;
@@ -41,7 +45,8 @@ pub(crate) enum PatchResult<'x> {
     RemoveKeyword(&'x Keyword),
     AddMailbox(u32),
     RemoveMailbox(u32),
-    Invalid(SetError<EmailProperty>),
+    Invalid,
+    InvalidValue,
 }
 
 pub(crate) fn parse_keywords<'x>(
@@ -66,31 +71,58 @@ pub(crate) fn handle_email_patch<'x>(
 ) -> PatchResult<'x> {
     let mut pointer_iter = pointer.iter();
 
-    match (pointer_iter.next(), pointer_iter.next()) {
-        (
-            Some(JsonPointerItem::Key(Key::Property(EmailProperty::Keywords))),
-            Some(JsonPointerItem::Key(Key::Property(EmailProperty::Keyword(keyword)))),
-        ) => match value {
-            Value::Bool(true) => return PatchResult::SetKeyword(keyword),
-            Value::Bool(false) | Value::Null => return PatchResult::RemoveKeyword(keyword),
-            _ => (),
-        },
+    match (
+        pointer_iter.next(),
+        pointer_iter.next(),
+        pointer_iter.next(),
+    ) {
+        (Some(JsonPointerItem::Key(Key::Property(EmailProperty::Keywords))), Some(item), None) => {
+            match (item, value) {
+                (JsonPointerItem::Invalid(_), _) => PatchResult::Invalid,
+                (
+                    JsonPointerItem::Key(Key::Property(EmailProperty::Keyword(keyword))),
+                    Value::Bool(true),
+                ) => PatchResult::SetKeyword(keyword),
+                (
+                    JsonPointerItem::Key(Key::Property(EmailProperty::Keyword(keyword))),
+                    Value::Bool(false) | Value::Null,
+                ) => PatchResult::RemoveKeyword(keyword),
+                _ => PatchResult::InvalidValue,
+            }
+        }
         (
             Some(JsonPointerItem::Key(Key::Property(EmailProperty::MailboxIds))),
-            Some(JsonPointerItem::Key(Key::Property(EmailProperty::IdValue(id)))),
-        ) => match value {
-            Value::Bool(true) => return PatchResult::AddMailbox(id.document_id()),
-            Value::Bool(false) | Value::Null => {
-                return PatchResult::RemoveMailbox(id.document_id());
-            }
-            _ => (),
+            Some(item),
+            None,
+        ) => match (item, value) {
+            (JsonPointerItem::Invalid(_), _) => PatchResult::Invalid,
+            (
+                JsonPointerItem::Key(Key::Property(EmailProperty::IdValue(id))),
+                Value::Bool(true),
+            ) => PatchResult::AddMailbox(id.document_id()),
+            (
+                JsonPointerItem::Key(Key::Property(EmailProperty::IdValue(id))),
+                Value::Bool(false) | Value::Null,
+            ) => PatchResult::RemoveMailbox(id.document_id()),
+            _ => PatchResult::InvalidValue,
         },
-        _ => (),
+        _ => PatchResult::Invalid,
     }
+}
 
-    PatchResult::Invalid(
-        SetError::invalid_properties()
-            .with_property(EmailProperty::Pointer(pointer.clone()))
-            .with_description("Invalid patch value".to_string()),
-    )
+#[cold]
+pub(crate) fn invalid_pointer(
+    error: SetError<EmailProperty>,
+    pointer: JsonPointer<EmailProperty>,
+) -> SetError<EmailProperty> {
+    error
+        .with_property(EmailProperty::Pointer(pointer))
+        .with_description("Invalid patch value")
+}
+
+#[cold]
+pub(crate) fn conflicting_patch(property: EmailProperty) -> SetError<EmailProperty> {
+    SetError::invalid_patch()
+        .with_property(property)
+        .with_description("A property cannot be replaced and patched in the same update.")
 }

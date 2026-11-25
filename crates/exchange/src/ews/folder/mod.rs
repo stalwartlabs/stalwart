@@ -14,16 +14,19 @@ use self::props::{EXTENDED_PROPS, FolderProp, change_time};
 use super::context::{EwsContext, MailboxOwner};
 use super::filter::PropValue;
 use crate::{
+    cache::ExchangeCacheFetch,
     folders::{
         ContainerClass, FolderEntry, FolderNode, FolderTree, SpecialFolder, access::ViewRights,
         rights::FolderRights,
     },
+    mapi::{emsmdb::store::StoreGuids, ids::MapiId},
     store::{FolderKind, FolderRef},
 };
 use ahash::AHashMap;
-use common::{GroupwareResources, Server};
+use common::{GroupwareResources, Server, cache::exchange::ExchangeAccountCache};
 use email::cache::MessageCacheFetch;
 use exchange_proto::{
+    common::base64::{base64_encode_into, base64_encoded_len},
     ews::{
         MessageXml, Status,
         schema::{BaseShape, DistinguishedFolderName, ResponseCode, UnindexedField},
@@ -53,6 +56,7 @@ const MAILBOX_ITEM_NOT_FOUND: &str = "The specified object was not found in the 
 const NON_EXISTENT_MAILBOX: &str = "The SMTP address has no mailbox associated with it.";
 const SMTP_ADDRESS: &str = "SmtpAddress";
 const SEEN_BIT: u32 = 1 << SEEN;
+const ENTRY_ID_CAPACITY: usize = 46;
 
 #[derive(Clone, Copy)]
 pub(crate) enum FolderSelector<'r, 'a> {
@@ -337,6 +341,17 @@ impl FolderFieldSet {
         }
         mask
     };
+    const EXTENDED_ENTRY_ID: u32 = {
+        let mut mask = 0;
+        let mut index = 0;
+        while index < EXTENDED_PROPS.len() {
+            if EXTENDED_PROPS[index].2.is_entry_id() {
+                mask |= 1 << (Self::EXTENDED_SHIFT + index);
+            }
+            index += 1;
+        }
+        mask
+    };
     const DEFAULT: u32 = Self::ID | Self::NAME | Self::TOTAL | Self::CHILDREN | Self::UNREAD;
     const ALL: u32 = Self::DEFAULT | Self::PARENT | Self::CLASS | Self::RIGHTS;
 
@@ -385,6 +400,10 @@ impl FolderFieldSet {
 
     pub fn with_counts(self) -> Self {
         FolderFieldSet(self.0 | Self::TOTAL | Self::EXTENDED_TIMES)
+    }
+
+    fn needs_entry_ids(self) -> bool {
+        self.has(Self::EXTENDED_ENTRY_ID)
     }
 
     fn needs_change_times(self) -> bool {
@@ -549,12 +568,45 @@ fn children_count(resources: Option<&GroupwareResources>, id: u32) -> usize {
     resources.map_or(0, |resources| resources.children_ids(id).count())
 }
 
+pub(crate) struct FolderEntryIds {
+    exchange: Arc<ExchangeAccountCache>,
+    guids: StoreGuids,
+}
+
+impl FolderEntryIds {
+    pub async fn load(
+        server: &Server,
+        ctx: &EwsContext,
+        fields: FolderFieldSet,
+    ) -> trc::Result<Option<Self>> {
+        if !fields.needs_entry_ids() {
+            return Ok(None);
+        }
+        let account_id = ctx.account.account_id;
+        let exchange = server.get_cached_exchange(account_id).await?;
+        let guids = StoreGuids::new(exchange.store_instance, account_id);
+        Ok(Some(FolderEntryIds { exchange, guids }))
+    }
+
+    fn base64(&self, node: FolderNode) -> Option<String> {
+        let mut entry_id = Vec::with_capacity(ENTRY_ID_CAPACITY);
+        self.guids
+            .folder_entry_id(MapiId::from_folder(&self.exchange, node))
+            .encode(&mut entry_id)
+            .ok()?;
+        let mut out = Vec::with_capacity(base64_encoded_len(entry_id.len()));
+        base64_encode_into(&entry_id, &mut out);
+        String::from_utf8(out).ok()
+    }
+}
+
 pub(crate) struct FolderRenderer<'t> {
     pub tree: &'t FolderTree,
     pub access: &'t ViewRights,
     pub account_id: u32,
     pub fields: FolderFieldSet,
     pub counts: FolderCounts,
+    pub entry_ids: Option<FolderEntryIds>,
 }
 
 impl<'t> FolderRenderer<'t> {
@@ -614,7 +666,7 @@ impl<'t> FolderRenderer<'t> {
                                 target: XPropTarget::Tag(*tag),
                                 ptype: *ptype,
                             },
-                            value: XPropValue::Single(self.value(entry, *prop)?.to_text()),
+                            value: XPropValue::Single(self.extended_text(entry, *prop)?),
                         })
                     })
                     .collect(),
@@ -624,8 +676,17 @@ impl<'t> FolderRenderer<'t> {
         kind.wrap(out)
     }
 
+    fn extended_text(&self, entry: &'t FolderEntry, prop: FolderProp) -> Option<Cow<'t, str>> {
+        match prop {
+            FolderProp::EntryId => self.entry_ids.as_ref()?.base64(entry.node).map(Cow::Owned),
+            prop => self.value(entry, prop).map(PropValue::to_text),
+        }
+    }
+
     pub fn value(&self, entry: &'t FolderEntry, prop: FolderProp) -> Option<PropValue<'t>> {
         Some(match prop {
+            FolderProp::EntryId => return None,
+            FolderProp::AttrHidden => PropValue::Bool(false),
             FolderProp::DisplayName => PropValue::Text(&entry.name),
             FolderProp::Class => {
                 let class = entry.class.as_str();

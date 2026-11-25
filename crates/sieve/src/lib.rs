@@ -46,6 +46,7 @@ pub struct Compiler {
     pub(crate) max_includes: usize,
     pub(crate) no_capability_check: bool,
     pub(crate) disabled_capabilities: AHashSet<Capability>,
+    pub(crate) unknown_capabilities_disabled: bool,
     pub(crate) functions: AHashMap<String, (u32, u32)>,
 }
 

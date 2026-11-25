@@ -185,7 +185,7 @@ fn local_midnight(value: ZonedDateTime) -> Option<Timestamp> {
     value
         .naive_local()
         .date()
-        .to_zoned(TimeZone::UTC)
+        .to_zoned_datetime(TimeZone::UTC)
         .ok()
         .map(|zoned| zoned.timestamp())
 }

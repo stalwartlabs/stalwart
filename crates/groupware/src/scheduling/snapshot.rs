@@ -11,6 +11,7 @@ use crate::scheduling::{
     RecurrenceId,
 };
 use ahash::AHashMap;
+use calcard::common::DateTimeResult;
 use calcard::icalendar::{
     ICalendar, ICalendarDuration, ICalendarParameterName, ICalendarParameterValue,
     ICalendarParticipationStatus, ICalendarProperty, ICalendarScheduleAgentValue, ICalendarValue,
@@ -322,15 +323,19 @@ pub fn itip_snapshot<'x, 'y>(
                                     ItipEntryValue::Text(v.as_str())
                                 }
                                 ICalendarValue::PartialDateTime(date) => {
-                                    let tz = tz_resolver
-                                        .get_or_insert_with(|| ical.build_tz_resolver())
-                                        .resolve_or_default(tz_id);
+                                    let resolved = date.to_date_time();
+                                    let tz = match resolved.as_ref().and_then(DateTimeResult::tz) {
+                                        Some(tz) => tz,
+                                        None => tz_resolver
+                                            .get_or_insert_with(|| ical.build_tz_resolver())
+                                            .resolve_or_default(tz_id),
+                                    };
                                     ItipEntryValue::DateTime(ItipDateTime {
                                         date,
                                         tz_id,
                                         tz_code: tz.as_id(),
-                                        timestamp: date
-                                            .to_date_time_with_tz(tz)
+                                        timestamp: resolved
+                                            .and_then(|dt| dt.to_date_time_with_tz(tz))
                                             .map(|dt| dt.timestamp())
                                             .unwrap_or_else(|| {
                                                 date.to_timestamp().unwrap_or_default()

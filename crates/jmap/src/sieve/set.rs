@@ -753,7 +753,7 @@ impl SieveScriptSet for Server {
                                 if let ErrorType::ScriptTooLong = &err.error_type() {
                                     SetErrorType::TooLarge
                                 } else {
-                                    SetErrorType::InvalidScript
+                                    SetErrorType::InvalidSieve
                                 },
                             )
                             .with_description(err.to_string())));

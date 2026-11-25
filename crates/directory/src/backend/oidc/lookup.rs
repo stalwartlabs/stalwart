@@ -40,7 +40,7 @@ const NON_ACCESS_MARKERS: [(&str, &str); 12] = [
 
 impl OpenIdDirectory {
     pub async fn authenticate(&self, _credentials: &Credentials) -> trc::Result<Account> {
-        Err(AuthEvent::Error
+        Err(AuthEvent::Failed
             .into_err()
             .reason("Unsupported credentials type for OIDC backend"))
     }

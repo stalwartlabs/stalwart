@@ -60,7 +60,9 @@ use exchange_proto::{
     ids::{Globcnt, ReplGuid},
     mapi::{
         ErrorCode,
-        prop::{NamedPropMap, PropId, PropKeyRef, PropTag, PropType, PropValue, tags},
+        prop::{
+            NamedPropMap, OwnedPropValue, PropId, PropKeyRef, PropTag, PropType, PropValue, tags,
+        },
     },
 };
 use groupware::cache::GroupwareCache;
@@ -725,7 +727,7 @@ fn write_message(
         .contains(SynchronizationFlags::BEST_BODY)
         .then(|| native_body_id(bag))
         .flatten();
-    write_message_props(encoder, bag, filter, native, names)?;
+    write_message_props(encoder, bag, &content.props, filter, native, names)?;
     write_children(encoder, content, filter, names, 0)
 }
 
@@ -749,6 +751,7 @@ fn carries_value(bag: &PropBag, tag: PropTag) -> bool {
 pub(super) fn write_message_props(
     encoder: &mut FxEncoder,
     bag: &PropBag,
+    content: &ContentBag,
     filter: Option<&TagFilter>,
     native: Option<PropId>,
     names: &dyn NamedPropMap,
@@ -762,12 +765,32 @@ pub(super) fn write_message_props(
             continue;
         }
         match value {
+            PropOut::Value(PropValue::Error(ErrorCode::NOT_ENOUGH_MEMORY)) => {
+                let Some((key, value)) = oversized_value(content, tag, names) else {
+                    continue;
+                };
+                encoder.prop_owned(key, value, names)
+            }
             PropOut::Value(value) => encoder.prop(tag, &value, names),
             PropOut::Text(text) => encoder.prop_text(tag, text, names),
         }
         .map_err(fx)?;
     }
     Ok(())
+}
+
+fn oversized_value<'x>(
+    content: &'x ContentBag,
+    tag: PropTag,
+    names: &'x dyn NamedPropMap,
+) -> Option<(PropKeyRef<'x>, &'x OwnedPropValue)> {
+    let id = tag.id();
+    let key = if id.is_named() {
+        names.key(id)?
+    } else {
+        PropKeyRef::Tag(id)
+    };
+    content.get(key, tag.ptype()).map(|value| (key, value))
 }
 
 pub(super) fn write_children(

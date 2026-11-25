@@ -26,9 +26,11 @@ pub(crate) enum FolderProp {
     UnreadCount,
     CommitTimeMax,
     LastModified,
+    EntryId,
+    AttrHidden,
 }
 
-pub(crate) const EXTENDED_PROPS: [(u16, MapiPropertyTypeName, FolderProp); 8] = [
+pub(crate) const EXTENDED_PROPS: [(u16, MapiPropertyTypeName, FolderProp); 10] = [
     (
         0x3001,
         MapiPropertyTypeName::String,
@@ -65,13 +67,21 @@ pub(crate) const EXTENDED_PROPS: [(u16, MapiPropertyTypeName, FolderProp); 8] = 
         MapiPropertyTypeName::SystemTime,
         FolderProp::LastModified,
     ),
+    (0x0FFF, MapiPropertyTypeName::Binary, FolderProp::EntryId),
+    (
+        0x10F4,
+        MapiPropertyTypeName::Boolean,
+        FolderProp::AttrHidden,
+    ),
 ];
 
 impl FilterProp for FolderProp {
     fn of_path(path: &Path<'_>) -> Option<Self> {
         match path {
             Path::Field(field) => Self::of_field(*field),
-            Path::Extended(uri) => Self::of_extended(uri).map(|(_, prop)| prop),
+            Path::Extended(uri) => Self::of_extended(uri)
+                .map(|(_, prop)| prop)
+                .filter(|prop| *prop != FolderProp::EntryId),
             Path::Indexed { .. } => None,
         }
     }
@@ -102,6 +112,10 @@ impl FolderProp {
 
     pub const fn is_change_time(self) -> bool {
         matches!(self, FolderProp::CommitTimeMax | FolderProp::LastModified)
+    }
+
+    pub const fn is_entry_id(self) -> bool {
+        matches!(self, FolderProp::EntryId)
     }
 
     pub const fn needs_counts(self) -> bool {

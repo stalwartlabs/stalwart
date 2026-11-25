@@ -1,6 +1,6 @@
 [package]
 name = "store"
-version = "1.2.0"
+version = "1.2.1"
 edition = "2024"
 
 [dependencies]
@@ -13,7 +13,7 @@ rocksdb = { version = "0.25", optional = true, features = ["multi-threaded-cf"] 
 fdb = { path = "../fdb", optional = true }
 foundationdb = { version = "0.11", features = ["embedded-fdb-include", "fdb-7_4"], optional = true }
 foundationdb-sys = { version = "0.11", features = ["embedded-fdb-include", "fdb-7_4"], optional = true }
-rusqlite = { version = "0.41", features = ["bundled"], optional = true }
+rusqlite = { version = "0.43", features = ["bundled"], optional = true }
 s3 = { path = "../s3", optional = true }
 azure_core = { version = "1.1", default-features = false, features = ["reqwest", "tokio"], optional = true }
 azure_storage_blob = { version = "1.1", default-features = false, features = ["tokio"], optional = true }
@@ -23,12 +23,12 @@ tokio = { version = "1.54", features = ["sync", "fs", "io-util", "time", "rt", "
 r2d2 = { version = "0.8.10", optional = true }
 futures = { version = "0.3", optional = true }
 libc = { version = "0.2.191", optional = true }
-rand = "0.10.3"
-roaring = "0.11"
+rand = "0.10.4"
+roaring = "0.12"
 rayon = { version = "1.12", optional = true }
 serde = { version = "1.0", features = ["derive"]}
-ahash = { version = "0.8.12", features = ["serde"] }
-xxhash-rust = { version = "0.8.19", features = ["xxh3"] }
+ahash = { version = "0.8.14", features = ["serde"] }
+xxhash-rust = { version = "0.8.21", features = ["xxh3"] }
 parking_lot = "0.13"
 papaya = "0.2.5"
 lru-cache = { version = "0.1.2", optional = true }
@@ -37,7 +37,7 @@ blake3 = "1.8"
 lz4_flex = { version = "0.14", features = ["alloc"], default-features = false }
 zstd = { version = "0.14", default-features = false }
 deadpool-postgres = { version = "0.14", optional = true }
-hashbrown = { version = "0.17.1", default-features = false, features = ["inline-more"], optional = true }
+hashbrown = { version = "0.17.2", default-features = false, features = ["inline-more"], optional = true }
 tokio-postgres = { version = "0.7.18", features = ["with-serde_json-1"], optional = true }
 tokio-rustls = { version = "0.26", optional = true, default-features = false, features = ["aws_lc_rs", "tls12"] }
 rustls = { version = "0.23.46", optional = true, default-features = false, features = ["std", "aws_lc_rs", "tls12"] }
@@ -52,7 +52,7 @@ redis = { version = "1.8", features = [ "tokio-comp", "tokio-rustls-comp", "tls-
 deadpool = { version = "0.13", features = ["managed"], optional = true }
 keep-client = { version = "1.0.0", optional = true }
 keep-proto = { version = "1.0.0", optional = true }
-arc-swap = "1.9.3"
+arc-swap = "1.9.5"
 bitpacking = "0.9.3"
 rkyv.workspace = true
 compact_str = "0.10.0"

@@ -47,6 +47,13 @@ pub const QUEUE_REFRESH: u64 = 5 * 60; // 5 minutes
 pub const DSN_RETRY: u64 = 5 * 60; // 5 minutes
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EventLock {
+    Acquired,
+    Held,
+    Failed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QueueOutcome {
     Queued,
     QuotaExceeded,
@@ -80,7 +87,7 @@ pub trait SmtpSpool: Sync + Send {
         &self,
         queue_id: QueueId,
         queue_name: QueueName,
-    ) -> impl Future<Output = bool> + Send;
+    ) -> impl Future<Output = EventLock> + Send;
 
     fn unlock_event(
         &self,
@@ -149,7 +156,7 @@ impl SmtpSpool for Server {
         }
     }
 
-    async fn try_lock_event(&self, queue_id: QueueId, queue_name: QueueName) -> bool {
+    async fn try_lock_event(&self, queue_id: QueueId, queue_name: QueueName) -> EventLock {
         match self
             .in_memory_store()
             .try_lock(
@@ -159,22 +166,21 @@ impl SmtpSpool for Server {
             )
             .await
         {
-            Ok(result) => {
-                if !result {
-                    trc::event!(
-                        Queue(trc::QueueEvent::Locked),
-                        QueueId = queue_id,
-                        QueueName = queue_name.to_compact_string()
-                    );
-                }
-                result
+            Ok(true) => EventLock::Acquired,
+            Ok(false) => {
+                trc::event!(
+                    Queue(trc::QueueEvent::Locked),
+                    QueueId = queue_id,
+                    QueueName = queue_name.to_compact_string()
+                );
+                EventLock::Held
             }
             Err(err) => {
                 trc::error!(
                     err.details("Failed to lock event.")
                         .caused_by(trc::location!())
                 );
-                false
+                EventLock::Failed
             }
         }
     }

@@ -5,8 +5,8 @@
  */
 
 use super::{
-    FolderCounts, FolderFieldSet, FolderRenderer, FolderSelector, props::FolderProp,
-    removed_folder_status, resolve_folder,
+    FolderCounts, FolderEntryIds, FolderFieldSet, FolderRenderer, FolderSelector,
+    props::FolderProp, removed_folder_status, resolve_folder,
 };
 use crate::{
     ews::{
@@ -58,6 +58,7 @@ pub(crate) async fn get_folder(
                 .filter_map(|entry| entry.as_ref().ok().copied()),
         )
         .await?,
+        entry_ids: FolderEntryIds::load(server, ctx, fields).await?,
     };
 
     let mut out = Vec::with_capacity(RESPONSE_CAPACITY);
@@ -128,6 +129,7 @@ pub(crate) async fn find_folder(
         } else {
             FolderCounts::default()
         },
+        entry_ids: FolderEntryIds::load(server, ctx, fields).await?,
     };
     let matches = parents
         .iter()

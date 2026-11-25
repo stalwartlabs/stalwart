@@ -249,6 +249,7 @@ pub enum QueueEventStatus {
     Completed,
     Locked,
     Deferred,
+    Failed,
 }
 
 #[derive(Debug)]

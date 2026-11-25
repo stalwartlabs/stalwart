@@ -17,7 +17,7 @@ use crate::outbound::mta_sts::verify::VerifyPolicy;
 use crate::outbound::{client::StartTlsResult, dane::verify::TlsaVerify};
 use crate::queue::dsn::{DsnStatus, SendDsn};
 use crate::queue::lease::{FinalWrite, QueueLease};
-use crate::queue::spool::{DSN_RETRY, SmtpSpool};
+use crate::queue::spool::{DSN_RETRY, EventLock, SmtpSpool};
 use crate::queue::throttle::IsAllowed;
 use crate::queue::{
     Error, FROM_REPORT, HostResponse, Message, MessageWrapper, Metadata, QueueEnvelope,
@@ -60,8 +60,8 @@ impl QueuedMessage {
             // Lock queue event
             let queue_id = self.queue_id;
             let locked_at = Instant::now();
-            let status = if server.try_lock_event(queue_id, self.queue_name).await {
-                match server
+            let status = match server.try_lock_event(queue_id, self.queue_name).await {
+                EventLock::Acquired => match server
                     .read_message_archive_fresh(queue_id)
                     .await
                     .and_then(|archive| {
@@ -165,11 +165,11 @@ impl QueuedMessage {
 
                         server.unlock_event(queue_id, self.queue_name).await;
 
-                        QueueEventStatus::Locked
+                        QueueEventStatus::Failed
                     }
-                }
-            } else {
-                QueueEventStatus::Locked
+                },
+                EventLock::Held => QueueEventStatus::Locked,
+                EventLock::Failed => QueueEventStatus::Failed,
             };
 
             #[cfg(stalwart_tests)]

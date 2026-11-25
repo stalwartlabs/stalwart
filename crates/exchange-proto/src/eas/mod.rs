@@ -6,6 +6,7 @@
 
 pub mod commands;
 pub mod http;
+pub mod kql;
 pub mod multipart;
 pub mod status;
 pub mod tokens;

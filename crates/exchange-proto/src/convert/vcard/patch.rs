@@ -749,7 +749,7 @@ pub(super) fn impp_handle(uri: &str) -> &str {
 fn utc_date(time: FileTime) -> Option<PartialDateTime> {
     let date = Timestamp::from_second(time.to_utc().0.0)
         .ok()?
-        .to_zoned(jiff::tz::TimeZone::UTC)
+        .to_zoned_datetime(jiff::tz::TimeZone::UTC)
         .date();
     Some(PartialDateTime {
         year: u16::try_from(date.year()).ok(),

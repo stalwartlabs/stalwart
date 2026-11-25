@@ -1,6 +1,6 @@
 [package]
 name = "coordinator"
-version = "1.2.0"
+version = "1.2.1"
 edition = "2024"
 
 [dependencies]
@@ -10,9 +10,9 @@ utils = { path =  "../utils", optional = true }
 trc = { path = "../trc" }
 futures = { version = "0.3", optional = true }
 tokio = { version = "1.54", features = ["sync", "fs", "io-util"] }
-async-nats = { version = "0.50", default-features = false, features = ["server_2_10", "server_2_11", "aws-lc-rs"], optional = true }
-zenoh = { version = "1.10.1", default-features = false, features = ["auth_pubkey", "transport_multilink", "transport_compression", "transport_quic", "transport_tcp", "transport_tls", "transport_udp"], optional = true }
-rdkafka = { version = "0.39", features = ["cmake-build", "ssl"], optional = true }
+async-nats = { version = "0.53", default-features = false, features = ["server_2_10", "server_2_11", "aws-lc-rs"], optional = true }
+zenoh = { version = "1.10.2", default-features = false, features = ["auth_pubkey", "transport_multilink", "transport_compression", "transport_quic", "transport_tcp", "transport_tls", "transport_udp"], optional = true }
+rdkafka = { version = "0.40", features = ["cmake-build", "ssl"], optional = true }
 redis = { version = "1.8", features = [ "tokio-comp", "tokio-rustls-comp", "tls-rustls-insecure", "tls-rustls", "cluster-async", "sentinel"], optional = true }
 deadpool = { version = "0.13", default-features = false, features = ["managed"], optional = true }
 hashify = { version = "0.3", optional = true }

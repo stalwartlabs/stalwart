@@ -5,7 +5,7 @@
  */
 
 use jiff::{
-    SignedDuration, Span, ToSpan, Zoned,
+    SignedDuration, Span, ToSpan, ZonedDateTime,
     civil::{Date, Time},
 };
 use std::time::Duration;
@@ -19,13 +19,13 @@ pub enum SimpleCron {
 
 impl SimpleCron {
     pub fn time_to_next(&self) -> Duration {
-        let now = Zoned::now();
+        let now = ZonedDateTime::now();
         self.next_after(&now)
             .and_then(|next| Duration::try_from(now.duration_until(&next)).ok())
             .unwrap_or_else(|| self.as_duration())
     }
 
-    fn next_after(&self, now: &Zoned) -> Option<Zoned> {
+    fn next_after(&self, now: &ZonedDateTime) -> Option<ZonedDateTime> {
         match *self {
             SimpleCron::Hour { minute } => {
                 let next = now
@@ -55,17 +55,17 @@ impl SimpleCron {
     }
 
     fn next_local_time(
-        now: &Zoned,
+        now: &ZonedDateTime,
         days_ahead: i64,
         period: Span,
         hour: u32,
         minute: u32,
-    ) -> Option<Zoned> {
+    ) -> Option<ZonedDateTime> {
         let time = Time::new(i8::try_from(hour).ok()?, i8::try_from(minute).ok()?, 0, 0).ok()?;
         let date = now.date().checked_add(days_ahead.days()).ok()?;
         let at = |date: Date| {
             date.to_datetime(time)
-                .to_zoned(now.time_zone().clone())
+                .to_zoned_datetime(now.time_zone().clone())
                 .ok()
         };
         let next = at(date)?;

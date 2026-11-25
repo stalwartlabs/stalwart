@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-SEL
  */
 
-use super::{FolderCounts, FolderFieldSet, FolderRenderer, FolderSelector, resolve_folder};
+use super::{
+    FolderCounts, FolderEntryIds, FolderFieldSet, FolderRenderer, FolderSelector, resolve_folder,
+};
 use crate::{
     ews::{
         context::EwsContext,
@@ -99,6 +101,7 @@ pub(crate) async fn sync_folder_hierarchy(
                     }),
                 )
                 .await?,
+                entry_ids: FolderEntryIds::load(server, ctx, fields).await?,
             };
             let account_id = ctx.account.account_id;
             messages.message(&MessageResult {

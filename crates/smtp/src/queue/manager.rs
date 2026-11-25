@@ -474,10 +474,12 @@ impl VirtualQueueState {
                     self.request_rescan(Rescan::Coalesced);
                 }
             }
-            QueueEventStatus::Locked => {
+            QueueEventStatus::Locked | QueueEventStatus::Failed => {
                 if let Some(tracked) = self.tracked.get_mut(&queue_id) {
-                    let park_for =
-                        if is_cluster { LOCK_EXPIRY } else { 0 } + rand::rng().random_range(5..10);
+                    let park_for = match status {
+                        QueueEventStatus::Locked if is_cluster => LOCK_EXPIRY,
+                        _ => 0,
+                    } + rand::rng().random_range(5..10);
                     tracked.state = TrackedState::Parked {
                         expires: now() + park_for,
                     };

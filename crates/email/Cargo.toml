@@ -1,6 +1,6 @@
 [package]
 name = "email"
-version = "1.2.0"
+version = "1.2.1"
 edition = "2024"
 
 [dependencies]
@@ -20,7 +20,7 @@ mail-parser = { version = "1.0", features = ["full_encoding"] }
 mail-builder = { version = "2.0" }
 sieve-rs = { path = "../sieve" }
 tokio = { version = "1.54", features = ["net", "macros"] }
-rand = "0.8"
+rand = "0.10"
 hashify = "0.3"
 rkyv.workspace = true
 compact_str = "0.10.0"

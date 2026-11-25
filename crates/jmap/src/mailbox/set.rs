@@ -77,6 +77,15 @@ pub struct SetContext<'x> {
     mailbox_ids: RoaringBitmap,
     will_destroy: Vec<Id>,
     counters: AHashMap<u32, MailboxCounters>,
+    claimed_names: AHashMap<NameClaim, Option<u32>>,
+}
+
+type NameClaim = (ParentRef, String);
+
+pub struct PreparedMailbox {
+    builder: ObjectIndexBuilder<Archive<Mailbox>, Mailbox>,
+    parent: ParentRef,
+    name_claim: Option<NameClaim>,
 }
 
 #[derive(Clone, Copy)]
@@ -158,21 +167,13 @@ pub trait MailboxSet: Sync + Send {
         lock: Option<&CreateLock>,
     ) -> impl Future<Output = trc::Result<SetResponse<mailbox::Mailbox>>> + Send;
 
-    #[allow(clippy::type_complexity)]
     fn mailbox_set_item(
         &self,
         changes_: Map<'_, MailboxProperty, MailboxValue>,
         update: Option<(u32, Archive<Mailbox>)>,
         ctx: &SetContext,
         resolver: Option<&CreateResolver<'_>>,
-    ) -> impl Future<
-        Output = trc::Result<
-            Result<
-                (ObjectIndexBuilder<Archive<Mailbox>, Mailbox>, ParentRef),
-                SetError<MailboxProperty>,
-            >,
-        >,
-    > + Send;
+    ) -> impl Future<Output = trc::Result<Result<PreparedMailbox, SetError<MailboxProperty>>>> + Send;
 }
 
 impl ResolveCreatedReference<MailboxProperty, MailboxValue> for CreateResolver<'_> {
@@ -289,6 +290,7 @@ impl MailboxSet for Server {
             mailbox_ids: RoaringBitmap::from_iter(cache.mailboxes.index.keys()),
             will_destroy,
             counters,
+            claimed_names: AHashMap::new(),
         };
         let mut change_id = None;
 
@@ -334,7 +336,11 @@ impl MailboxSet for Server {
                 )
                 .await?
             {
-                Ok((mut builder, parent)) => {
+                Ok(PreparedMailbox {
+                    mut builder,
+                    parent,
+                    name_claim,
+                }) => {
                     let my_rights = if ctx.is_shared {
                         JmapRights::rights::<mailbox::Mailbox>(
                             builder
@@ -400,6 +406,9 @@ impl MailboxSet for Server {
                     batch.commit_point();
 
                     pending_creates.insert(id.clone(), slot);
+                    if let Some(name_claim) = name_claim {
+                        ctx.claimed_names.insert(name_claim, None);
+                    }
                     created.push((id, slot, omitted, my_rights));
                 }
                 Err(err) => {
@@ -428,6 +437,8 @@ impl MailboxSet for Server {
                 );
             }
         }
+
+        ctx.claimed_names.clear();
 
         // Process updates
         let mut will_update = Vec::with_capacity(request.update.as_ref().map_or(0, |u| u.len()));
@@ -514,8 +525,17 @@ impl MailboxSet for Server {
                                 .with_description("You are not allowed to modify this mailbox."),
                         );
                         continue 'update;
-                    } else if object.contains_key(&Key::Property(MailboxProperty::ShareWith))
-                        && !acl.contains(Acl::Share)
+                    } else if !acl.contains(Acl::Share)
+                        && object.keys().any(|key| match key {
+                            Key::Property(MailboxProperty::ShareWith) => true,
+                            Key::Property(MailboxProperty::Pointer(pointer)) => matches!(
+                                pointer.first(),
+                                Some(JsonPointerItem::Key(Key::Property(
+                                    MailboxProperty::ShareWith
+                                )))
+                            ),
+                            _ => false,
+                        })
                     {
                         ctx.response.not_updated.append(
                             id,
@@ -583,7 +603,11 @@ impl MailboxSet for Server {
                     .mailbox_set_item(object, (document_id, mailbox).into(), &ctx, None)
                     .await?
                 {
-                    Ok((mut builder, parent)) => {
+                    Ok(PreparedMailbox {
+                        mut builder,
+                        parent,
+                        name_claim,
+                    }) => {
                         batch
                             .with_account_id(account_id)
                             .with_collection(Collection::Mailbox);
@@ -648,6 +672,9 @@ impl MailboxSet for Server {
                                     .caused_by(trc::location!())?;
                             }
                             batch.commit_point();
+                        }
+                        if let Some(name_claim) = name_claim {
+                            ctx.claimed_names.insert(name_claim, Some(document_id));
                         }
                         will_update.push(id);
                     }
@@ -770,12 +797,7 @@ impl MailboxSet for Server {
         update: Option<(u32, Archive<Mailbox>)>,
         ctx: &SetContext<'_>,
         resolver: Option<&CreateResolver<'_>>,
-    ) -> trc::Result<
-        Result<
-            (ObjectIndexBuilder<Archive<Mailbox>, Mailbox>, ParentRef),
-            SetError<MailboxProperty>,
-        >,
-    > {
+    ) -> trc::Result<Result<PreparedMailbox, SetError<MailboxProperty>>> {
         // Parse properties
         let mut changes = update
             .as_ref()
@@ -1042,25 +1064,48 @@ impl MailboxSet for Server {
         }
 
         // Verify that the mailbox name is unique.
+        let mut name_claim = None;
         if !changes.name.is_empty() {
-            // Obtain parent mailbox id
-            let lower_name = changes.name.to_lowercase();
-            let current_id = update.as_ref().map(|(document_id, _)| *document_id);
             if update.as_ref().is_none_or(|(_, m)| {
                 m.inner.name != changes.name || m.inner.parent_id != changes.parent_id
-            }) && let Some(parent_cache_id) = parent.cache_id()
-                && let Some(existing) = cached_mailboxes.mailboxes.items.iter().find(|m| {
-                    Some(m.document_id) != current_id
-                        && m.parent_id() == parent_cache_id
-                        && m.name.to_lowercase() == lower_name
-                })
-            {
-                return Ok(Err(SetError::already_exists()
-                    .with_existing_id(Id::from(existing.document_id))
-                    .with_description(format!(
+            }) {
+                let lower_name = changes
+                    .name
+                    .chars()
+                    .flat_map(char::to_lowercase)
+                    .collect::<String>();
+                let current_id = update.as_ref().map(|(document_id, _)| *document_id);
+                if let Some(parent_cache_id) = parent.cache_id()
+                    && let Some(existing) = cached_mailboxes.mailboxes.items.iter().find(|m| {
+                        Some(m.document_id) != current_id
+                            && m.parent_id() == parent_cache_id
+                            && m.name
+                                .chars()
+                                .flat_map(char::to_lowercase)
+                                .eq(lower_name.chars())
+                    })
+                {
+                    return Ok(Err(SetError::already_exists()
+                        .with_existing_id(Id::from(existing.document_id))
+                        .with_description(format!(
+                            "A mailbox with name '{}' already exists.",
+                            changes.name
+                        ))));
+                }
+                let claim = (parent, lower_name);
+                if let Some(holder) = ctx.claimed_names.get(&claim) {
+                    let err = match holder {
+                        Some(document_id) => {
+                            SetError::already_exists().with_existing_id(Id::from(*document_id))
+                        }
+                        None => SetError::invalid_properties().with_property(MailboxProperty::Name),
+                    };
+                    return Ok(Err(err.with_description(format!(
                         "A mailbox with name '{}' already exists.",
                         changes.name
                     ))));
+                }
+                name_claim = Some(claim);
             }
         } else {
             return Ok(Err(SetError::invalid_properties()
@@ -1087,11 +1132,12 @@ impl MailboxSet for Server {
         }
 
         // Validate
-        Ok(Ok((
-            ObjectIndexBuilder::new()
+        Ok(Ok(PreparedMailbox {
+            builder: ObjectIndexBuilder::new()
                 .with_changes(changes)
                 .with_current_opt(current),
             parent,
-        )))
+            name_claim,
+        }))
     }
 }

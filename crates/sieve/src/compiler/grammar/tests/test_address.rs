@@ -130,7 +130,7 @@ impl CompilerState<'_> {
                 _ => {
                     if header_list.is_none() {
                         let headers = self.parse_raw_strings_token(token_info)?;
-                        header_list = self.resolve_header_names(headers).0.into();
+                        header_list = self.resolve_header_names(headers).into();
                     } else {
                         key_list = self.parse_raw_strings_token(token_info)?;
                         break;

@@ -1075,7 +1075,7 @@ fn text_date(text: &str) -> Option<Date> {
 fn file_time(date: Date, hour: i8, minute: i8) -> Option<FileTime> {
     let seconds = date
         .to_datetime(Time::new(hour, minute, 0, 0).ok()?)
-        .to_zoned(TimeZone::UTC)
+        .to_zoned_datetime(TimeZone::UTC)
         .ok()?
         .timestamp()
         .as_second();
@@ -1101,7 +1101,7 @@ fn utc_time(value: &PartialDateTime) -> Option<FileTime> {
     .ok()?;
     let local = date
         .to_datetime(time)
-        .to_zoned(TimeZone::UTC)
+        .to_zoned_datetime(TimeZone::UTC)
         .ok()?
         .timestamp()
         .as_second();

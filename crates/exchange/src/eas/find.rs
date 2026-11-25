@@ -192,7 +192,7 @@ async fn find_mail(
     }
     let cache = server.get_cached_messages(ctx.account_id).await?;
     let mut search = MailSearch::default();
-    search.push_text(free_text, server.core.email.default_language);
+    search.push_free_text(free_text, server.core.email.default_language);
     if class.is_some_and(|class| class != Class::Email) {
         search.empty = true;
     }

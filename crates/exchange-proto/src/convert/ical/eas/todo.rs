@@ -390,7 +390,7 @@ impl Moment {
             (_, Some(local), _) => {
                 let wall = Timestamp::from_second(local)
                     .ok()?
-                    .to_zoned(TimeZone::UTC)
+                    .to_zoned_datetime(TimeZone::UTC)
                     .datetime();
                 target.tz.from_local(wall).map(|zoned| zoned.to_timestamp())
             }

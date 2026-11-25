@@ -50,7 +50,8 @@ use exchange_proto::{
 };
 use groupware::cache::GroupwareCache;
 use jiff::Timestamp;
-use store::{ValueKey, rand, write::now};
+use std::fmt::Debug;
+use store::{ValueKey, blake3, rand, write::now};
 use trc::{AddContext, EventType, LimitEvent};
 use types::{
     collection::{Collection, SyncCollection},
@@ -62,11 +63,17 @@ const MERGE_MEMORY_FACTOR: usize = 4;
 const TRANSIENT_REPLY: char = '4';
 const TOO_MANY_RECIPIENTS: &str = ".5.3";
 
+pub enum ComposeBody<'a, 'b> {
+    Wbxml(&'b mut Decoder<'a>),
+    Mime(&'a [u8]),
+    Missing,
+}
+
 pub trait EasCompose: Sync + Send {
     fn eas_compose(
         &self,
         ctx: &EasContext<'_>,
-        decoder: Option<&mut Decoder<'_>>,
+        body: ComposeBody<'_, '_>,
         command: ComposeCommand,
     ) -> impl Future<Output = trc::Result<EasResponse>> + Send;
 }
@@ -75,7 +82,7 @@ impl EasCompose for Server {
     async fn eas_compose(
         &self,
         ctx: &EasContext<'_>,
-        decoder: Option<&mut Decoder<'_>>,
+        body: ComposeBody<'_, '_>,
         command: ComposeCommand,
     ) -> trc::Result<EasResponse> {
         let http_command = match command {
@@ -83,16 +90,40 @@ impl EasCompose for Server {
             ComposeCommand::SmartReply => Command::SmartReply,
             ComposeCommand::SmartForward => Command::SmartForward,
         };
-        let failed = |status: Status| Ok(EasResponse::status(http_command, status));
-        let Some(decoder) = decoder else {
-            return failed(CommonStatus::INVALID_XML.into());
+        let failed = |status: Status, reason: &dyn Debug| {
+            Ok(EasResponse::refused(
+                ctx.session.session_id,
+                ctx.account_id,
+                http_command,
+                status,
+                reason,
+            ))
         };
-        let request = match ComposeRequest::parse(decoder, ctx.version, command) {
-            Ok(request) => request,
-            Err(err) => return failed(err.status(http_command)),
+        let (request, once) = match body {
+            ComposeBody::Wbxml(decoder) => {
+                match ComposeRequest::parse(decoder, ctx.version, command) {
+                    Ok(request) => {
+                        let once = SubmitOnce::eas(ctx.device.slot, request.client_id.as_bytes());
+                        (request, once)
+                    }
+                    Err(err) => return failed(err.status(http_command), &err),
+                }
+            }
+            ComposeBody::Mime(mime) => {
+                match ComposeRequest::from_mime(&ctx.params, mime, command) {
+                    Ok(request) => (
+                        request,
+                        SubmitOnce::eas(ctx.device.slot, blake3::hash(mime).as_bytes()),
+                    ),
+                    Err(err) => return failed(err.status(http_command), &err),
+                }
+            }
+            ComposeBody::Missing => {
+                return failed(CommonStatus::INVALID_XML.into(), &Refusal::MissingBody);
+            }
         };
         if !ctx.allows(EasDataKind::Mail) {
-            return failed(CommonStatus::ACCESS_DENIED.into());
+            return failed(CommonStatus::ACCESS_DENIED.into(), &Refusal::MailNotAllowed);
         }
         if let Some(account_id) = request.account_id.as_deref()
             && !self
@@ -102,10 +133,10 @@ impl EasCompose for Server {
                 .iter()
                 .any(|address| address.eq_ignore_ascii_case(account_id))
         {
-            return failed(CommonStatus::INVALID_ACCOUNT_ID.into());
+            return failed(CommonStatus::INVALID_ACCOUNT_ID.into(), &Refusal::AccountId);
         }
         if request.template_id.is_some() {
-            return failed(CommonStatus::IRM_FEATURE_DISABLED.into());
+            return failed(CommonStatus::IRM_FEATURE_DISABLED.into(), &Refusal::Irm);
         }
 
         let cache = self.get_cached_messages(ctx.account_id).await?;
@@ -165,8 +196,10 @@ impl EasCompose for Server {
         let raw = match outcome {
             Ok(SmartOutcome::Merged(raw)) => raw,
             Ok(SmartOutcome::Unmerged) => request.mime.into_owned(),
-            Ok(SmartOutcome::InvalidClient) => return failed(CommonStatus::INVALID_MIME.into()),
-            Err(status) => return failed(status),
+            Ok(SmartOutcome::InvalidClient) => {
+                return failed(CommonStatus::INVALID_MIME.into(), &Refusal::ClientMime);
+            }
+            Err(status) => return failed(status, &Refusal::Source),
         };
         let raw = match (source, &source_row) {
             (
@@ -202,7 +235,7 @@ impl EasCompose for Server {
                 message: Outgoing::Composed { raw, save_copy },
                 recipients: Recipients::Headers,
                 options: SubmitOptions {
-                    once: SubmitOnce::eas(ctx.device.slot, &request.client_id),
+                    once,
                     delivery_report: DeliveryReport::FromMessage,
                     ..Default::default()
                 },
@@ -215,7 +248,7 @@ impl EasCompose for Server {
                 }
                 Ok(EasResponse::Empty)
             }
-            Err(err) => failed(submit_status(&err, ctx.version)),
+            Err(err) => failed(submit_status(&err, ctx.version), &err),
         }
     }
 }
@@ -301,6 +334,16 @@ async fn mark_source_once(
     edits
         .commit(server, &ctx.access_token, ctx.session.session_id)
         .await
+}
+
+#[derive(Debug)]
+enum Refusal {
+    MissingBody,
+    MailNotAllowed,
+    AccountId,
+    Irm,
+    Source,
+    ClientMime,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

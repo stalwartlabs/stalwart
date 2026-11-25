@@ -30,7 +30,7 @@ pub mod sync;
 pub mod wait;
 
 use crate::eas::{
-    compose::EasCompose,
+    compose::{ComposeBody, EasCompose},
     context::EasContext,
     device::{DeviceGate, EasDeviceAccess},
     find::EasFind,
@@ -136,11 +136,23 @@ impl EasHandler for Server {
         let command = line.command;
 
         let body_kind = classify_body(content_type, body.len());
-        if body_kind == BodyKind::Other {
-            return Ok(
-                EasResponse::status(command, CommonStatus::INVALID_CONTENT.into())
-                    .into_http(Some(version)),
-            );
+        let accepted = match body_kind {
+            BodyKind::Wbxml | BodyKind::Empty => true,
+            BodyKind::Mime => matches!(
+                command,
+                Command::SendMail | Command::SmartReply | Command::SmartForward
+            ),
+            BodyKind::Other => false,
+        };
+        if !accepted {
+            return Ok(EasResponse::refused(
+                session.session_id,
+                access_token.account_id(),
+                command,
+                CommonStatus::INVALID_CONTENT.into(),
+                &eas_headers.content_type,
+            )
+            .into_http(Some(version)));
         }
 
         let Some(device_id) = line.device_id.as_str() else {
@@ -176,11 +188,15 @@ impl EasHandler for Server {
         let mut decoder = match body_kind {
             BodyKind::Wbxml => match Decoder::new(&body, &WbxmlLimits::DEFAULT) {
                 Ok(decoder) => Some(decoder),
-                Err(_) => {
-                    return Ok(
-                        EasResponse::status(command, CommonStatus::INVALID_WBXML.into())
-                            .into_http(Some(version)),
-                    );
+                Err(err) => {
+                    return Ok(EasResponse::refused(
+                        ctx.session.session_id,
+                        ctx.account_id,
+                        command,
+                        CommonStatus::INVALID_WBXML.into(),
+                        &err,
+                    )
+                    .into_http(Some(version)));
                 }
             },
             _ => None,
@@ -222,20 +238,44 @@ impl EasHandler for Server {
                 },
             ),
             Command::SendMail => {
-                self.eas_compose(&ctx, decoder.as_mut(), ComposeCommand::SendMail)
-                    .await?
+                self.eas_compose(
+                    &ctx,
+                    compose_body(decoder.as_mut(), body_kind, &body),
+                    ComposeCommand::SendMail,
+                )
+                .await?
             }
             Command::SmartReply => {
-                self.eas_compose(&ctx, decoder.as_mut(), ComposeCommand::SmartReply)
-                    .await?
+                self.eas_compose(
+                    &ctx,
+                    compose_body(decoder.as_mut(), body_kind, &body),
+                    ComposeCommand::SmartReply,
+                )
+                .await?
             }
             Command::SmartForward => {
-                self.eas_compose(&ctx, decoder.as_mut(), ComposeCommand::SmartForward)
-                    .await?
+                self.eas_compose(
+                    &ctx,
+                    compose_body(decoder.as_mut(), body_kind, &body),
+                    ComposeCommand::SmartForward,
+                )
+                .await?
             }
         };
 
         response.into_http_coded(Some(version), coding).await
+    }
+}
+
+fn compose_body<'a, 'b>(
+    decoder: Option<&'b mut Decoder<'a>>,
+    kind: BodyKind,
+    body: &'a [u8],
+) -> ComposeBody<'a, 'b> {
+    match (decoder, kind) {
+        (Some(decoder), _) => ComposeBody::Wbxml(decoder),
+        (None, BodyKind::Mime) => ComposeBody::Mime(body),
+        (None, _) => ComposeBody::Missing,
     }
 }
 

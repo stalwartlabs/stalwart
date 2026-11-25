@@ -6,7 +6,7 @@
 
 use super::{DerError, tag};
 
-const MAX_DEPTH: usize = 32;
+pub(crate) const MAX_DEPTH: usize = 32;
 const HIGH_TAG_NUMBER: u8 = 0x1F;
 const INDEFINITE_LENGTH: u8 = 0x80;
 

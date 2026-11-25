@@ -1,6 +1,6 @@
 [package]
 name = "s3"
-version = "1.2.0"
+version = "1.2.1"
 edition = "2024"
 license = "AGPL-3.0-only OR LicenseRef-SEL"
 publish = false
@@ -14,7 +14,7 @@ md5 = "0.8"
 quick-xml = "0.42"
 crc-fast = { version = "1.10", default-features = false, features = ["std"] }
 tokio = { version = "1.54", features = ["time"] }
-rand = "0.10.3"
+rand = "0.10.4"
 hashify = "0.3"
 memchr = "2.8"
 
@@ -22,5 +22,5 @@ memchr = "2.8"
 workspace = true
 
 [dev-dependencies]
-jiff = "0.2.38"
+jiff = "1.0.3"
 tokio = { version = "1.54", features = ["macros", "rt", "net", "io-util", "time"] }

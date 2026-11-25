@@ -596,6 +596,14 @@ get_architecture() {
         fi
     fi
 
+    if [ "$_ostype" = Darwin ] && [ "$_cputype" = x86_64 ]; then
+        if sysctl hw.optional.arm64 2>/dev/null | grep -q ': 1'; then
+            _cputype=aarch64
+        else
+            err "❌ Install failed: Intel Macs are not supported, only Apple silicon. Build Stalwart from source instead: https://stalw.art/docs/development/compile"
+        fi
+    fi
+
     if [ "$_ostype" = SunOS ]; then
         # Both Solaris and illumos presently announce as "SunOS" in "uname -s"
         # so use "uname -o" to disambiguate.  We use the full path to the

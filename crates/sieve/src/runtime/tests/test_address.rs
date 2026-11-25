@@ -13,7 +13,7 @@ use crate::{
         Number,
         grammar::{AddressPart, Comparator, MatchType},
     },
-    runtime::{RuntimeError, handler::Handler},
+    runtime::{RuntimeError, handler::Handler, tests::test_header::InvalidHeaderNames},
 };
 use ahash::AHashSet;
 use mail_parser::{
@@ -30,7 +30,9 @@ impl<'x> Context<'x> {
         handler: &mut H,
     ) -> Result<TestResult, RuntimeError> {
         let key_list = self.eval_keys(script, test.key_list)?;
-        let header_list = self.parse_header_names(script, test.header_list)?;
+        let header_list = self
+            .parse_header_names(script, test.header_list, InvalidHeaderNames::Skip)?
+            .unwrap_or_default();
         let address_part = AddressPart::from_code(test.address_part);
         let comparator = Comparator::from_code(test.comparator);
         let match_type = test.match_type.match_type();

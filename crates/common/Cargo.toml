@@ -1,6 +1,6 @@
 [package]
 name = "common"
-version = "1.2.0"
+version = "1.2.1"
 edition = "2024"
 build = "build.rs"
 
@@ -24,10 +24,10 @@ smtp-report = { path = "../smtp-report" }
 smtp-proto = { path = "../smtp-proto", features = ["rkyv"] }
 dns-update = { version = "0.6.3" }
 calcard = { path = "../calcard", features = ["rkyv"] }
-ahash = { version = "0.8.12", features = ["serde"] }
+ahash = { version = "0.8.14", features = ["serde"] }
 parking_lot = "0.13.0"
 proxy-header = { version = "0.1.3", features = ["tokio"] }
-arc-swap = "1.9.3"
+arc-swap = "1.9.5"
 rustls = { version = "0.23.46", default-features = false, features = ["std", "aws_lc_rs", "tls12"] }
 rustls-pemfile = "2.2"
 rustls-pki-types = { version = "1" }
@@ -43,8 +43,8 @@ serde_json = { version = "1.0", features = ["raw_value"] }
 encodify = "1.0"
 x509-parser = "0.18"
 pem = "4.0"
-jiff = "0.2.38"
-hyper = { version = "1.12.0", features = ["server", "http1", "http2"] }
+jiff = "1.0.3"
+hyper = { version = "1.13.0", features = ["server", "http1", "http2"] }
 imagesize = "0.15"
 sha1 = "0.11"
 sha2 = "0.11"
@@ -53,15 +53,15 @@ md5 = "0.8.1"
 whatlang = "0.18"
 idna = "1.1"
 decancer = "4.0.0"
-unicode-security = "0.1.2"
+unicode-security = "0.1.3"
 infer = "0.22"
 bincode = { version = "2.0.1", features = ["serde"] }
-zip = "9.1"
-xxhash-rust = { version = "0.8.19", features = ["xxh3"] }
+zip = "9.8"
+xxhash-rust = { version = "0.8.21", features = ["xxh3"] }
 psl = "2"
 aes-gcm-siv = "0.12.1"
-jsonwebtoken = { version = "11.1.0", features = ["aws_lc_rs"] }
-rsa = "0.9.10"
+jsonwebtoken = { version = "12.0.0", features = ["aws_lc_rs"] }
+rsa = "0.10.0"
 p256 = { version = "0.14", features = ["ecdh", "ecdsa", "pkcs8", "pem"] }
 p384 = { version = "0.14", features = ["ecdh"] }
 hashify = "0.3"
@@ -78,10 +78,10 @@ zxcvbn = "3.1.1"
 pkcs8 = { version = "0.11.0", features = ["alloc", "std"] }
 quick-xml = "0.42"
 percent-encoding = "2.3.2"
-bumpalo = { version = "3.20.3", features = ["collections"] }
-regex-automata = { version = "0.4.18", default-features = false, features = ["std", "syntax", "meta", "nfa-pikevm", "nfa-backtrack", "hybrid", "dfa-onepass", "perf-inline", "perf-literal", "unicode"] }
+bumpalo = { version = "3.20.4", features = ["collections"] }
+regex-automata = { version = "0.4.19", default-features = false, features = ["std", "syntax", "meta", "nfa-pikevm", "nfa-backtrack", "hybrid", "dfa-onepass", "perf-inline", "perf-literal", "unicode"] }
 memchr = "2.8.3"
-itoa = "1.0.18"
+itoa = "1.0.19"
 zmij = "1.0.23"
 
 [target.'cfg(unix)'.dependencies]
@@ -104,7 +104,7 @@ keep = ["store/keep"]
 
 [dev-dependencies]
 tokio = { version = "1.54", features = ["full"] }
-regex = "1.13.1"
+regex = "1.13.2"
 
 [lints]
 workspace = true

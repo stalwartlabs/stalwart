@@ -11,12 +11,16 @@ use calcard::{
 };
 use common::i18n::{self, Locale, PluralForms};
 use compact_str::ToCompactString;
-use icu_datetime::{DateTimeFormatter, fieldsets};
+use icu_calendar::{Date as IcuDate, Gregorian};
+use icu_datetime::{
+    DateTimeFormatter, fieldsets,
+    input::{DateTime as IcuDateTime, Time as IcuTime},
+};
 use icu_locale_core::{Locale as IcuLocale, locale};
 use icu_plurals::{PluralCategory, PluralRuleType, PluralRules, PluralRulesOptions};
 use jiff::{
     Timestamp,
-    civil::{Date, ISOWeekDate, Weekday},
+    civil::{Date, DateTime, ISOWeekDate, Weekday},
 };
 use std::fmt::Write;
 
@@ -105,7 +109,10 @@ impl TextFormatter {
                 let local = tz
                     .from_timestamp(Timestamp::from_second(time.start).unwrap_or_default())
                     .naive_local();
-                let local_date = local.date();
+                let Some(local) = icu_datetime(local) else {
+                    return;
+                };
+                let local_date = local.date;
                 let _ = write!(out, "{}, ", weekday.format(&local_date));
                 match time.kind {
                     ItipTimeKind::DateTime => {
@@ -334,13 +341,19 @@ impl TextFormatter {
             ICalendarWeekday::Sunday => Weekday::Sunday,
         };
 
-        if let Ok(date) = ISOWeekDate::new(2024, 1, weekday).map(ISOWeekDate::date) {
+        if let Some(date) = ISOWeekDate::new(2024, 1, weekday)
+            .ok()
+            .and_then(|date| icu_date(date.date()))
+        {
             let _ = write!(out, "{}", self.weekday.format(&date));
         }
     }
 
     fn write_month(&self, out: &mut String, month: u8) {
-        if let Ok(date) = Date::new(2024, month.clamp(1, 12) as i8, 1) {
+        if let Some(date) = Date::new(2024, month.clamp(1, 12) as i8, 1)
+            .ok()
+            .and_then(icu_date)
+        {
             let _ = write!(out, "{}", self.month.format(&date));
         }
     }
@@ -426,6 +439,23 @@ pub fn hyperlink(value: &str) -> Option<&str> {
         "xmpp"
     )
     .then_some(value)
+}
+
+fn icu_date(date: Date) -> Option<IcuDate<Gregorian>> {
+    IcuDate::try_new_gregorian(i32::from(date.year()), date.month() as u8, date.day() as u8).ok()
+}
+
+fn icu_datetime(datetime: DateTime) -> Option<IcuDateTime<Gregorian>> {
+    Some(IcuDateTime {
+        date: icu_date(datetime.date())?,
+        time: IcuTime::try_new(
+            datetime.hour() as u8,
+            datetime.minute() as u8,
+            datetime.second() as u8,
+            datetime.subsec_nanosecond() as u32,
+        )
+        .ok()?,
+    })
 }
 
 #[cfg(all(test, stalwart_tests))]

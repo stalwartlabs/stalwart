@@ -413,7 +413,7 @@ impl CalendarEdit {
         };
         start
             .unwrap_or_else(Timestamp::now)
-            .to_zoned(TimeZone::UTC)
+            .to_zoned_datetime(TimeZone::UTC)
             .year()
     }
 

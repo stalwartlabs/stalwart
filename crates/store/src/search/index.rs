@@ -175,13 +175,10 @@ impl Store {
     }
 
     pub async fn unindex_traces(&self, before_id: u64) -> trc::Result<()> {
-        let last_bucket = (before_id >> GLOBAL_BUCKET_SHIFT)
-            .checked_sub(1)
-            .ok_or_else(|| {
-                trc::StoreEvent::UnexpectedError
-                    .into_err()
-                    .details("Invalid id cutoff for global unindex")
-            })? as u16;
+        let Some(last_bucket) = (before_id >> GLOBAL_BUCKET_SHIFT).checked_sub(1) else {
+            return Ok(());
+        };
+        let last_bucket = last_bucket as u16;
         let last_id =
             ((last_bucket as u64) << GLOBAL_BUCKET_SHIFT) | ((1 << GLOBAL_BUCKET_SHIFT) - 1);
         let mut delete_terms = AHashSet::new();
@@ -350,3 +347,8 @@ pub(crate) fn stored_document(stored: &[(u32, Vec<u8>)], document_id: u32) -> Op
 #[rustfmt::skip]
 #[path = "../../../../../stalwart-tests/unit/store/src/search/index/test_support.rs"]
 mod test_support;
+
+#[cfg(all(test, stalwart_tests, feature = "rocks"))]
+#[rustfmt::skip]
+#[path = "../../../../../stalwart-tests/unit/store/src/search/index/tests.rs"]
+mod tests;

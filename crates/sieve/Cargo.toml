@@ -1,7 +1,7 @@
 [package]
 name = "sieve-rs"
 description = "Sieve filter interpreter"
-version = "1.2.0"
+version = "1.2.1"
 edition = "2024"
 license = "AGPL-3.0-only OR LicenseRef-SEL"
 publish = false
@@ -12,23 +12,23 @@ doctest = false
 
 [dependencies]
 mail-parser = { version = "1.0", features = ["full_encoding"] }
-fancy-regex = "0.20.0"
+fancy-regex = "0.20.2"
 bumpalo = { version = "3.20", features = ["collections"] }
 memchr = "2.8"
 encodify = "1.0"
 smallvec = "1.16"
-hashbrown = "0.17.1"
+hashbrown = "0.17.2"
 hashify = "0.3"
 serde = { version = "1.0", features = ["derive", "rc"], optional = true }
 mail-builder = { version = "2.0" }
-ahash = { version = "0.8.12" }
+ahash = { version = "0.8.14" }
 calcard = { path = "../calcard", default-features = false, features = ["tzdb-bundle"] }
 
 [dev-dependencies]
 mail-parser = { version = "1.0", features = ["full_encoding", "serde"] }
 serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = "1.0"
-evalexpr = "13.1.0"
+evalexpr = "14.0.0"
 
 [features]
 default = []

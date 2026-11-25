@@ -1,6 +1,6 @@
 [package]
 name = "exchange"
-version = "1.2.0"
+version = "1.2.1"
 edition = "2024"
 
 [dependencies]
@@ -16,10 +16,10 @@ http_proto = { path = "../http-proto" }
 types = { path = "../types" }
 registry = { path = "../registry" }
 trc = { path = "../trc" }
-ahash = { version = "0.8.12" }
+ahash = { version = "0.8.14" }
 hashify = "0.3"
-hyper = { version = "1.12.0", features = ["server", "http1", "http2"] }
-jiff = "0.2.38"
+hyper = { version = "1.13.0", features = ["server", "http1", "http2"] }
+jiff = "1.0.3"
 rkyv.workspace = true
 smallvec = { version = "1.16", features = ["union"] }
 mail-builder = { version = "2.0" }

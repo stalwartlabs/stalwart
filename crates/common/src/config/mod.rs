@@ -25,7 +25,7 @@ use hyper::HeaderMap;
 use p256::elliptic_curve::sec1::ToSec1Point;
 use pkcs8::EncodePrivateKey;
 use rsa::{
-    RsaPrivateKey,
+    PrivateKey,
     pkcs1::{DecodeRsaPrivateKey, EncodeRsaPrivateKey},
     pkcs8::DecodePrivateKey as _,
     traits::PublicKeyParts,
@@ -147,8 +147,8 @@ impl Core {
     }
 }
 
-const RSA_MIN_MODULUS_BITS: usize = 2048;
-const RSA_MAX_MODULUS_BITS: usize = 8192;
+const RSA_MIN_MODULUS_BITS: u32 = 2048;
+const RSA_MAX_MODULUS_BITS: u32 = 8192;
 
 fn no_key_found(pem: &str, expected: &str) -> String {
     if pem.contains("ENCRYPTED PRIVATE KEY") || pem.contains("Proc-Type: 4,ENCRYPTED") {
@@ -171,17 +171,17 @@ pub fn build_rsa_keypair(pem: &str) -> Result<RsaSigningKey, String> {
     for item in rustls_pemfile::read_all(&mut Cursor::new(pem)) {
         let key = match item.map_err(|err| format!("Failed to read private key PEM: {err}"))? {
             rustls_pemfile::Item::Pkcs1Key(key) => {
-                RsaPrivateKey::from_pkcs1_der(key.secret_pkcs1_der())
+                PrivateKey::from_pkcs1_der(key.secret_pkcs1_der())
                     .map_err(|err| format!("Failed to parse PKCS1 RSA key: {err}"))?
             }
             rustls_pemfile::Item::Pkcs8Key(key) => {
-                RsaPrivateKey::from_pkcs8_der(key.secret_pkcs8_der())
+                PrivateKey::from_pkcs8_der(key.secret_pkcs8_der())
                     .map_err(|err| format!("Failed to parse PKCS8 RSA key: {err}"))?
             }
             _ => continue,
         };
 
-        let bits = key.n().bits();
+        let bits = key.n().bit_width();
         if !(RSA_MIN_MODULUS_BITS..=RSA_MAX_MODULUS_BITS).contains(&bits) {
             return Err(format!(
                 "RSA key modulus is {bits} bits, expected between {RSA_MIN_MODULUS_BITS} and {RSA_MAX_MODULUS_BITS}"
@@ -194,8 +194,8 @@ pub fn build_rsa_keypair(pem: &str) -> Result<RsaSigningKey, String> {
 
         return Ok(RsaSigningKey {
             pkcs1_der: pkcs1_der.as_bytes().to_vec(),
-            modulus: key.n().to_bytes_be(),
-            exponent: key.e().to_bytes_be(),
+            modulus: key.n_bytes().into_vec(),
+            exponent: key.e_bytes().into_vec(),
         });
     }
 

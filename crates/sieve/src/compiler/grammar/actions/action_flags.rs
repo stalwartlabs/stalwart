@@ -53,11 +53,14 @@ impl CompilerState<'_> {
                     Some(Ok(
                         Token::StringConstant(_) | Token::StringVariable(_) | Token::BracketOpen,
                     )),
-                ) => EditFlags {
-                    name: self.parse_variable_name(token_info, false)?.into(),
-                    flags: self.parse_strings(false)?.into(),
-                    action,
-                },
+                ) => {
+                    self.validate_flag_variable_name(token_info.line_num, token_info.line_pos)?;
+                    EditFlags {
+                        name: self.parse_variable_name(token_info, false)?.into(),
+                        flags: self.parse_strings(false)?.into(),
+                        action,
+                    }
+                }
                 (Token::BracketOpen, _)
                 | (
                     Token::StringConstant(_) | Token::StringVariable(_),

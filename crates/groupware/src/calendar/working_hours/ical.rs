@@ -116,7 +116,7 @@ pub fn generate_vavailability(
         Some(name) => match ICalendar::parse(&ical) {
             Ok(mut parsed) => {
                 let from = reference_date(0)
-                    .and_then(|date| date.to_zoned(CivilTimeZone::UTC).ok())
+                    .and_then(|date| date.to_zoned_datetime(CivilTimeZone::UTC).ok())
                     .map_or(now, |zoned| zoned.timestamp().as_second());
                 parsed.add_timezone(name, from, now.saturating_add(TZ_RANGE_SECONDS));
                 Some(parsed.to_string())
@@ -141,7 +141,12 @@ pub fn always_available_vavailability(account_id: u32) -> String {
 pub fn parse_vavailability(ical: &ICalendar, now: i64) -> Result<WorkingHours, VAvailabilityError> {
     let latest_start = Timestamp::from_second(now)
         .ok()
-        .and_then(|now| now.to_zoned(CivilTimeZone::UTC).date().tomorrow().ok())
+        .and_then(|now| {
+            now.to_zoned_datetime(CivilTimeZone::UTC)
+                .date()
+                .tomorrow()
+                .ok()
+        })
         .unwrap_or(Date::MAX);
     let mut availability = None;
     for component in &ical.components {

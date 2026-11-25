@@ -5,7 +5,7 @@
  */
 
 use crate::compiler::{
-    CompileError, ErrorType, Number, Value,
+    CompileError, Number, Value,
     grammar::{Capability, Comparator, instruction::CompilerState},
     lexer::{StringConstant, Token, tokenizer::TokenInfo, word::Word},
 };
@@ -170,15 +170,7 @@ impl CompilerState<'_> {
                 _ => {
                     if header_name.is_none() {
                         let header = self.parse_raw_string_token(token_info)?;
-                        header_name = match self.resolve_header_name(header) {
-                            Some(header) => header.into(),
-                            None => {
-                                return Err(self
-                                    .tokens
-                                    .unwrap_next()?
-                                    .custom(ErrorType::InvalidHeaderName));
-                            }
-                        };
+                        header_name = self.resolve_test_header_name(header).into();
                     } else if date_part.is_none() {
                         if let Token::StringConstant(string) = &token_info.token
                             && let Some(date_part_) =

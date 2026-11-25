@@ -552,7 +552,7 @@ fn default_text(disposition_type: DispositionType, subject: Option<&str>) -> Str
     }
 }
 
-fn is_valid_field_value(value: &str) -> bool {
+pub(crate) fn is_valid_field_value(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= MAX_FIELD_LEN
         && !value.chars().any(|ch| ch.is_control() && ch != '\t')

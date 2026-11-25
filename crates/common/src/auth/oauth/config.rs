@@ -48,7 +48,7 @@ pub struct OAuthConfig {
     pub client_metadata_documents: OAuthClientMetadataPolicy,
 
     pub oidc_expiry_id_token: u64,
-    pub oidc_signing_secret: EncodingKey,
+    pub oidc_signing_secret: Option<EncodingKey>,
     pub oidc_verifying_key: Option<DecodingKey>,
     pub oidc_signature_algorithm: Algorithm,
     pub oidc_signature_algorithm_name: &'static str,
@@ -113,8 +113,11 @@ impl OAuthConfig {
         };
 
         let (oidc_signing_secret, algorithm) = match asymmetric_key {
-            None => (EncodingKey::from_secret(signature_key.as_bytes()), None),
-            Some(Ok((secret, params))) => (secret, Some(params)),
+            None => (
+                EncodingKey::from_secret(signature_key.as_bytes()).ok(),
+                None,
+            ),
+            Some(Ok((secret, params))) => (Some(secret), Some(params)),
             Some(Err(err)) => match ephemeral_ecdsa_key() {
                 Ok((secret, params)) => {
                     bp.build_error(
@@ -123,7 +126,7 @@ impl OAuthConfig {
                     );
                     oidc_signature_algorithm = Algorithm::ES256;
                     oidc_signature_algorithm_name = "ES256";
-                    (secret, Some(params))
+                    (Some(secret), Some(params))
                 }
                 Err(ephemeral_err) => {
                     bp.build_error(
@@ -135,7 +138,10 @@ impl OAuthConfig {
                     oidc_signature_algorithm = Algorithm::HS256;
                     oidc_signature_algorithm_name = "HS256";
                     signature_key = Cow::Owned(random_secret());
-                    (EncodingKey::from_secret(signature_key.as_bytes()), None)
+                    (
+                        EncodingKey::from_secret(signature_key.as_bytes()).ok(),
+                        None,
+                    )
                 }
             },
         };
@@ -146,7 +152,7 @@ impl OAuthConfig {
                 algorithm: params.clone(),
             })
             .ok(),
-            None => Some(DecodingKey::from_secret(signature_key.as_bytes())),
+            None => DecodingKey::from_secret(signature_key.as_bytes()).ok(),
         };
 
         let oidc_jwks = Resource {

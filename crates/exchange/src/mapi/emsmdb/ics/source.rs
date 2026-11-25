@@ -274,7 +274,7 @@ impl CopySource {
                 write_identity(encoder, id, bag, versions, guids, names)?;
             }
         }
-        write_message_props(encoder, bag, filter, None, names)?;
+        write_message_props(encoder, bag, &content.props, filter, None, names)?;
         if self.subobjects == Subobjects::Copy {
             write_children(encoder, content, filter, names, 0)?;
         }
